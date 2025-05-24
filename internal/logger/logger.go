@@ -8,6 +8,7 @@ import (
 	"github.com/natefinch/lumberjack"
 	"github.com/sirupsen/logrus"
 	"github.com/zsiec/mirror/internal/config"
+	"github.com/zsiec/mirror/pkg/version"
 )
 
 // New creates a new configured logger instance.
@@ -65,7 +66,7 @@ func New(cfg *config.LoggingConfig) (*logrus.Logger, error) {
 	// Add default fields
 	logger = logger.WithFields(logrus.Fields{
 		"service": "mirror",
-		"version": "1.0.0", // This will be replaced with actual version
+		"version": version.GetInfo().Short(),
 	}).Logger
 
 	return logger, nil
