@@ -1,4 +1,3 @@
-version: 2
 run:
   timeout: 5m
   tests: true
@@ -20,8 +19,6 @@ linters:
     - funlen
     - whitespace
     - godot
-    - revive
-    - unconvert
 
   disable:
     - dupl
@@ -33,7 +30,7 @@ linters:
 
 linters-settings:
   govet:
-    enable-all: true
+    check-shadowing: true
   gocritic:
     enabled-tags:
       - diagnostic
@@ -48,10 +45,6 @@ linters-settings:
   funlen:
     lines: 100
     statements: 50
-  revive:
-    rules:
-      - name: var-naming
-        disabled: true
 
 issues:
   exclude-rules:
@@ -74,3 +67,6 @@ issues:
   max-issues-per-linter: 0
   max-same-issues: 0
   new: false
+
+service:
+  golangci-lint-version: 1.55.x
