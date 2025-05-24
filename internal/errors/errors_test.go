@@ -35,14 +35,14 @@ func TestAppError(t *testing.T) {
 			"field": "email",
 			"value": "invalid-email",
 		}
-		err.WithDetails(details)
+		_ = err.WithDetails(details)
 		
 		assert.Equal(t, details, err.Details)
 	})
 
 	t.Run("WithCode adds code", func(t *testing.T) {
 		err := New(ErrorTypeValidation, "Invalid input", http.StatusBadRequest)
-		err.WithCode("ERR_001")
+		_ = err.WithCode("ERR_001")
 		
 		assert.Equal(t, "ERR_001", err.Code)
 	})

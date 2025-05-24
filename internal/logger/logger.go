@@ -10,7 +10,7 @@ import (
 	"github.com/zsiec/mirror/internal/config"
 )
 
-// New creates a new configured logger instance
+// New creates a new configured logger instance.
 func New(cfg *config.LoggingConfig) (*logrus.Logger, error) {
 	logger := logrus.New()
 
@@ -71,20 +71,20 @@ func New(cfg *config.LoggingConfig) (*logrus.Logger, error) {
 	return logger, nil
 }
 
-// WithComponent creates a logger entry with component field
+// WithComponent creates a logger entry with component field.
 func WithComponent(logger *logrus.Logger, component string) *logrus.Entry {
 	return logger.WithField("component", component)
 }
 
 
-// WithStream creates a logger entry with stream information
+// WithStream creates a logger entry with stream information.
 func WithStream(logger *logrus.Logger, streamID string) *logrus.Entry {
 	return logger.WithFields(logrus.Fields{
 		"stream_id": streamID,
 	})
 }
 
-// WithError creates a logger entry with error details
+// WithError creates a logger entry with error details.
 func WithError(logger *logrus.Logger, err error) *logrus.Entry {
 	return logger.WithError(err)
 }

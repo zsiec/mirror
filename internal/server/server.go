@@ -19,7 +19,7 @@ import (
 	"github.com/zsiec/mirror/internal/logger"
 )
 
-// Server represents the HTTP/3 server
+// Server represents the HTTP/3 server.
 type Server struct {
 	config       *config.ServerConfig
 	router       *mux.Router
@@ -30,7 +30,7 @@ type Server struct {
 	errorHandler *errors.ErrorHandler
 }
 
-// New creates a new server instance
+// New creates a new server instance.
 func New(cfg *config.ServerConfig, log *logrus.Logger, redisClient *redis.Client) *Server {
 	router := mux.NewRouter()
 	healthMgr := health.NewManager(log)
@@ -51,7 +51,7 @@ func New(cfg *config.ServerConfig, log *logrus.Logger, redisClient *redis.Client
 	return s
 }
 
-// Start starts the HTTP/3 server
+// Start starts the HTTP/3 server.
 func (s *Server) Start(ctx context.Context) error {
 	// TLS configuration
 	tlsConfig := &tls.Config{
@@ -107,7 +107,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 }
 
-// Shutdown gracefully shuts down the server
+// Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown() error {
 	s.logger.Info("Shutting down HTTP/3 server")
 
@@ -164,7 +164,7 @@ func (s *Server) registerHealthCheckers() {
 	s.healthMgr.Register(memChecker)
 }
 
-// GetRouter returns the router for testing
+// GetRouter returns the router for testing.
 func (s *Server) GetRouter() *mux.Router {
 	return s.router
 }

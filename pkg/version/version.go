@@ -15,7 +15,7 @@ var (
 	Arch      = runtime.GOARCH
 )
 
-// Info contains version information
+// Info contains version information.
 type Info struct {
 	Version   string `json:"version"`
 	GitCommit string `json:"git_commit"`
@@ -25,7 +25,7 @@ type Info struct {
 	Arch      string `json:"arch"`
 }
 
-// GetInfo returns the version information
+// GetInfo returns the version information.
 func GetInfo() Info {
 	return Info{
 		Version:   Version,
@@ -37,13 +37,13 @@ func GetInfo() Info {
 	}
 }
 
-// String returns the version string
+// String returns the version string.
 func (i Info) String() string {
 	return fmt.Sprintf("Mirror %s (commit: %s, built: %s, go: %s, os/arch: %s/%s)",
 		i.Version, i.GitCommit, i.BuildTime, i.GoVersion, i.OS, i.Arch)
 }
 
-// Short returns a short version string
+// Short returns a short version string.
 func (i Info) Short() string {
 	return fmt.Sprintf("Mirror %s", i.Version)
 }

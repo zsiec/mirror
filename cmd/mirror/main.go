@@ -114,7 +114,7 @@ func main() {
 	log.Info("Server shutdown complete")
 }
 
-// startMetricsServer starts the Prometheus metrics server
+// startMetricsServer starts the Prometheus metrics server.
 func startMetricsServer(cfg config.MetricsConfig, log logger.Logger) {
 	mux := http.NewServeMux()
 	mux.Handle(cfg.Path, promhttp.Handler())

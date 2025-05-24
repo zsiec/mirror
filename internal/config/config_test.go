@@ -77,7 +77,9 @@ func TestLoadConfig(t *testing.T) {
 	// Create a temporary config file
 	tmpfile, err := os.CreateTemp("", "test-config-*.yaml")
 	require.NoError(t, err)
-	defer os.Remove(tmpfile.Name())
+	defer func() {
+		_ = os.Remove(tmpfile.Name())
+	}()
 
 	configContent := `
 server:
@@ -101,7 +103,7 @@ metrics:
 `
 	_, err = tmpfile.Write([]byte(configContent))
 	require.NoError(t, err)
-	tmpfile.Close()
+	_ = tmpfile.Close()
 
 	// Test loading config
 	cfg, err := Load(tmpfile.Name())

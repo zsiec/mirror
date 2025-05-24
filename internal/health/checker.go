@@ -8,7 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Status represents the health status of a component
+// Status represents the health status of a component.
 type Status string
 
 const (
@@ -17,7 +17,7 @@ const (
 	StatusDown     Status = "down"
 )
 
-// Check represents a health check result
+// Check represents a health check result.
 type Check struct {
 	Name        string                 `json:"name"`
 	Status      Status                 `json:"status"`
@@ -28,13 +28,13 @@ type Check struct {
 	Details     map[string]interface{} `json:"details,omitempty"`
 }
 
-// Checker is the interface that health checkers must implement
+// Checker is the interface that health checkers must implement.
 type Checker interface {
 	Name() string
 	Check(ctx context.Context) error
 }
 
-// Manager manages health checks
+// Manager manages health checks.
 type Manager struct {
 	checkers []Checker
 	results  map[string]*Check
@@ -42,7 +42,7 @@ type Manager struct {
 	logger   *logrus.Logger
 }
 
-// NewManager creates a new health check manager
+// NewManager creates a new health check manager.
 func NewManager(logger *logrus.Logger) *Manager {
 	return &Manager{
 		checkers: make([]Checker, 0),
@@ -51,7 +51,7 @@ func NewManager(logger *logrus.Logger) *Manager {
 	}
 }
 
-// Register adds a new health checker
+// Register adds a new health checker.
 func (m *Manager) Register(checker Checker) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -59,7 +59,7 @@ func (m *Manager) Register(checker Checker) {
 	m.logger.WithField("checker", checker.Name()).Debug("Registered health checker")
 }
 
-// RunChecks executes all registered health checks
+// RunChecks executes all registered health checks.
 func (m *Manager) RunChecks(ctx context.Context) map[string]*Check {
 	var wg sync.WaitGroup
 	results := make(map[string]*Check, len(m.checkers))
@@ -128,7 +128,7 @@ func (m *Manager) RunChecks(ctx context.Context) map[string]*Check {
 	return results
 }
 
-// GetResults returns the latest health check results
+// GetResults returns the latest health check results.
 func (m *Manager) GetResults() map[string]*Check {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -142,7 +142,7 @@ func (m *Manager) GetResults() map[string]*Check {
 	return results
 }
 
-// GetOverallStatus returns the overall system health status
+// GetOverallStatus returns the overall system health status.
 func (m *Manager) GetOverallStatus() Status {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -172,7 +172,7 @@ func (m *Manager) GetOverallStatus() Status {
 	return StatusOK
 }
 
-// StartPeriodicChecks starts running health checks periodically
+// StartPeriodicChecks starts running health checks periodically.
 func (m *Manager) StartPeriodicChecks(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

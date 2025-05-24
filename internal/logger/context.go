@@ -18,12 +18,12 @@ const (
 	RequestIDKey contextKey = "request_id"
 )
 
-// WithLogger adds a logger to the context
+// WithLogger adds a logger to the context.
 func WithLogger(ctx context.Context, logger *logrus.Entry) context.Context {
 	return context.WithValue(ctx, LoggerKey, logger)
 }
 
-// FromContext retrieves the logger from context
+// FromContext retrieves the logger from context.
 func FromContext(ctx context.Context) *logrus.Entry {
 	if logger, ok := ctx.Value(LoggerKey).(*logrus.Entry); ok {
 		return logger
@@ -32,12 +32,12 @@ func FromContext(ctx context.Context) *logrus.Entry {
 	return logrus.NewEntry(logrus.StandardLogger())
 }
 
-// WithRequestID adds a request ID to the context
+// WithRequestID adds a request ID to the context.
 func WithRequestID(ctx context.Context, requestID string) context.Context {
 	return context.WithValue(ctx, RequestIDKey, requestID)
 }
 
-// GetRequestID retrieves the request ID from context
+// GetRequestID retrieves the request ID from context.
 func GetRequestID(ctx context.Context) string {
 	if requestID, ok := ctx.Value(RequestIDKey).(string); ok {
 		return requestID
@@ -45,7 +45,7 @@ func GetRequestID(ctx context.Context) string {
 	return ""
 }
 
-// WithRequest creates a logger entry with request information
+// WithRequest creates a logger entry with request information.
 func WithRequest(logger *logrus.Logger, r *http.Request) *logrus.Entry {
 	requestID := r.Header.Get("X-Request-ID")
 	if requestID == "" {
@@ -62,7 +62,7 @@ func WithRequest(logger *logrus.Logger, r *http.Request) *logrus.Entry {
 	})
 }
 
-// RequestLoggerMiddleware creates a middleware that adds a logger to the request context
+// RequestLoggerMiddleware creates a middleware that adds a logger to the request context.
 func RequestLoggerMiddleware(logger *logrus.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +114,7 @@ type ResponseWriter struct {
 	written    bool
 }
 
-// NewResponseWriter creates a new ResponseWriter
+// NewResponseWriter creates a new ResponseWriter.
 func NewResponseWriter(w http.ResponseWriter) *ResponseWriter {
 	return &ResponseWriter{
 		ResponseWriter: w,
@@ -122,7 +122,7 @@ func NewResponseWriter(w http.ResponseWriter) *ResponseWriter {
 	}
 }
 
-// WriteHeader captures the status code
+// WriteHeader captures the status code.
 func (rw *ResponseWriter) WriteHeader(code int) {
 	if !rw.written {
 		rw.statusCode = code
@@ -131,7 +131,7 @@ func (rw *ResponseWriter) WriteHeader(code int) {
 	}
 }
 
-// Write captures that a write has occurred
+// Write captures that a write has occurred.
 func (rw *ResponseWriter) Write(b []byte) (int, error) {
 	if !rw.written {
 		rw.WriteHeader(http.StatusOK)
@@ -139,7 +139,7 @@ func (rw *ResponseWriter) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
-// StatusCode returns the captured status code
+// StatusCode returns the captured status code.
 func (rw *ResponseWriter) StatusCode() int {
 	return rw.statusCode
 }

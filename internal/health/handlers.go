@@ -10,7 +10,7 @@ import (
 	"github.com/zsiec/mirror/pkg/version"
 )
 
-// Response represents the health check response
+// Response represents the health check response.
 type Response struct {
 	Status    Status             `json:"status"`
 	Timestamp time.Time          `json:"timestamp"`
@@ -19,13 +19,13 @@ type Response struct {
 	Checks    map[string]*Check  `json:"checks,omitempty"`
 }
 
-// Handler handles health check HTTP endpoints
+// Handler handles health check HTTP endpoints.
 type Handler struct {
 	manager   *Manager
 	startTime time.Time
 }
 
-// NewHandler creates a new health check handler
+// NewHandler creates a new health check handler.
 func NewHandler(manager *Manager) *Handler {
 	return &Handler{
 		manager:   manager,
@@ -33,7 +33,7 @@ func NewHandler(manager *Manager) *Handler {
 	}
 }
 
-// HandleHealth handles the /health endpoint
+// HandleHealth handles the /health endpoint.
 func (h *Handler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	// Run health checks with request context
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -61,7 +61,7 @@ func (h *Handler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, statusCode, response)
 }
 
-// HandleReady handles the /ready endpoint (simplified health check)
+// HandleReady handles the /ready endpoint (simplified health check).
 func (h *Handler) HandleReady(w http.ResponseWriter, r *http.Request) {
 	overallStatus := h.manager.GetOverallStatus()
 
@@ -81,7 +81,7 @@ func (h *Handler) HandleReady(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, statusCode, response)
 }
 
-// HandleLive handles the /live endpoint (basic liveness check)
+// HandleLive handles the /live endpoint (basic liveness check).
 func (h *Handler) HandleLive(w http.ResponseWriter, r *http.Request) {
 	response := struct {
 		Status    string    `json:"status"`
@@ -94,7 +94,7 @@ func (h *Handler) HandleLive(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, response)
 }
 
-// getUptime calculates the service uptime
+// getUptime calculates the service uptime.
 func (h *Handler) getUptime() string {
 	uptime := time.Since(h.startTime)
 	days := int(uptime.Hours() / 24)
@@ -102,17 +102,19 @@ func (h *Handler) getUptime() string {
 	minutes := int(uptime.Minutes()) % 60
 	seconds := int(uptime.Seconds()) % 60
 
-	if days > 0 {
+	switch {
+	case days > 0:
 		return formatDuration(days, hours, minutes, seconds)
-	} else if hours > 0 {
+	case hours > 0:
 		return formatDuration(0, hours, minutes, seconds)
-	} else if minutes > 0 {
+	case minutes > 0:
 		return formatDuration(0, 0, minutes, seconds)
+	default:
+		return formatDuration(0, 0, 0, seconds)
 	}
-	return formatDuration(0, 0, 0, seconds)
 }
 
-// formatDuration formats duration in a human-readable way
+// formatDuration formats duration in a human-readable way.
 func formatDuration(days, hours, minutes, seconds int) string {
 	result := ""
 	if days > 0 {

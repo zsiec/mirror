@@ -7,14 +7,14 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// ErrorResponse represents the error response structure
+// ErrorResponse represents the error response structure.
 type ErrorResponse struct {
 	Error    ErrorDetails `json:"error"`
 	TraceID  string       `json:"trace_id,omitempty"`
 	Metadata interface{}  `json:"metadata,omitempty"`
 }
 
-// ErrorDetails contains the error details
+// ErrorDetails contains the error details.
 type ErrorDetails struct {
 	Type    ErrorType              `json:"type"`
 	Message string                 `json:"message"`
@@ -22,19 +22,19 @@ type ErrorDetails struct {
 	Details map[string]interface{} `json:"details,omitempty"`
 }
 
-// ErrorHandler handles error responses
+// ErrorHandler handles error responses.
 type ErrorHandler struct {
 	logger *logrus.Logger
 }
 
-// NewErrorHandler creates a new error handler
+// NewErrorHandler creates a new error handler.
 func NewErrorHandler(logger *logrus.Logger) *ErrorHandler {
 	return &ErrorHandler{
 		logger: logger,
 	}
 }
 
-// HandleError handles an error and writes the appropriate response
+// HandleError handles an error and writes the appropriate response.
 func (h *ErrorHandler) HandleError(w http.ResponseWriter, r *http.Request, err error) {
 	// Extract trace ID from request context if available
 	traceID := r.Header.Get("X-Request-ID")
@@ -83,19 +83,19 @@ func (h *ErrorHandler) HandleError(w http.ResponseWriter, r *http.Request, err e
 	h.writeJSON(w, appErr.HTTPStatus, response)
 }
 
-// HandleNotFound handles 404 errors
+// HandleNotFound handles 404 errors.
 func (h *ErrorHandler) HandleNotFound(w http.ResponseWriter, r *http.Request) {
 	err := NewNotFoundError("endpoint")
 	h.HandleError(w, r, err)
 }
 
-// HandleMethodNotAllowed handles 405 errors
+// HandleMethodNotAllowed handles 405 errors.
 func (h *ErrorHandler) HandleMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	err := New(ErrorTypeValidation, "Method not allowed", http.StatusMethodNotAllowed)
 	h.HandleError(w, r, err)
 }
 
-// HandlePanic handles panics in HTTP handlers
+// HandlePanic handles panics in HTTP handlers.
 func (h *ErrorHandler) HandlePanic(w http.ResponseWriter, r *http.Request, recovered interface{}) {
 	h.logger.WithFields(logrus.Fields{
 		"panic":      recovered,
@@ -109,7 +109,7 @@ func (h *ErrorHandler) HandlePanic(w http.ResponseWriter, r *http.Request, recov
 	h.HandleError(w, r, err)
 }
 
-// writeJSON writes a JSON response
+// writeJSON writes a JSON response.
 func (h *ErrorHandler) writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -119,7 +119,7 @@ func (h *ErrorHandler) writeJSON(w http.ResponseWriter, status int, data interfa
 	}
 }
 
-// Middleware returns an error handling middleware
+// Middleware returns an error handling middleware.
 func (h *ErrorHandler) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {

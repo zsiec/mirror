@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/quic-go/quic-go/http3"
@@ -34,12 +35,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Failed to read response: %v", err)
+		_ = resp.Body.Close()
+		log.Printf("Failed to read response: %v", err)
+		os.Exit(1)
 	}
 
 	fmt.Printf("Status: %s\n", resp.Status)

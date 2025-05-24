@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockChecker is a mock implementation of Checker for testing
+// mockChecker is a mock implementation of Checker for testing.
 type mockChecker struct {
 	name string
 	err  error
