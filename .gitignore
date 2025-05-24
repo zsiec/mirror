@@ -1,0 +1,133 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Build directories
+bin/
+build/
+dist/
+out/
+
+# Log files
+*.log
+logs/
+*.log.*
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Coverage reports
+coverage/
+*.lcov
+.nyc_output/
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Kubernetes
+*.kubeconfig
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Video/Media files (for testing)
+*.mp4
+*.m4s
+*.ts
+*.m3u8
+*.mpd
+*.hevc
+*.h264
+*.h265
+test-streams/
+sample-media/
+
+# Generated files
+generated/
+*.generated.go
+
+# Performance profiling
+*.prof
+*.pprof
+
+# Binary outputs
+mirror
+mirror-ingestion
+mirror-transcoder
+mirror-packager
+
+# Session/State files
+*.session
+*.pid
+
+# Certificates and keys
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+ca-certificates/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Redis dump
+dump.rdb
+
+# Backup files
+*.bak
+*.backup
+
+# Claude Code specific
+.claude/
