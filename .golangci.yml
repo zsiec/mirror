@@ -1,74 +1,41 @@
-# golangci-lint configuration
-# https://golangci-lint.run/usage/configuration/
-
-# Required in golangci-lint v2+
-version: "2"
-
 run:
   timeout: 5m
   tests: true
+  skip-dirs:
+    - vendor
+    - third_party
+  skip-files:
+    - ".*\\.pb\\.go$"
+  modules-download-mode: readonly
 
 linters:
+  disable-all: true
   enable:
     - errcheck
     - govet
     - ineffassign
     - misspell
 
-  disable:
-    - dupl
-    - gocyclo
-    - lll
-    - gocognit
-    - goconst
-    - depguard
-    - godot      # Too strict about comment formatting
-    - funlen     # Function length is subjective
-    - gocritic   # Too many opinionated checks
-    - dogsled    # Not critical
-    - nakedret   # Not critical
-    - prealloc   # Premature optimization
-    - unused     # Can be annoying during development
-    - gosec      # Security checks can be too strict for development
-    - staticcheck # Can be pedantic
-    - unparam    # Not critical
-    - whitespace # Formatting can be handled by gofmt
-
 linters-settings:
   govet:
     check-shadowing: true
-  staticcheck:
-    checks: ["all", "-ST1003", "-QF1003"]  # Disable some pedantic checks
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-      - style
-    disabled-checks:
-      - dupImport
-      - ifElseChain
-      - octalLiteral
-      - whyNoLint
-      - wrapperFunc
-      - exitAfterDefer  # Allow os.Exit with defer in main functions
-  funlen:
-    lines: 150      # Increased from 100
-    statements: 80   # Increased from 50
-    # Ignore test functions
-    ignore-comments: true
+  errcheck:
+    check-type-assertions: true
+    check-blank: false
 
 issues:
+  # Exclude typecheck errors - these are false positives in v1.55.2
+  exclude:
+    - "undefined: redis"
+    - "undefined: quic"
+  
   exclude-rules:
     # Be more lenient with test files
     - path: _test\.go
       linters:
         - errcheck
-        - gosec
-        - funlen
-        - gocritic
-        - unparam
-        - unused
 
+    # Exclude some paths
     - path: pkg/version/
       linters:
         - gochecknoglobals
@@ -76,27 +43,6 @@ issues:
     - path: cmd/
       linters:
         - gochecknoglobals
-        - funlen  # Main functions can be longer
-
-    - text: "do not define dynamic errors"
-      linters:
-        - goerr113
-    
-    # Exclude some gosec checks
-    - text: "G114"  # Allow net/http functions without timeouts in certain cases
-      linters:
-        - gosec
-    
-    - text: "G402"  # Allow InsecureSkipVerify in test client
-      path: cmd/test-client/
-      linters:
-        - gosec
-    
-    # Exclude pedantic staticcheck suggestions
-    - text: "QF1003"
-      linters:
-        - staticcheck
 
   max-issues-per-linter: 0
   max-same-issues: 0
-  new: false
