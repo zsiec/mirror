@@ -100,7 +100,6 @@ generated/
 *.pprof
 
 # Binary outputs
-mirror
 mirror-ingestion
 mirror-transcoder
 mirror-packager

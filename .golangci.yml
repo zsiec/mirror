@@ -1,0 +1,48 @@
+run:
+  timeout: 5m
+  tests: true
+  skip-dirs:
+    - vendor
+    - third_party
+  skip-files:
+    - ".*\\.pb\\.go$"
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+
+linters-settings:
+  govet:
+    check-shadowing: true
+  errcheck:
+    check-type-assertions: true
+    check-blank: false
+
+issues:
+  # Exclude typecheck errors - these are false positives in v1.55.2
+  exclude:
+    - "undefined: redis"
+    - "undefined: quic"
+  
+  exclude-rules:
+    # Be more lenient with test files
+    - path: _test\.go
+      linters:
+        - errcheck
+
+    # Exclude some paths
+    - path: pkg/version/
+      linters:
+        - gochecknoglobals
+
+    - path: cmd/
+      linters:
+        - gochecknoglobals
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
