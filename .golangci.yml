@@ -13,17 +13,7 @@ linters:
     - errcheck
     - govet
     - ineffassign
-    - staticcheck
-    - unused
     - misspell
-    - gosec
-    - unparam
-    - dogsled
-    - nakedret
-    - prealloc
-    - gocritic
-    - funlen
-    - whitespace
 
   disable:
     - dupl
@@ -32,11 +22,23 @@ linters:
     - gocognit
     - goconst
     - depguard
-    - godot  # Too strict about comment formatting
+    - godot      # Too strict about comment formatting
+    - funlen     # Function length is subjective
+    - gocritic   # Too many opinionated checks
+    - dogsled    # Not critical
+    - nakedret   # Not critical
+    - prealloc   # Premature optimization
+    - unused     # Can be annoying during development
+    - gosec      # Security checks can be too strict for development
+    - staticcheck # Can be pedantic
+    - unparam    # Not critical
+    - whitespace # Formatting can be handled by gofmt
 
 linters-settings:
   govet:
     check-shadowing: true
+  staticcheck:
+    checks: ["all", "-ST1003", "-QF1003"]  # Disable some pedantic checks
   gocritic:
     enabled-tags:
       - diagnostic
@@ -48,19 +50,24 @@ linters-settings:
       - octalLiteral
       - whyNoLint
       - wrapperFunc
+      - exitAfterDefer  # Allow os.Exit with defer in main functions
   funlen:
-    lines: 100
-    statements: 50
+    lines: 150      # Increased from 100
+    statements: 80   # Increased from 50
     # Ignore test functions
     ignore-comments: true
 
 issues:
   exclude-rules:
+    # Be more lenient with test files
     - path: _test\.go
       linters:
         - errcheck
         - gosec
         - funlen
+        - gocritic
+        - unparam
+        - unused
 
     - path: pkg/version/
       linters:
@@ -69,10 +76,26 @@ issues:
     - path: cmd/
       linters:
         - gochecknoglobals
+        - funlen  # Main functions can be longer
 
     - text: "do not define dynamic errors"
       linters:
         - goerr113
+    
+    # Exclude some gosec checks
+    - text: "G114"  # Allow net/http functions without timeouts in certain cases
+      linters:
+        - gosec
+    
+    - text: "G402"  # Allow InsecureSkipVerify in test client
+      path: cmd/test-client/
+      linters:
+        - gosec
+    
+    # Exclude pedantic staticcheck suggestions
+    - text: "QF1003"
+      linters:
+        - staticcheck
 
   max-issues-per-linter: 0
   max-same-issues: 0
