@@ -1,0 +1,132 @@
+run:
+  timeout: 5m
+  tests: true
+  skip-dirs:
+    - vendor
+    - testdata
+    - docker
+
+linters:
+  enable:
+    - gofmt
+    - goimports
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gosimple
+    - structcheck
+    - varcheck
+    - ineffassign
+    - deadcode
+    - typecheck
+    - gosec
+    - megacheck
+    - misspell
+    - unparam
+    - dogsled
+    - nakedret
+    - prealloc
+    - scopelint
+    - gocritic
+    - gochecknoinits
+    - gochecknoglobals
+    - godox
+    - funlen
+    - whitespace
+    - wsl
+    - goprintffuncname
+    - gomnd
+    - goerr113
+    - gomodguard
+    - godot
+    - testpackage
+    - nestif
+    - exportloopref
+    - exhaustive
+    - sqlclosecheck
+    - nolintlint
+    - wrapcheck
+
+  disable:
+    - dupl
+    - gocyclo
+    - lll
+    - gocognit
+    - goconst
+    - depguard
+    - interfacer
+    - maligned
+
+linters-settings:
+  govet:
+    check-shadowing: true
+  golint:
+    min-confidence: 0
+  gocyclo:
+    min-complexity: 20
+  maligned:
+    suggest-new: true
+  dupl:
+    threshold: 100
+  goconst:
+    min-len: 2
+    min-occurrences: 2
+  misspell:
+    locale: US
+  lll:
+    line-length: 140
+  goimports:
+    local-prefixes: github.com/zsiec/mirror
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+      - wrapperFunc
+  funlen:
+    lines: 100
+    statements: 50
+  godox:
+    keywords:
+      - TODO
+      - FIXME
+      - HACK
+  wsl:
+    allow-cuddle-declarations: true
+    allow-trailing-comment: true
+    force-err-cuddling: true
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - funlen
+        - goconst
+        - testpackage
+
+    - path: pkg/version/
+      linters:
+        - gochecknoglobals
+
+    - linters:
+        - goerr113
+      text: "do not define dynamic errors"
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
+
+service:
+  golangci-lint-version: 1.55.x

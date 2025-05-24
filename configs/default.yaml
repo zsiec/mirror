@@ -1,0 +1,37 @@
+# Default configuration for Mirror streaming server
+
+server:
+  http3_port: 443
+  tls_cert_file: "./certs/cert.pem"
+  tls_key_file: "./certs/key.pem"
+  read_timeout: 30s
+  write_timeout: 30s
+  shutdown_timeout: 10s
+  max_incoming_streams: 5000
+  max_incoming_uni_streams: 1000
+  max_idle_timeout: 30s
+
+redis:
+  addresses:
+    - "localhost:6379"
+  password: ""
+  db: 0
+  max_retries: 3
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+  pool_size: 100
+  min_idle_conns: 10
+
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
+  max_size: 100    # MB
+  max_backups: 5
+  max_age: 30      # days
+
+metrics:
+  enabled: true
+  path: "/metrics"
+  port: 9090

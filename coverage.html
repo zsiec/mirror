@@ -1,0 +1,1992 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>mirror: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/zsiec/mirror/cmd/mirror/main.go (0.0%)</option>
+				
+				<option value="file1">github.com/zsiec/mirror/cmd/test-client/main.go (0.0%)</option>
+				
+				<option value="file2">github.com/zsiec/mirror/internal/config/config.go (92.1%)</option>
+				
+				<option value="file3">github.com/zsiec/mirror/internal/config/validate.go (64.3%)</option>
+				
+				<option value="file4">github.com/zsiec/mirror/internal/errors/errors.go (100.0%)</option>
+				
+				<option value="file5">github.com/zsiec/mirror/internal/errors/handler.go (0.0%)</option>
+				
+				<option value="file6">github.com/zsiec/mirror/internal/health/checker.go (97.0%)</option>
+				
+				<option value="file7">github.com/zsiec/mirror/internal/health/handlers.go (0.0%)</option>
+				
+				<option value="file8">github.com/zsiec/mirror/internal/health/redis.go (0.0%)</option>
+				
+				<option value="file9">github.com/zsiec/mirror/internal/logger/context.go (7.7%)</option>
+				
+				<option value="file10">github.com/zsiec/mirror/internal/logger/logger.go (95.0%)</option>
+				
+				<option value="file11">github.com/zsiec/mirror/internal/server/middleware.go (0.0%)</option>
+				
+				<option value="file12">github.com/zsiec/mirror/internal/server/routes.go (0.0%)</option>
+				
+				<option value="file13">github.com/zsiec/mirror/internal/server/server.go (0.0%)</option>
+				
+				<option value="file14">github.com/zsiec/mirror/pkg/version/version.go (0.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "context"
+        "flag"
+        "fmt"
+        "os"
+        "os/signal"
+        "syscall"
+
+        "github.com/prometheus/client_golang/prometheus/promhttp"
+        "github.com/redis/go-redis/v9"
+        
+        "github.com/zsiec/mirror/internal/config"
+        "github.com/zsiec/mirror/internal/logger"
+        "github.com/zsiec/mirror/internal/server"
+        "github.com/zsiec/mirror/pkg/version"
+        "net/http"
+)
+
+func main() <span class="cov0" title="0">{
+        var (
+                configPath  string
+                showVersion bool
+        )
+        
+        flag.StringVar(&amp;configPath, "config", "configs/default.yaml", "Path to configuration file")
+        flag.BoolVar(&amp;showVersion, "version", false, "Show version information")
+        flag.Parse()
+
+        // Show version and exit if requested
+        if showVersion </span><span class="cov0" title="0">{
+                fmt.Println(version.GetInfo().String())
+                os.Exit(0)
+        }</span>
+
+        // Load configuration
+        <span class="cov0" title="0">cfg, err := config.Load(configPath)
+        if err != nil </span><span class="cov0" title="0">{
+                fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+                os.Exit(1)
+        }</span>
+
+        // Initialize logger
+        <span class="cov0" title="0">log, err := logger.New(&amp;cfg.Logging)
+        if err != nil </span><span class="cov0" title="0">{
+                fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+                os.Exit(1)
+        }</span>
+
+        // Log startup information
+        <span class="cov0" title="0">log.WithField("version", version.GetInfo().Short()).Info("Starting Mirror streaming server")
+        log.WithField("config_path", configPath).Debug("Configuration loaded")
+
+        // Connect to Redis
+        redisClient := redis.NewClient(&amp;redis.Options{
+                Addr:         cfg.Redis.Addresses[0],
+                Password:     cfg.Redis.Password,
+                DB:           cfg.Redis.DB,
+                MaxRetries:   cfg.Redis.MaxRetries,
+                DialTimeout:  cfg.Redis.DialTimeout,
+                ReadTimeout:  cfg.Redis.ReadTimeout,
+                WriteTimeout: cfg.Redis.WriteTimeout,
+                PoolSize:     cfg.Redis.PoolSize,
+                MinIdleConns: cfg.Redis.MinIdleConns,
+        })
+
+        // Test Redis connection
+        ctx := context.Background()
+        if err := redisClient.Ping(ctx).Err(); err != nil </span><span class="cov0" title="0">{
+                log.WithError(err).Fatal("Failed to connect to Redis")
+        }</span>
+        <span class="cov0" title="0">log.Info("Connected to Redis successfully")
+
+        // Verify Redis is writable
+        testKey := "mirror:startup:test"
+        if err := redisClient.Set(ctx, testKey, "1", 0).Err(); err != nil </span><span class="cov0" title="0">{
+                log.WithError(err).Fatal("Redis is not writable")
+        }</span>
+        <span class="cov0" title="0">redisClient.Del(ctx, testKey)
+
+        // Start metrics server if enabled
+        if cfg.Metrics.Enabled </span><span class="cov0" title="0">{
+                go startMetricsServer(cfg.Metrics, log)
+        }</span>
+
+        // Create server
+        <span class="cov0" title="0">srv := server.New(&amp;cfg.Server, log, redisClient)
+
+        // Setup graceful shutdown
+        ctx, cancel := context.WithCancel(context.Background())
+        defer cancel()
+
+        // Handle shutdown signals
+        sigCh := make(chan os.Signal, 1)
+        signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+        go func() </span><span class="cov0" title="0">{
+                sig := &lt;-sigCh
+                log.WithField("signal", sig).Info("Received shutdown signal")
+                cancel()
+        }</span>()
+
+        // Start server
+        <span class="cov0" title="0">if err := srv.Start(ctx); err != nil </span><span class="cov0" title="0">{
+                log.WithError(err).Fatal("Server error")
+        }</span>
+
+        // Cleanup
+        <span class="cov0" title="0">if err := redisClient.Close(); err != nil </span><span class="cov0" title="0">{
+                log.WithError(err).Error("Failed to close Redis connection")
+        }</span>
+
+        <span class="cov0" title="0">log.Info("Server shutdown complete")</span>
+}
+
+// startMetricsServer starts the Prometheus metrics server
+func startMetricsServer(cfg config.MetricsConfig, log logger.Logger) <span class="cov0" title="0">{
+        mux := http.NewServeMux()
+        mux.Handle(cfg.Path, promhttp.Handler())
+
+        addr := fmt.Sprintf(":%d", cfg.Port)
+        log.WithField("addr", addr).Info("Starting metrics server")
+
+        if err := http.ListenAndServe(addr, mux); err != nil </span><span class="cov0" title="0">{
+                log.WithError(err).Error("Metrics server error")
+        }</span>
+}</pre>
+		
+		<pre class="file" id="file1" style="display: none">package main
+
+import (
+        "crypto/tls"
+        "flag"
+        "fmt"
+        "io"
+        "log"
+        "net/http"
+        "time"
+
+        "github.com/quic-go/quic-go/http3"
+)
+
+func main() <span class="cov0" title="0">{
+        var url string
+        flag.StringVar(&amp;url, "url", "https://localhost:8443/health", "URL to test")
+        flag.Parse()
+
+        // Create HTTP/3 client
+        client := &amp;http.Client{
+                Transport: &amp;http3.RoundTripper{
+                        TLSClientConfig: &amp;tls.Config{
+                                InsecureSkipVerify: true,
+                        },
+                },
+                Timeout: 10 * time.Second,
+        }
+
+        fmt.Printf("Testing HTTP/3 endpoint: %s\n", url)
+
+        // Make request
+        resp, err := client.Get(url)
+        if err != nil </span><span class="cov0" title="0">{
+                log.Fatalf("Request failed: %v", err)
+        }</span>
+        <span class="cov0" title="0">defer resp.Body.Close()
+
+        // Read response
+        body, err := io.ReadAll(resp.Body)
+        if err != nil </span><span class="cov0" title="0">{
+                log.Fatalf("Failed to read response: %v", err)
+        }</span>
+
+        <span class="cov0" title="0">fmt.Printf("Status: %s\n", resp.Status)
+        fmt.Printf("Protocol: %s\n", resp.Proto)
+        fmt.Printf("Headers:\n")
+        for k, v := range resp.Header </span><span class="cov0" title="0">{
+                fmt.Printf("  %s: %v\n", k, v)
+        }</span>
+        <span class="cov0" title="0">fmt.Printf("\nBody:\n%s\n", string(body))</span>
+}</pre>
+		
+		<pre class="file" id="file2" style="display: none">package config
+
+import (
+        "fmt"
+        "strings"
+        "time"
+
+        "github.com/spf13/viper"
+)
+
+type Config struct {
+        Server  ServerConfig  `mapstructure:"server"`
+        Redis   RedisConfig   `mapstructure:"redis"`
+        Logging LoggingConfig `mapstructure:"logging"`
+        Metrics MetricsConfig `mapstructure:"metrics"`
+}
+
+type ServerConfig struct {
+        // HTTP/3 Server
+        HTTP3Port       int           `mapstructure:"http3_port"`
+        TLSCertFile     string        `mapstructure:"tls_cert_file"`
+        TLSKeyFile      string        `mapstructure:"tls_key_file"`
+        ReadTimeout     time.Duration `mapstructure:"read_timeout"`
+        WriteTimeout    time.Duration `mapstructure:"write_timeout"`
+        ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
+
+        // QUIC specific
+        MaxIncomingStreams    int64         `mapstructure:"max_incoming_streams"`
+        MaxIncomingUniStreams int64         `mapstructure:"max_incoming_uni_streams"`
+        MaxIdleTimeout        time.Duration `mapstructure:"max_idle_timeout"`
+}
+
+type RedisConfig struct {
+        Addresses    []string      `mapstructure:"addresses"`
+        Password     string        `mapstructure:"password"`
+        DB           int           `mapstructure:"db"`
+        MaxRetries   int           `mapstructure:"max_retries"`
+        DialTimeout  time.Duration `mapstructure:"dial_timeout"`
+        ReadTimeout  time.Duration `mapstructure:"read_timeout"`
+        WriteTimeout time.Duration `mapstructure:"write_timeout"`
+        PoolSize     int           `mapstructure:"pool_size"`
+        MinIdleConns int           `mapstructure:"min_idle_conns"`
+}
+
+type LoggingConfig struct {
+        Level      string `mapstructure:"level"`
+        Format     string `mapstructure:"format"`     // json or text
+        Output     string `mapstructure:"output"`     // stdout, stderr, or file path
+        MaxSize    int    `mapstructure:"max_size"`   // MB
+        MaxBackups int    `mapstructure:"max_backups"`
+        MaxAge     int    `mapstructure:"max_age"` // days
+}
+
+type MetricsConfig struct {
+        Enabled bool   `mapstructure:"enabled"`
+        Path    string `mapstructure:"path"`
+        Port    int    `mapstructure:"port"`
+}
+
+func Load(configPath string) (*Config, error) <span class="cov8" title="1">{
+        viper.SetConfigType("yaml")
+        viper.SetConfigFile(configPath)
+
+        // Environment variable override
+        viper.SetEnvPrefix("MIRROR")
+        viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+        viper.AutomaticEnv()
+
+        // Defaults
+        setDefaults()
+
+        if err := viper.ReadInConfig(); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to read config: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">var cfg Config
+        if err := viper.Unmarshal(&amp;cfg); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">if err := cfg.Validate(); err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("invalid config: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return &amp;cfg, nil</span>
+}
+
+func setDefaults() <span class="cov8" title="1">{
+        // Server defaults
+        viper.SetDefault("server.http3_port", 443)
+        viper.SetDefault("server.read_timeout", "30s")
+        viper.SetDefault("server.write_timeout", "30s")
+        viper.SetDefault("server.shutdown_timeout", "10s")
+        viper.SetDefault("server.max_incoming_streams", 5000)
+        viper.SetDefault("server.max_incoming_uni_streams", 1000)
+        viper.SetDefault("server.max_idle_timeout", "30s")
+
+        // Redis defaults
+        viper.SetDefault("redis.addresses", []string{"localhost:6379"})
+        viper.SetDefault("redis.db", 0)
+        viper.SetDefault("redis.max_retries", 3)
+        viper.SetDefault("redis.dial_timeout", "5s")
+        viper.SetDefault("redis.read_timeout", "3s")
+        viper.SetDefault("redis.write_timeout", "3s")
+        viper.SetDefault("redis.pool_size", 100)
+        viper.SetDefault("redis.min_idle_conns", 10)
+
+        // Logging defaults
+        viper.SetDefault("logging.level", "info")
+        viper.SetDefault("logging.format", "json")
+        viper.SetDefault("logging.output", "stdout")
+        viper.SetDefault("logging.max_size", 100)
+        viper.SetDefault("logging.max_backups", 5)
+        viper.SetDefault("logging.max_age", 30)
+
+        // Metrics defaults
+        viper.SetDefault("metrics.enabled", true)
+        viper.SetDefault("metrics.path", "/metrics")
+        viper.SetDefault("metrics.port", 9090)
+}</pre>
+		
+		<pre class="file" id="file3" style="display: none">package config
+
+import (
+        "fmt"
+        "os"
+)
+
+func (c *Config) Validate() error <span class="cov8" title="1">{
+        if err := c.Server.Validate(); err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("server config: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">if err := c.Redis.Validate(); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("redis config: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">if err := c.Logging.Validate(); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("logging config: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">if err := c.Metrics.Validate(); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("metrics config: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return nil</span>
+}
+
+func (s *ServerConfig) Validate() error <span class="cov8" title="1">{
+        if s.HTTP3Port &lt; 1 || s.HTTP3Port &gt; 65535 </span><span class="cov8" title="1">{
+                return fmt.Errorf("invalid HTTP3 port: %d", s.HTTP3Port)
+        }</span>
+
+        <span class="cov8" title="1">if s.TLSCertFile == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("TLS certificate file is required")
+        }</span>
+
+        <span class="cov8" title="1">if s.TLSKeyFile == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("TLS key file is required")
+        }</span>
+
+        // Check if certificate files exist
+        <span class="cov8" title="1">if _, err := os.Stat(s.TLSCertFile); os.IsNotExist(err) </span><span class="cov8" title="1">{
+                return fmt.Errorf("TLS certificate file not found: %s", s.TLSCertFile)
+        }</span>
+
+        <span class="cov0" title="0">if _, err := os.Stat(s.TLSKeyFile); os.IsNotExist(err) </span><span class="cov0" title="0">{
+                return fmt.Errorf("TLS key file not found: %s", s.TLSKeyFile)
+        }</span>
+
+        <span class="cov0" title="0">if s.MaxIncomingStreams &lt;= 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("max_incoming_streams must be positive")
+        }</span>
+
+        <span class="cov0" title="0">if s.MaxIncomingUniStreams &lt;= 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("max_incoming_uni_streams must be positive")
+        }</span>
+
+        <span class="cov0" title="0">return nil</span>
+}
+
+func (r *RedisConfig) Validate() error <span class="cov8" title="1">{
+        if len(r.Addresses) == 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("at least one Redis address is required")
+        }</span>
+
+        <span class="cov8" title="1">if r.DB &lt; 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("invalid Redis database number: %d", r.DB)
+        }</span>
+
+        <span class="cov8" title="1">if r.MaxRetries &lt; 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("max_retries cannot be negative")
+        }</span>
+
+        <span class="cov8" title="1">if r.PoolSize &lt;= 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("pool_size must be positive")
+        }</span>
+
+        <span class="cov8" title="1">if r.MinIdleConns &lt; 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("min_idle_conns cannot be negative")
+        }</span>
+
+        <span class="cov8" title="1">if r.MinIdleConns &gt; r.PoolSize </span><span class="cov8" title="1">{
+                return fmt.Errorf("min_idle_conns cannot be greater than pool_size")
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+func (l *LoggingConfig) Validate() error <span class="cov8" title="1">{
+        validLevels := map[string]bool{
+                "panic": true,
+                "fatal": true,
+                "error": true,
+                "warn":  true,
+                "info":  true,
+                "debug": true,
+                "trace": true,
+        }
+
+        if !validLevels[l.Level] </span><span class="cov8" title="1">{
+                return fmt.Errorf("invalid log level: %s", l.Level)
+        }</span>
+
+        <span class="cov8" title="1">if l.Format != "json" &amp;&amp; l.Format != "text" </span><span class="cov8" title="1">{
+                return fmt.Errorf("log format must be 'json' or 'text'")
+        }</span>
+
+        <span class="cov8" title="1">if l.Output != "stdout" &amp;&amp; l.Output != "stderr" </span><span class="cov8" title="1">{
+                // If it's a file path, check if the directory exists
+                if l.MaxSize &lt;= 0 </span><span class="cov8" title="1">{
+                        return fmt.Errorf("max_size must be positive for file output")
+                }</span>
+                <span class="cov0" title="0">if l.MaxBackups &lt; 0 </span><span class="cov0" title="0">{
+                        return fmt.Errorf("max_backups cannot be negative")
+                }</span>
+                <span class="cov0" title="0">if l.MaxAge &lt; 0 </span><span class="cov0" title="0">{
+                        return fmt.Errorf("max_age cannot be negative")
+                }</span>
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+func (m *MetricsConfig) Validate() error <span class="cov8" title="1">{
+        if m.Enabled </span><span class="cov8" title="1">{
+                if m.Port &lt; 1 || m.Port &gt; 65535 </span><span class="cov8" title="1">{
+                        return fmt.Errorf("invalid metrics port: %d", m.Port)
+                }</span>
+
+                <span class="cov8" title="1">if m.Path == "" </span><span class="cov8" title="1">{
+                        return fmt.Errorf("metrics path cannot be empty")
+                }</span>
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}</pre>
+		
+		<pre class="file" id="file4" style="display: none">package errors
+
+import (
+        "fmt"
+        "net/http"
+)
+
+// ErrorType represents the type of error
+type ErrorType string
+
+const (
+        ErrorTypeValidation   ErrorType = "VALIDATION_ERROR"
+        ErrorTypeNotFound     ErrorType = "NOT_FOUND"
+        ErrorTypeUnauthorized ErrorType = "UNAUTHORIZED"
+        ErrorTypeForbidden    ErrorType = "FORBIDDEN"
+        ErrorTypeInternal     ErrorType = "INTERNAL_ERROR"
+        ErrorTypeTimeout      ErrorType = "TIMEOUT"
+        ErrorTypeConflict     ErrorType = "CONFLICT"
+        ErrorTypeRateLimit    ErrorType = "RATE_LIMIT"
+        ErrorTypeServiceDown  ErrorType = "SERVICE_DOWN"
+)
+
+// AppError represents an application error with additional context
+type AppError struct {
+        Type       ErrorType              `json:"type"`
+        Message    string                 `json:"message"`
+        Code       string                 `json:"code,omitempty"`
+        Details    map[string]interface{} `json:"details,omitempty"`
+        HTTPStatus int                    `json:"-"`
+        Err        error                  `json:"-"`
+}
+
+// Error implements the error interface
+func (e *AppError) Error() string <span class="cov8" title="1">{
+        if e.Err != nil </span><span class="cov8" title="1">{
+                return fmt.Sprintf("%s: %s (caused by: %v)", e.Type, e.Message, e.Err)
+        }</span>
+        <span class="cov8" title="1">return fmt.Sprintf("%s: %s", e.Type, e.Message)</span>
+}
+
+// Unwrap returns the wrapped error
+func (e *AppError) Unwrap() error <span class="cov8" title="1">{
+        return e.Err
+}</span>
+
+// WithDetails adds details to the error
+func (e *AppError) WithDetails(details map[string]interface{}) *AppError <span class="cov8" title="1">{
+        e.Details = details
+        return e
+}</span>
+
+// WithCode adds an error code
+func (e *AppError) WithCode(code string) *AppError <span class="cov8" title="1">{
+        e.Code = code
+        return e
+}</span>
+
+// New creates a new AppError
+func New(errType ErrorType, message string, httpStatus int) *AppError <span class="cov8" title="1">{
+        return &amp;AppError{
+                Type:       errType,
+                Message:    message,
+                HTTPStatus: httpStatus,
+        }
+}</span>
+
+// Wrap wraps an existing error
+func Wrap(err error, errType ErrorType, message string, httpStatus int) *AppError <span class="cov8" title="1">{
+        return &amp;AppError{
+                Type:       errType,
+                Message:    message,
+                HTTPStatus: httpStatus,
+                Err:        err,
+        }
+}</span>
+
+// Common error constructors
+
+// NewValidationError creates a validation error
+func NewValidationError(message string) *AppError <span class="cov8" title="1">{
+        return New(ErrorTypeValidation, message, http.StatusBadRequest)
+}</span>
+
+// NewNotFoundError creates a not found error
+func NewNotFoundError(resource string) *AppError <span class="cov8" title="1">{
+        return New(ErrorTypeNotFound, fmt.Sprintf("%s not found", resource), http.StatusNotFound)
+}</span>
+
+// NewUnauthorizedError creates an unauthorized error
+func NewUnauthorizedError(message string) *AppError <span class="cov8" title="1">{
+        return New(ErrorTypeUnauthorized, message, http.StatusUnauthorized)
+}</span>
+
+// NewForbiddenError creates a forbidden error
+func NewForbiddenError(message string) *AppError <span class="cov8" title="1">{
+        return New(ErrorTypeForbidden, message, http.StatusForbidden)
+}</span>
+
+// NewInternalError creates an internal server error
+func NewInternalError(message string) *AppError <span class="cov8" title="1">{
+        return New(ErrorTypeInternal, message, http.StatusInternalServerError)
+}</span>
+
+// WrapInternalError wraps an error as internal server error
+func WrapInternalError(err error, message string) *AppError <span class="cov8" title="1">{
+        return Wrap(err, ErrorTypeInternal, message, http.StatusInternalServerError)
+}</span>
+
+// NewTimeoutError creates a timeout error
+func NewTimeoutError(message string) *AppError <span class="cov8" title="1">{
+        return New(ErrorTypeTimeout, message, http.StatusRequestTimeout)
+}</span>
+
+// NewConflictError creates a conflict error
+func NewConflictError(message string) *AppError <span class="cov8" title="1">{
+        return New(ErrorTypeConflict, message, http.StatusConflict)
+}</span>
+
+// NewRateLimitError creates a rate limit error
+func NewRateLimitError(message string) *AppError <span class="cov8" title="1">{
+        return New(ErrorTypeRateLimit, message, http.StatusTooManyRequests)
+}</span>
+
+// NewServiceDownError creates a service down error
+func NewServiceDownError(service string) *AppError <span class="cov8" title="1">{
+        return New(ErrorTypeServiceDown, fmt.Sprintf("%s service is currently unavailable", service), http.StatusServiceUnavailable)
+}</span>
+
+// IsAppError checks if an error is an AppError
+func IsAppError(err error) bool <span class="cov8" title="1">{
+        _, ok := err.(*AppError)
+        return ok
+}</span>
+
+// GetAppError extracts AppError from an error
+func GetAppError(err error) (*AppError, bool) <span class="cov8" title="1">{
+        appErr, ok := err.(*AppError)
+        return appErr, ok
+}</pre>
+		
+		<pre class="file" id="file5" style="display: none">package errors
+
+import (
+        "encoding/json"
+        "net/http"
+
+        "github.com/sirupsen/logrus"
+)
+
+// ErrorResponse represents the error response structure
+type ErrorResponse struct {
+        Error    ErrorDetails `json:"error"`
+        TraceID  string       `json:"trace_id,omitempty"`
+        Metadata interface{}  `json:"metadata,omitempty"`
+}
+
+// ErrorDetails contains the error details
+type ErrorDetails struct {
+        Type    ErrorType              `json:"type"`
+        Message string                 `json:"message"`
+        Code    string                 `json:"code,omitempty"`
+        Details map[string]interface{} `json:"details,omitempty"`
+}
+
+// ErrorHandler handles error responses
+type ErrorHandler struct {
+        logger *logrus.Logger
+}
+
+// NewErrorHandler creates a new error handler
+func NewErrorHandler(logger *logrus.Logger) *ErrorHandler <span class="cov0" title="0">{
+        return &amp;ErrorHandler{
+                logger: logger,
+        }
+}</span>
+
+// HandleError handles an error and writes the appropriate response
+func (h *ErrorHandler) HandleError(w http.ResponseWriter, r *http.Request, err error) <span class="cov0" title="0">{
+        // Extract trace ID from request context if available
+        traceID := r.Header.Get("X-Request-ID")
+
+        // Convert to AppError if it's not already
+        var appErr *AppError
+        var ok bool
+
+        if appErr, ok = GetAppError(err); !ok </span><span class="cov0" title="0">{
+                // Convert standard errors to AppError
+                appErr = WrapInternalError(err, "An unexpected error occurred")
+        }</span>
+
+        // Log the error
+        <span class="cov0" title="0">logEntry := h.logger.WithFields(logrus.Fields{
+                "error_type": appErr.Type,
+                "error_code": appErr.Code,
+                "trace_id":   traceID,
+                "method":     r.Method,
+                "path":       r.URL.Path,
+                "remote_ip":  r.RemoteAddr,
+        })
+
+        // Log at appropriate level
+        switch appErr.HTTPStatus </span>{
+        case http.StatusInternalServerError, http.StatusServiceUnavailable:<span class="cov0" title="0">
+                logEntry.Error(appErr.Error())</span>
+        case http.StatusBadRequest, http.StatusNotFound, http.StatusConflict:<span class="cov0" title="0">
+                logEntry.Warn(appErr.Error())</span>
+        default:<span class="cov0" title="0">
+                logEntry.Info(appErr.Error())</span>
+        }
+
+        // Create error response
+        <span class="cov0" title="0">response := ErrorResponse{
+                Error: ErrorDetails{
+                        Type:    appErr.Type,
+                        Message: appErr.Message,
+                        Code:    appErr.Code,
+                        Details: appErr.Details,
+                },
+                TraceID: traceID,
+        }
+
+        // Write response
+        h.writeJSON(w, appErr.HTTPStatus, response)</span>
+}
+
+// HandleNotFound handles 404 errors
+func (h *ErrorHandler) HandleNotFound(w http.ResponseWriter, r *http.Request) <span class="cov0" title="0">{
+        err := NewNotFoundError("endpoint")
+        h.HandleError(w, r, err)
+}</span>
+
+// HandleMethodNotAllowed handles 405 errors
+func (h *ErrorHandler) HandleMethodNotAllowed(w http.ResponseWriter, r *http.Request) <span class="cov0" title="0">{
+        err := New(ErrorTypeValidation, "Method not allowed", http.StatusMethodNotAllowed)
+        h.HandleError(w, r, err)
+}</span>
+
+// HandlePanic handles panics in HTTP handlers
+func (h *ErrorHandler) HandlePanic(w http.ResponseWriter, r *http.Request, recovered interface{}) <span class="cov0" title="0">{
+        h.logger.WithFields(logrus.Fields{
+                "panic":      recovered,
+                "method":     r.Method,
+                "path":       r.URL.Path,
+                "remote_ip":  r.RemoteAddr,
+                "trace_id":   r.Header.Get("X-Request-ID"),
+        }).Error("Panic recovered in HTTP handler")
+
+        err := NewInternalError("An unexpected error occurred")
+        h.HandleError(w, r, err)
+}</span>
+
+// writeJSON writes a JSON response
+func (h *ErrorHandler) writeJSON(w http.ResponseWriter, status int, data interface{}) <span class="cov0" title="0">{
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(status)
+
+        if err := json.NewEncoder(w).Encode(data); err != nil </span><span class="cov0" title="0">{
+                h.logger.WithError(err).Error("Failed to encode error response")
+        }</span>
+}
+
+// Middleware returns an error handling middleware
+func (h *ErrorHandler) Middleware(next http.Handler) http.Handler <span class="cov0" title="0">{
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+                defer func() </span><span class="cov0" title="0">{
+                        if recovered := recover(); recovered != nil </span><span class="cov0" title="0">{
+                                h.HandlePanic(w, r, recovered)
+                        }</span>
+                }()
+
+                <span class="cov0" title="0">next.ServeHTTP(w, r)</span>
+        })
+}</pre>
+		
+		<pre class="file" id="file6" style="display: none">package health
+
+import (
+        "context"
+        "sync"
+        "time"
+
+        "github.com/sirupsen/logrus"
+)
+
+// Status represents the health status of a component
+type Status string
+
+const (
+        StatusOK       Status = "ok"
+        StatusDegraded Status = "degraded"
+        StatusDown     Status = "down"
+)
+
+// Check represents a health check result
+type Check struct {
+        Name        string                 `json:"name"`
+        Status      Status                 `json:"status"`
+        Message     string                 `json:"message,omitempty"`
+        LastChecked time.Time              `json:"last_checked"`
+        Duration    time.Duration          `json:"-"`
+        DurationMS  float64                `json:"duration_ms"`
+        Details     map[string]interface{} `json:"details,omitempty"`
+}
+
+// Checker is the interface that health checkers must implement
+type Checker interface {
+        Name() string
+        Check(ctx context.Context) error
+}
+
+// Manager manages health checks
+type Manager struct {
+        checkers []Checker
+        results  map[string]*Check
+        mu       sync.RWMutex
+        logger   *logrus.Logger
+}
+
+// NewManager creates a new health check manager
+func NewManager(logger *logrus.Logger) *Manager <span class="cov8" title="1">{
+        return &amp;Manager{
+                checkers: make([]Checker, 0),
+                results:  make(map[string]*Check),
+                logger:   logger,
+        }
+}</span>
+
+// Register adds a new health checker
+func (m *Manager) Register(checker Checker) <span class="cov8" title="1">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.checkers = append(m.checkers, checker)
+        m.logger.WithField("checker", checker.Name()).Debug("Registered health checker")
+}</span>
+
+// RunChecks executes all registered health checks
+func (m *Manager) RunChecks(ctx context.Context) map[string]*Check <span class="cov8" title="1">{
+        var wg sync.WaitGroup
+        results := make(map[string]*Check, len(m.checkers))
+        resultsChan := make(chan *Check, len(m.checkers))
+
+        // Run all checks concurrently
+        for _, checker := range m.checkers </span><span class="cov8" title="1">{
+                wg.Add(1)
+                go func(c Checker) </span><span class="cov8" title="1">{
+                        defer wg.Done()
+
+                        // Create a timeout context for individual checks
+                        checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+                        defer cancel()
+
+                        start := time.Now()
+                        err := c.Check(checkCtx)
+                        duration := time.Since(start)
+
+                        check := &amp;Check{
+                                Name:        c.Name(),
+                                LastChecked: time.Now(),
+                                Duration:    duration,
+                                DurationMS:  float64(duration.Milliseconds()),
+                        }
+
+                        if err != nil </span><span class="cov8" title="1">{
+                                if err == context.DeadlineExceeded </span><span class="cov8" title="1">{
+                                        check.Status = StatusDown
+                                        check.Message = "Health check timed out"
+                                }</span> else<span class="cov8" title="1"> {
+                                        check.Status = StatusDown
+                                        check.Message = err.Error()
+                                }</span>
+                                <span class="cov8" title="1">m.logger.WithFields(logrus.Fields{
+                                        "checker":  c.Name(),
+                                        "duration": duration,
+                                        "error":    err,
+                                }).Error("Health check failed")</span>
+                        } else<span class="cov8" title="1"> {
+                                check.Status = StatusOK
+                                m.logger.WithFields(logrus.Fields{
+                                        "checker":  c.Name(),
+                                        "duration": duration,
+                                }).Debug("Health check passed")
+                        }</span>
+
+                        <span class="cov8" title="1">resultsChan &lt;- check</span>
+                }(checker)
+        }
+
+        // Wait for all checks to complete
+        <span class="cov8" title="1">go func() </span><span class="cov8" title="1">{
+                wg.Wait()
+                close(resultsChan)
+        }</span>()
+
+        // Collect results
+        <span class="cov8" title="1">for check := range resultsChan </span><span class="cov8" title="1">{
+                results[check.Name] = check
+                m.mu.Lock()
+                m.results[check.Name] = check
+                m.mu.Unlock()
+        }</span>
+
+        <span class="cov8" title="1">return results</span>
+}
+
+// GetResults returns the latest health check results
+func (m *Manager) GetResults() map[string]*Check <span class="cov8" title="1">{
+        m.mu.RLock()
+        defer m.mu.RUnlock()
+
+        results := make(map[string]*Check, len(m.results))
+        for k, v := range m.results </span><span class="cov8" title="1">{
+                // Create a copy to avoid race conditions
+                checkCopy := *v
+                results[k] = &amp;checkCopy
+        }</span>
+        <span class="cov8" title="1">return results</span>
+}
+
+// GetOverallStatus returns the overall system health status
+func (m *Manager) GetOverallStatus() Status <span class="cov8" title="1">{
+        m.mu.RLock()
+        defer m.mu.RUnlock()
+
+        if len(m.results) == 0 </span><span class="cov8" title="1">{
+                return StatusDown
+        }</span>
+
+        <span class="cov8" title="1">hasDown := false
+        hasDegraded := false
+
+        for _, check := range m.results </span><span class="cov8" title="1">{
+                switch check.Status </span>{
+                case StatusDown:<span class="cov8" title="1">
+                        hasDown = true</span>
+                case StatusDegraded:<span class="cov0" title="0">
+                        hasDegraded = true</span>
+                }
+        }
+
+        <span class="cov8" title="1">if hasDown </span><span class="cov8" title="1">{
+                return StatusDown
+        }</span>
+        <span class="cov8" title="1">if hasDegraded </span><span class="cov0" title="0">{
+                return StatusDegraded
+        }</span>
+        <span class="cov8" title="1">return StatusOK</span>
+}
+
+// StartPeriodicChecks starts running health checks periodically
+func (m *Manager) StartPeriodicChecks(ctx context.Context, interval time.Duration) <span class="cov8" title="1">{
+        ticker := time.NewTicker(interval)
+        defer ticker.Stop()
+
+        // Run initial check
+        m.RunChecks(ctx)
+
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ticker.C:<span class="cov8" title="1">
+                        m.RunChecks(ctx)</span>
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        m.logger.Info("Stopping periodic health checks")
+                        return</span>
+                }
+        }
+}</pre>
+		
+		<pre class="file" id="file7" style="display: none">package health
+
+import (
+        "context"
+        "encoding/json"
+        "net/http"
+        "strconv"
+        "time"
+
+        "github.com/zsiec/mirror/pkg/version"
+)
+
+// Response represents the health check response
+type Response struct {
+        Status    Status             `json:"status"`
+        Timestamp time.Time          `json:"timestamp"`
+        Version   string             `json:"version"`
+        Uptime    string             `json:"uptime"`
+        Checks    map[string]*Check  `json:"checks,omitempty"`
+}
+
+// Handler handles health check HTTP endpoints
+type Handler struct {
+        manager   *Manager
+        startTime time.Time
+}
+
+// NewHandler creates a new health check handler
+func NewHandler(manager *Manager) *Handler <span class="cov0" title="0">{
+        return &amp;Handler{
+                manager:   manager,
+                startTime: time.Now(),
+        }
+}</span>
+
+// HandleHealth handles the /health endpoint
+func (h *Handler) HandleHealth(w http.ResponseWriter, r *http.Request) <span class="cov0" title="0">{
+        // Run health checks with request context
+        ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+        defer cancel()
+
+        checks := h.manager.RunChecks(ctx)
+        overallStatus := h.manager.GetOverallStatus()
+
+        response := Response{
+                Status:    overallStatus,
+                Timestamp: time.Now(),
+                Version:   version.Version,
+                Uptime:    h.getUptime(),
+                Checks:    checks,
+        }
+
+        // Set appropriate status code
+        statusCode := http.StatusOK
+        if overallStatus == StatusDegraded </span><span class="cov0" title="0">{
+                statusCode = http.StatusOK // Still return 200 for degraded
+        }</span> else<span class="cov0" title="0"> if overallStatus == StatusDown </span><span class="cov0" title="0">{
+                statusCode = http.StatusServiceUnavailable
+        }</span>
+
+        <span class="cov0" title="0">h.writeJSON(w, statusCode, response)</span>
+}
+
+// HandleReady handles the /ready endpoint (simplified health check)
+func (h *Handler) HandleReady(w http.ResponseWriter, r *http.Request) <span class="cov0" title="0">{
+        overallStatus := h.manager.GetOverallStatus()
+
+        response := struct {
+                Status    Status    `json:"status"`
+                Timestamp time.Time `json:"timestamp"`
+        }{
+                Status:    overallStatus,
+                Timestamp: time.Now(),
+        }
+
+        statusCode := http.StatusOK
+        if overallStatus == StatusDown </span><span class="cov0" title="0">{
+                statusCode = http.StatusServiceUnavailable
+        }</span>
+
+        <span class="cov0" title="0">h.writeJSON(w, statusCode, response)</span>
+}
+
+// HandleLive handles the /live endpoint (basic liveness check)
+func (h *Handler) HandleLive(w http.ResponseWriter, r *http.Request) <span class="cov0" title="0">{
+        response := struct {
+                Status    string    `json:"status"`
+                Timestamp time.Time `json:"timestamp"`
+        }{
+                Status:    "alive",
+                Timestamp: time.Now(),
+        }
+
+        h.writeJSON(w, http.StatusOK, response)
+}</span>
+
+// getUptime calculates the service uptime
+func (h *Handler) getUptime() string <span class="cov0" title="0">{
+        uptime := time.Since(h.startTime)
+        days := int(uptime.Hours() / 24)
+        hours := int(uptime.Hours()) % 24
+        minutes := int(uptime.Minutes()) % 60
+        seconds := int(uptime.Seconds()) % 60
+
+        if days &gt; 0 </span><span class="cov0" title="0">{
+                return formatDuration(days, hours, minutes, seconds)
+        }</span> else<span class="cov0" title="0"> if hours &gt; 0 </span><span class="cov0" title="0">{
+                return formatDuration(0, hours, minutes, seconds)
+        }</span> else<span class="cov0" title="0"> if minutes &gt; 0 </span><span class="cov0" title="0">{
+                return formatDuration(0, 0, minutes, seconds)
+        }</span>
+        <span class="cov0" title="0">return formatDuration(0, 0, 0, seconds)</span>
+}
+
+// formatDuration formats duration in a human-readable way
+func formatDuration(days, hours, minutes, seconds int) string <span class="cov0" title="0">{
+        result := ""
+        if days &gt; 0 </span><span class="cov0" title="0">{
+                result += formatUnit(days, "day")
+        }</span>
+        <span class="cov0" title="0">if hours &gt; 0 </span><span class="cov0" title="0">{
+                if result != "" </span><span class="cov0" title="0">{
+                        result += " "
+                }</span>
+                <span class="cov0" title="0">result += formatUnit(hours, "hour")</span>
+        }
+        <span class="cov0" title="0">if minutes &gt; 0 </span><span class="cov0" title="0">{
+                if result != "" </span><span class="cov0" title="0">{
+                        result += " "
+                }</span>
+                <span class="cov0" title="0">result += formatUnit(minutes, "minute")</span>
+        }
+        <span class="cov0" title="0">if seconds &gt; 0 || result == "" </span><span class="cov0" title="0">{
+                if result != "" </span><span class="cov0" title="0">{
+                        result += " "
+                }</span>
+                <span class="cov0" title="0">result += formatUnit(seconds, "second")</span>
+        }
+        <span class="cov0" title="0">return result</span>
+}
+
+// formatUnit formats a unit with proper pluralization
+func formatUnit(value int, unit string) string <span class="cov0" title="0">{
+        if value == 1 </span><span class="cov0" title="0">{
+                return "1 " + unit
+        }</span>
+        <span class="cov0" title="0">return formatInt(value) + " " + unit + "s"</span>
+}
+
+// formatInt formats an integer
+func formatInt(n int) string <span class="cov0" title="0">{
+        return strconv.Itoa(n)
+}</span>
+
+// writeJSON writes a JSON response
+func (h *Handler) writeJSON(w http.ResponseWriter, statusCode int, data interface{}) <span class="cov0" title="0">{
+        w.Header().Set("Content-Type", "application/json")
+        w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+        w.WriteHeader(statusCode)
+
+        if err := json.NewEncoder(w).Encode(data); err != nil </span><span class="cov0" title="0">{
+                h.manager.logger.WithError(err).Error("Failed to encode health response")
+        }</span>
+}</pre>
+		
+		<pre class="file" id="file8" style="display: none">package health
+
+import (
+        "context"
+        "fmt"
+
+        "github.com/redis/go-redis/v9"
+)
+
+// RedisChecker checks Redis connectivity
+type RedisChecker struct {
+        client *redis.Client
+        name   string
+}
+
+// NewRedisChecker creates a new Redis health checker
+func NewRedisChecker(client *redis.Client) *RedisChecker <span class="cov0" title="0">{
+        return &amp;RedisChecker{
+                client: client,
+                name:   "redis",
+        }
+}</span>
+
+// Name returns the name of the checker
+func (r *RedisChecker) Name() string <span class="cov0" title="0">{
+        return r.name
+}</span>
+
+// Check performs the Redis health check
+func (r *RedisChecker) Check(ctx context.Context) error <span class="cov0" title="0">{
+        // Ping Redis
+        if err := r.client.Ping(ctx).Err(); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("redis ping failed: %w", err)
+        }</span>
+
+        // Optionally check Redis info for additional validation
+        <span class="cov0" title="0">info, err := r.client.Info(ctx, "server").Result()
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to get redis info: %w", err)
+        }</span>
+
+        // Simple validation that we got a response
+        <span class="cov0" title="0">if len(info) == 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("empty redis info response")
+        }</span>
+
+        <span class="cov0" title="0">return nil</span>
+}
+
+// DiskChecker checks available disk space
+type DiskChecker struct {
+        path      string
+        threshold float64 // percentage threshold (e.g., 0.9 for 90%)
+}
+
+// NewDiskChecker creates a new disk space checker
+func NewDiskChecker(path string, threshold float64) *DiskChecker <span class="cov0" title="0">{
+        return &amp;DiskChecker{
+                path:      path,
+                threshold: threshold,
+        }
+}</span>
+
+// Name returns the name of the checker
+func (d *DiskChecker) Name() string <span class="cov0" title="0">{
+        return "disk"
+}</span>
+
+// Check performs the disk space check
+func (d *DiskChecker) Check(ctx context.Context) error <span class="cov0" title="0">{
+        // Note: In a real implementation, you would use syscall to get disk stats
+        // For now, we'll just return nil (healthy)
+        // This would be implemented with platform-specific code
+        return nil
+}</span>
+
+// MemoryChecker checks available memory
+type MemoryChecker struct {
+        threshold float64 // percentage threshold
+}
+
+// NewMemoryChecker creates a new memory checker
+func NewMemoryChecker(threshold float64) *MemoryChecker <span class="cov0" title="0">{
+        return &amp;MemoryChecker{
+                threshold: threshold,
+        }
+}</span>
+
+// Name returns the name of the checker
+func (m *MemoryChecker) Name() string <span class="cov0" title="0">{
+        return "memory"
+}</span>
+
+// Check performs the memory check
+func (m *MemoryChecker) Check(ctx context.Context) error <span class="cov0" title="0">{
+        // Note: In a real implementation, you would use runtime.MemStats
+        // For now, we'll just return nil (healthy)
+        return nil
+}</pre>
+		
+		<pre class="file" id="file9" style="display: none">package logger
+
+import (
+        "context"
+        "net/http"
+
+        "github.com/google/uuid"
+        "github.com/sirupsen/logrus"
+)
+
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+const (
+        // LoggerKey is the context key for the logger
+        LoggerKey contextKey = "logger"
+        // RequestIDKey is the context key for request ID
+        RequestIDKey contextKey = "request_id"
+)
+
+// WithLogger adds a logger to the context
+func WithLogger(ctx context.Context, logger *logrus.Entry) context.Context <span class="cov0" title="0">{
+        return context.WithValue(ctx, LoggerKey, logger)
+}</span>
+
+// FromContext retrieves the logger from context
+func FromContext(ctx context.Context) *logrus.Entry <span class="cov0" title="0">{
+        if logger, ok := ctx.Value(LoggerKey).(*logrus.Entry); ok </span><span class="cov0" title="0">{
+                return logger
+        }</span>
+        // Return a default logger if none found
+        <span class="cov0" title="0">return logrus.NewEntry(logrus.StandardLogger())</span>
+}
+
+// WithRequestID adds a request ID to the context
+func WithRequestID(ctx context.Context, requestID string) context.Context <span class="cov8" title="1">{
+        return context.WithValue(ctx, RequestIDKey, requestID)
+}</span>
+
+// GetRequestID retrieves the request ID from context
+func GetRequestID(ctx context.Context) string <span class="cov8" title="1">{
+        if requestID, ok := ctx.Value(RequestIDKey).(string); ok </span><span class="cov8" title="1">{
+                return requestID
+        }</span>
+        <span class="cov0" title="0">return ""</span>
+}
+
+// WithRequest creates a logger entry with request information
+func WithRequest(logger *logrus.Logger, r *http.Request) *logrus.Entry <span class="cov0" title="0">{
+        requestID := r.Header.Get("X-Request-ID")
+        if requestID == "" </span><span class="cov0" title="0">{
+                requestID = uuid.New().String()
+        }</span>
+
+        <span class="cov0" title="0">return logger.WithFields(logrus.Fields{
+                "request_id": requestID,
+                "method":     r.Method,
+                "path":       r.URL.Path,
+                "remote_ip":  getRemoteIP(r),
+                "user_agent": r.UserAgent(),
+                "host":       r.Host,
+        })</span>
+}
+
+// RequestLoggerMiddleware creates a middleware that adds a logger to the request context
+func RequestLoggerMiddleware(logger *logrus.Logger) func(http.Handler) http.Handler <span class="cov0" title="0">{
+        return func(next http.Handler) http.Handler </span><span class="cov0" title="0">{
+                return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+                        // Get or create request ID
+                        requestID := r.Header.Get("X-Request-ID")
+                        if requestID == "" </span><span class="cov0" title="0">{
+                                requestID = uuid.New().String()
+                                r.Header.Set("X-Request-ID", requestID)
+                        }</span>
+
+                        // Create logger entry with request information
+                        <span class="cov0" title="0">entry := WithRequest(logger, r)
+
+                        // Add logger to context
+                        ctx := WithLogger(r.Context(), entry)
+                        ctx = WithRequestID(ctx, requestID)
+
+                        // Log request start
+                        entry.Info("Request started")
+
+                        // Call next handler with updated context
+                        next.ServeHTTP(w, r.WithContext(ctx))</span>
+                })
+        }
+}
+
+// getRemoteIP extracts the real client IP considering proxies
+func getRemoteIP(r *http.Request) string <span class="cov0" title="0">{
+        // Check X-Forwarded-For header
+        forwarded := r.Header.Get("X-Forwarded-For")
+        if forwarded != "" </span><span class="cov0" title="0">{
+                return forwarded
+        }</span>
+
+        // Check X-Real-IP header
+        <span class="cov0" title="0">realIP := r.Header.Get("X-Real-IP")
+        if realIP != "" </span><span class="cov0" title="0">{
+                return realIP
+        }</span>
+
+        // Fall back to RemoteAddr
+        <span class="cov0" title="0">return r.RemoteAddr</span>
+}
+
+// ResponseWriter wraps http.ResponseWriter to capture status code
+type ResponseWriter struct {
+        http.ResponseWriter
+        statusCode int
+        written    bool
+}
+
+// NewResponseWriter creates a new ResponseWriter
+func NewResponseWriter(w http.ResponseWriter) *ResponseWriter <span class="cov0" title="0">{
+        return &amp;ResponseWriter{
+                ResponseWriter: w,
+                statusCode:     http.StatusOK,
+        }
+}</span>
+
+// WriteHeader captures the status code
+func (rw *ResponseWriter) WriteHeader(code int) <span class="cov0" title="0">{
+        if !rw.written </span><span class="cov0" title="0">{
+                rw.statusCode = code
+                rw.ResponseWriter.WriteHeader(code)
+                rw.written = true
+        }</span>
+}
+
+// Write captures that a write has occurred
+func (rw *ResponseWriter) Write(b []byte) (int, error) <span class="cov0" title="0">{
+        if !rw.written </span><span class="cov0" title="0">{
+                rw.WriteHeader(http.StatusOK)
+        }</span>
+        <span class="cov0" title="0">return rw.ResponseWriter.Write(b)</span>
+}
+
+// StatusCode returns the captured status code
+func (rw *ResponseWriter) StatusCode() int <span class="cov0" title="0">{
+        return rw.statusCode
+}</pre>
+		
+		<pre class="file" id="file10" style="display: none">package logger
+
+import (
+        "fmt"
+        "os"
+        "path/filepath"
+
+        "github.com/natefinch/lumberjack"
+        "github.com/sirupsen/logrus"
+        "github.com/zsiec/mirror/internal/config"
+)
+
+// New creates a new configured logger instance
+func New(cfg *config.LoggingConfig) (*logrus.Logger, error) <span class="cov8" title="1">{
+        logger := logrus.New()
+
+        // Set log level
+        level, err := logrus.ParseLevel(cfg.Level)
+        if err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("invalid log level: %w", err)
+        }</span>
+        <span class="cov8" title="1">logger.SetLevel(level)
+
+        // Set formatter
+        if cfg.Format == "json" </span><span class="cov8" title="1">{
+                logger.SetFormatter(&amp;logrus.JSONFormatter{
+                        TimestampFormat: "2006-01-02T15:04:05.000Z07:00",
+                        FieldMap: logrus.FieldMap{
+                                logrus.FieldKeyTime:  "timestamp",
+                                logrus.FieldKeyLevel: "level",
+                                logrus.FieldKeyMsg:   "message",
+                        },
+                })
+        }</span> else<span class="cov8" title="1"> {
+                logger.SetFormatter(&amp;logrus.TextFormatter{
+                        FullTimestamp:   true,
+                        TimestampFormat: "2006-01-02 15:04:05.000",
+                        DisableColors:   false,
+                })
+        }</span>
+
+        // Set output
+        <span class="cov8" title="1">switch cfg.Output </span>{
+        case "stdout":<span class="cov8" title="1">
+                logger.SetOutput(os.Stdout)</span>
+        case "stderr":<span class="cov8" title="1">
+                logger.SetOutput(os.Stderr)</span>
+        default:<span class="cov8" title="1">
+                // File output with rotation
+                // Ensure directory exists
+                dir := filepath.Dir(cfg.Output)
+                if err := os.MkdirAll(dir, 0755); err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("failed to create log directory: %w", err)
+                }</span>
+
+                <span class="cov8" title="1">logger.SetOutput(&amp;lumberjack.Logger{
+                        Filename:   cfg.Output,
+                        MaxSize:    cfg.MaxSize,    // megabytes
+                        MaxBackups: cfg.MaxBackups,
+                        MaxAge:     cfg.MaxAge, // days
+                        Compress:   true,
+                })</span>
+        }
+
+        // Add default fields
+        <span class="cov8" title="1">logger = logger.WithFields(logrus.Fields{
+                "service": "mirror",
+                "version": "1.0.0", // This will be replaced with actual version
+        }).Logger
+
+        return logger, nil</span>
+}
+
+// WithComponent creates a logger entry with component field
+func WithComponent(logger *logrus.Logger, component string) *logrus.Entry <span class="cov8" title="1">{
+        return logger.WithField("component", component)
+}</span>
+
+
+// WithStream creates a logger entry with stream information
+func WithStream(logger *logrus.Logger, streamID string) *logrus.Entry <span class="cov8" title="1">{
+        return logger.WithFields(logrus.Fields{
+                "stream_id": streamID,
+        })
+}</span>
+
+// WithError creates a logger entry with error details
+func WithError(logger *logrus.Logger, err error) *logrus.Entry <span class="cov8" title="1">{
+        return logger.WithError(err)
+}</span>
+
+// Fields is a type alias for logrus.Fields for convenience
+type Fields = logrus.Fields
+
+// Entry is a type alias for logrus.Entry
+type Entry = logrus.Entry
+
+// Logger interface that both logrus.Logger and logrus.Entry implement
+type Logger interface {
+        WithField(key string, value interface{}) *logrus.Entry
+        WithFields(fields logrus.Fields) *logrus.Entry
+        WithError(err error) *logrus.Entry
+
+        Debugf(format string, args ...interface{})
+        Infof(format string, args ...interface{})
+        Printf(format string, args ...interface{})
+        Warnf(format string, args ...interface{})
+        Errorf(format string, args ...interface{})
+        Fatalf(format string, args ...interface{})
+        Panicf(format string, args ...interface{})
+
+        Debug(args ...interface{})
+        Info(args ...interface{})
+        Print(args ...interface{})
+        Warn(args ...interface{})
+        Error(args ...interface{})
+        Fatal(args ...interface{})
+        Panic(args ...interface{})
+}</pre>
+		
+		<pre class="file" id="file11" style="display: none">package server
+
+import (
+        "fmt"
+        "net/http"
+        "strings"
+        "time"
+
+        "github.com/google/uuid"
+        "github.com/prometheus/client_golang/prometheus"
+        "github.com/prometheus/client_golang/prometheus/promauto"
+        
+        "github.com/zsiec/mirror/internal/logger"
+)
+
+var (
+        // Prometheus metrics
+        httpRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+                Name: "http_request_duration_seconds",
+                Help: "Duration of HTTP requests in seconds",
+                Buckets: prometheus.DefBuckets,
+        }, []string{"method", "path", "status"})
+
+        httpRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+                Name: "http_requests_total",
+                Help: "Total number of HTTP requests",
+        }, []string{"method", "path", "status"})
+
+        httpRequestsInFlight = promauto.NewGauge(prometheus.GaugeOpts{
+                Name: "http_requests_in_flight",
+                Help: "Number of HTTP requests currently being processed",
+        })
+)
+
+// requestIDMiddleware adds a unique request ID to each request
+func (s *Server) requestIDMiddleware(next http.Handler) http.Handler <span class="cov0" title="0">{
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+                requestID := r.Header.Get("X-Request-ID")
+                if requestID == "" </span><span class="cov0" title="0">{
+                        requestID = uuid.New().String()
+                }</span>
+                
+                // Set request ID in response header
+                <span class="cov0" title="0">w.Header().Set("X-Request-ID", requestID)
+                
+                // Add to request header for downstream use
+                r.Header.Set("X-Request-ID", requestID)
+                
+                next.ServeHTTP(w, r)</span>
+        })
+}
+
+// metricsMiddleware tracks request metrics
+func (s *Server) metricsMiddleware(next http.Handler) http.Handler <span class="cov0" title="0">{
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+                start := time.Now()
+                path := r.URL.Path
+                
+                // Don't track metrics for health endpoints
+                if strings.HasPrefix(path, "/health") || strings.HasPrefix(path, "/ready") || strings.HasPrefix(path, "/live") </span><span class="cov0" title="0">{
+                        next.ServeHTTP(w, r)
+                        return
+                }</span>
+                
+                // Track in-flight requests
+                <span class="cov0" title="0">httpRequestsInFlight.Inc()
+                defer httpRequestsInFlight.Dec()
+                
+                // Wrap response writer to capture status code
+                rw := logger.NewResponseWriter(w)
+                
+                // Process request
+                next.ServeHTTP(rw, r)
+                
+                // Record metrics
+                duration := time.Since(start).Seconds()
+                status := fmt.Sprintf("%d", rw.StatusCode())
+                
+                httpRequestDuration.WithLabelValues(r.Method, path, status).Observe(duration)
+                httpRequestsTotal.WithLabelValues(r.Method, path, status).Inc()
+                
+                // Log request completion
+                log := logger.FromContext(r.Context())
+                log.WithFields(logger.Fields{
+                        "status":      rw.StatusCode(),
+                        "duration_ms": duration * 1000,
+                        "bytes":       rw.Header().Get("Content-Length"),
+                }).Info("Request completed")</span>
+        })
+}
+
+// corsMiddleware handles CORS headers
+func (s *Server) corsMiddleware(next http.Handler) http.Handler <span class="cov0" title="0">{
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+                // Set CORS headers
+                w.Header().Set("Access-Control-Allow-Origin", "*")
+                w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+                w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+                w.Header().Set("Access-Control-Max-Age", "86400")
+                
+                // Handle preflight requests
+                if r.Method == "OPTIONS" </span><span class="cov0" title="0">{
+                        w.WriteHeader(http.StatusNoContent)
+                        return
+                }</span>
+                
+                <span class="cov0" title="0">next.ServeHTTP(w, r)</span>
+        })
+}
+
+// recoveryMiddleware recovers from panics
+func (s *Server) recoveryMiddleware(next http.Handler) http.Handler <span class="cov0" title="0">{
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+                defer func() </span><span class="cov0" title="0">{
+                        if err := recover(); err != nil </span><span class="cov0" title="0">{
+                                s.logger.WithFields(logger.Fields{
+                                        "error":      err,
+                                        "request_id": r.Header.Get("X-Request-ID"),
+                                        "method":     r.Method,
+                                        "path":       r.URL.Path,
+                                }).Error("Panic recovered")
+                                
+                                s.errorHandler.HandlePanic(w, r, err)
+                        }</span>
+                }()
+                
+                <span class="cov0" title="0">next.ServeHTTP(w, r)</span>
+        })
+}
+
+// timeoutMiddleware adds request timeout
+func (s *Server) timeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler <span class="cov0" title="0">{
+        return func(next http.Handler) http.Handler </span><span class="cov0" title="0">{
+                return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+                        // Skip timeout for streaming endpoints
+                        if strings.Contains(r.URL.Path, "/stream") </span><span class="cov0" title="0">{
+                                next.ServeHTTP(w, r)
+                                return
+                        }</span>
+                        
+                        <span class="cov0" title="0">http.TimeoutHandler(next, timeout, "Request timeout").ServeHTTP(w, r)</span>
+                })
+        }
+}
+
+// rateLimitMiddleware implements rate limiting (placeholder for now)
+func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler <span class="cov0" title="0">{
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+                // TODO: Implement rate limiting in a future phase
+                next.ServeHTTP(w, r)
+        }</span>)
+}</pre>
+		
+		<pre class="file" id="file12" style="display: none">package server
+
+import (
+        "encoding/json"
+        "net/http"
+
+        "github.com/zsiec/mirror/pkg/version"
+)
+
+// handleVersion handles the /version endpoint
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) <span class="cov0" title="0">{
+        versionInfo := version.GetInfo()
+        
+        w.Header().Set("Content-Type", "application/json")
+        w.Header().Set("Cache-Control", "public, max-age=3600")
+        
+        if err := json.NewEncoder(w).Encode(versionInfo); err != nil </span><span class="cov0" title="0">{
+                s.logger.WithError(err).Error("Failed to encode version response")
+                s.errorHandler.HandleError(w, r, err)
+        }</span>
+}
+
+// handleStreamsPlaceholder is a placeholder for the streams endpoint
+func (s *Server) handleStreamsPlaceholder(w http.ResponseWriter, r *http.Request) <span class="cov0" title="0">{
+        response := struct {
+                Message string `json:"message"`
+                Phase   string `json:"phase"`
+        }{
+                Message: "Streams endpoint will be implemented in Phase 2",
+                Phase:   "1",
+        }
+        
+        w.Header().Set("Content-Type", "application/json")
+        if err := json.NewEncoder(w).Encode(response); err != nil </span><span class="cov0" title="0">{
+                s.logger.WithError(err).Error("Failed to encode response")
+                s.errorHandler.HandleError(w, r, err)
+        }</span>
+}
+
+// writeJSON is a helper to write JSON responses
+func (s *Server) writeJSON(w http.ResponseWriter, status int, data interface{}) error <span class="cov0" title="0">{
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(status)
+        return json.NewEncoder(w).Encode(data)
+}</span>
+
+// writeError is a helper to write error responses
+func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) <span class="cov0" title="0">{
+        s.errorHandler.HandleError(w, r, err)
+}</pre>
+		
+		<pre class="file" id="file13" style="display: none">package server
+
+import (
+        "context"
+        "crypto/tls"
+        "fmt"
+        "net/http"
+        "time"
+
+        "github.com/gorilla/mux"
+        "github.com/quic-go/quic-go"
+        "github.com/quic-go/quic-go/http3"
+        "github.com/redis/go-redis/v9"
+        "github.com/sirupsen/logrus"
+        
+        "github.com/zsiec/mirror/internal/config"
+        "github.com/zsiec/mirror/internal/errors"
+        "github.com/zsiec/mirror/internal/health"
+        "github.com/zsiec/mirror/internal/logger"
+)
+
+// Server represents the HTTP/3 server
+type Server struct {
+        config       *config.ServerConfig
+        router       *mux.Router
+        http3Server  *http3.Server
+        logger       *logrus.Logger
+        redis        *redis.Client
+        healthMgr    *health.Manager
+        errorHandler *errors.ErrorHandler
+}
+
+// New creates a new server instance
+func New(cfg *config.ServerConfig, log *logrus.Logger, redisClient *redis.Client) *Server <span class="cov0" title="0">{
+        router := mux.NewRouter()
+        healthMgr := health.NewManager(log)
+        errorHandler := errors.NewErrorHandler(log)
+
+        s := &amp;Server{
+                config:       cfg,
+                router:       router,
+                logger:       log,
+                redis:        redisClient,
+                healthMgr:    healthMgr,
+                errorHandler: errorHandler,
+        }
+
+        // Register health checkers
+        s.registerHealthCheckers()
+
+        return s
+}</span>
+
+// Start starts the HTTP/3 server
+func (s *Server) Start(ctx context.Context) error <span class="cov0" title="0">{
+        // TLS configuration
+        tlsConfig := &amp;tls.Config{
+                MinVersion: tls.VersionTLS13,
+                NextProtos: []string{"h3"},
+        }
+
+        // Load certificates
+        cert, err := tls.LoadX509KeyPair(s.config.TLSCertFile, s.config.TLSKeyFile)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to load TLS certificates: %w", err)
+        }</span>
+        <span class="cov0" title="0">tlsConfig.Certificates = []tls.Certificate{cert}
+
+        // QUIC configuration
+        quicConfig := &amp;quic.Config{
+                MaxIncomingStreams:    s.config.MaxIncomingStreams,
+                MaxIncomingUniStreams: s.config.MaxIncomingUniStreams,
+                MaxIdleTimeout:        s.config.MaxIdleTimeout,
+                EnableDatagrams:       true,
+        }
+
+        // HTTP/3 server
+        s.http3Server = &amp;http3.Server{
+                Addr:       fmt.Sprintf(":%d", s.config.HTTP3Port),
+                Handler:    s.router,
+                QuicConfig: quicConfig,
+                TLSConfig:  tlsConfig,
+        }
+
+        // Setup routes
+        s.setupRoutes()
+
+        // Start periodic health checks
+        healthCtx := ctx
+        go s.healthMgr.StartPeriodicChecks(healthCtx, 30*time.Second)
+
+        // Start server
+        s.logger.WithField("port", s.config.HTTP3Port).Info("Starting HTTP/3 server")
+
+        errCh := make(chan error, 1)
+        go func() </span><span class="cov0" title="0">{
+                if err := s.http3Server.ListenAndServe(); err != nil &amp;&amp; err != http.ErrServerClosed </span><span class="cov0" title="0">{
+                        errCh &lt;- err
+                }</span>
+        }()
+
+        <span class="cov0" title="0">select </span>{
+        case err := &lt;-errCh:<span class="cov0" title="0">
+                return fmt.Errorf("server failed to start: %w", err)</span>
+        case &lt;-ctx.Done():<span class="cov0" title="0">
+                return s.Shutdown()</span>
+        }
+}
+
+// Shutdown gracefully shuts down the server
+func (s *Server) Shutdown() error <span class="cov0" title="0">{
+        s.logger.Info("Shutting down HTTP/3 server")
+
+        // Note: http3.Server.Close() doesn't support context-based shutdown
+        // The timeout is handled at the application level
+        if err := s.http3Server.Close(); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to shutdown server: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">s.logger.Info("HTTP/3 server shutdown complete")
+        return nil</span>
+}
+
+// setupRoutes configures all routes
+func (s *Server) setupRoutes() <span class="cov0" title="0">{
+        // Apply global middleware
+        s.router.Use(s.requestIDMiddleware)
+        s.router.Use(logger.RequestLoggerMiddleware(s.logger))
+        s.router.Use(s.recoveryMiddleware)
+        s.router.Use(s.errorHandler.Middleware)
+        s.router.Use(s.metricsMiddleware)
+        s.router.Use(s.corsMiddleware)
+
+        // Health endpoints
+        healthHandler := health.NewHandler(s.healthMgr)
+        s.router.HandleFunc("/health", healthHandler.HandleHealth).Methods("GET")
+        s.router.HandleFunc("/ready", healthHandler.HandleReady).Methods("GET")
+        s.router.HandleFunc("/live", healthHandler.HandleLive).Methods("GET")
+
+        // Version endpoint
+        s.router.HandleFunc("/version", s.handleVersion).Methods("GET")
+
+        // API routes will be added in future phases
+        api := s.router.PathPrefix("/api/v1").Subrouter()
+        api.HandleFunc("/streams", s.handleStreamsPlaceholder).Methods("GET")
+
+        // 404 handler
+        s.router.NotFoundHandler = http.HandlerFunc(s.errorHandler.HandleNotFound)
+        s.router.MethodNotAllowedHandler = http.HandlerFunc(s.errorHandler.HandleMethodNotAllowed)
+}</span>
+
+// registerHealthCheckers registers all health checkers
+func (s *Server) registerHealthCheckers() <span class="cov0" title="0">{
+        // Register Redis health checker
+        redisChecker := health.NewRedisChecker(s.redis)
+        s.healthMgr.Register(redisChecker)
+
+        // Register disk space checker
+        diskChecker := health.NewDiskChecker("/", 0.9)
+        s.healthMgr.Register(diskChecker)
+
+        // Register memory checker
+        memChecker := health.NewMemoryChecker(0.9)
+        s.healthMgr.Register(memChecker)
+}</span>
+
+// GetRouter returns the router for testing
+func (s *Server) GetRouter() *mux.Router <span class="cov0" title="0">{
+        return s.router
+}</pre>
+		
+		<pre class="file" id="file14" style="display: none">package version
+
+import (
+        "fmt"
+        "runtime"
+)
+
+// Build information. These variables are set at build time using ldflags.
+var (
+        Version   = "dev"
+        GitCommit = "unknown"
+        BuildTime = "unknown"
+        GoVersion = runtime.Version()
+        OS        = runtime.GOOS
+        Arch      = runtime.GOARCH
+)
+
+// Info contains version information
+type Info struct {
+        Version   string `json:"version"`
+        GitCommit string `json:"git_commit"`
+        BuildTime string `json:"build_time"`
+        GoVersion string `json:"go_version"`
+        OS        string `json:"os"`
+        Arch      string `json:"arch"`
+}
+
+// GetInfo returns the version information
+func GetInfo() Info <span class="cov0" title="0">{
+        return Info{
+                Version:   Version,
+                GitCommit: GitCommit,
+                BuildTime: BuildTime,
+                GoVersion: GoVersion,
+                OS:        OS,
+                Arch:      Arch,
+        }
+}</span>
+
+// String returns the version string
+func (i Info) String() string <span class="cov0" title="0">{
+        return fmt.Sprintf("Mirror %s (commit: %s, built: %s, go: %s, os/arch: %s/%s)",
+                i.Version, i.GitCommit, i.BuildTime, i.GoVersion, i.OS, i.Arch)
+}</span>
+
+// Short returns a short version string
+func (i Info) Short() string <span class="cov0" title="0">{
+        return fmt.Sprintf("Mirror %s", i.Version)
+}</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
