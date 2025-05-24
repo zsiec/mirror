@@ -4,97 +4,205 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Go-based backend project for high-performance video streaming, designed to handle:
+Mirror is a high-performance video streaming platform built in Go, designed to handle:
 - 25 concurrent SRT/RTP streams at 50mbps with HEVC input
 - Transcoding to HLS-compatible formats with hardware acceleration
 - Broadcasting to 5,000 concurrent viewers using Low-Latency HLS (LL-HLS)
 - Multi-stream viewing with up to 6 concurrent streams per viewer
 
+## Current Status
+
+### Phase 1 ✅ COMPLETED
+- Go project structure with modular architecture
+- Configuration management (Viper-based YAML + env)
+- Structured logging with rotation (logrus)
+- Custom error handling framework
+- Health check system (Redis, disk, memory)
+- HTTP/3 server with QUIC protocol
+- Docker environment with NVIDIA CUDA support
+- GitHub Actions CI/CD
+- 71% test coverage
+
+### Next Phases
+- Phase 2: Stream Ingestion (SRT/RTP)
+- Phase 3: Video Processing & Transcoding
+- Phase 4: HLS Packaging & Distribution
+- Phase 5: Multi-stream Management
+- Phase 6: CDN Integration
+- Phase 7: Monitoring & Observability
+
 ## Architecture
 
 ### Core Technology Stack
-- **Stream Ingestion**: `datarhei/gosrt` for SRT protocol, `pion/rtp` for RTP
-- **Video Processing**: `go-astiav` with FFmpeg bindings and NVIDIA NVENC hardware acceleration
-- **HLS Generation**: `Eyevinn/hls-m3u8` and `Eyevinn/mp4ff` for LL-HLS with CMAF chunks
+- **Language**: Go 1.23+
 - **HTTP/3 Server**: `quic-go/quic-go` for low-latency delivery
+- **Configuration**: Viper for YAML + environment variable support
+- **Logging**: Logrus with log rotation
 - **State Management**: Redis for session management
-- **CDN/Storage**: S3-compatible storage (MinIO) + CloudFront
+- **Metrics**: Prometheus for monitoring
+- **Container**: Docker with multi-stage builds
 
 ### Service Architecture
 ```
-Ingestion Service → Transcoding Service → HLS Packager → CDN Distribution
-       ↓                    ↓                   ↓              ↓
-    Redis (Session Management)                           5,000 Viewers
+HTTP/3 Server (QUIC)
+    ├── Health Checks (/health, /ready, /live)
+    ├── Version Info (/version)
+    └── Stream Endpoints (Phase 2+)
+        ├── Ingestion Service → 
+        ├── Transcoding Service → 
+        ├── HLS Packager → 
+        └── CDN Distribution
 ```
-
-## Key Implementation Details
-
-### Stream Ingestion
-- Optimized for 50mbps streams with proper flow control
-- SRT configuration: 120ms latency buffer, MTU-friendly payload size
-- Concurrent connection handling for 25 streams
-
-### Transcoding Strategy
-- Hardware-accelerated using NVIDIA NVENC (h264_nvenc)
-- Single bitrate output (640x360 @ 400kbps) for multi-view scenarios
-- Fixed 500ms HLS segments with 100ms CMAF chunks for ultra-low latency
-
-### LL-HLS Implementation
-- EXT-X-SERVER-CONTROL and EXT-X-PART-INF tags for low latency
-- HTTP/3 Push for predictive segment delivery
-- Blocking playlist reload support (_HLS_msn parameter)
-- 2-3 second glass-to-glass latency target
-
-## Infrastructure Requirements
-
-### Hardware
-- **GPU**: 2x NVIDIA RTX 4090 or A6000 for HEVC transcoding
-- **Memory**: 16-32GB RAM (200-500MB per stream + viewer overhead)
-- **Network**: 10Gbps connection recommended
-
-### AWS Deployment (from deploy.md)
-- **GPU Instances**: G5 instances with A10G GPUs (g5.2xlarge recommended)
-- **Storage**: S3 Express One Zone for live edge segments
-- **CDN**: CloudFront with HTTP/3 enabled
-- **Container Orchestration**: Amazon ECS with GPU-optimized AMIs
-
-## Development Notes
-
-### Performance Optimization
-- Memory-mapped files for zero-copy segment handling
-- Buffer pooling to reduce GC pressure
-- GOMEMLIMIT set to 30GiB for large-scale deployments
-- Connection pooling for all external services
-
-### Cost Optimization
-- Single low-bitrate stream per feed (400kbps) for multi-view
-- CDN caching reduces origin bandwidth by 80%+
-- Tiered storage: S3 Express One Zone for live edge, S3 Standard for recent content
-- Spot instances for batch transcoding workloads
-
-### Security Considerations
-- Never include sensitive information (API keys, tokens) in code
-- Use AWS Secrets Manager for credential storage
-- Implement CloudFront signed URLs for premium content
-- Deploy instances in private subnets with security groups
 
 ## Repository Structure
 
 ```
 mirror/
-├── docs/           # Architecture and planning documentation
-│   ├── plan-*.md   # Detailed implementation plans
-│   ├── deploy.md   # AWS deployment strategies
-│   └── libs.md     # Go library recommendations
-├── CLAUDE.md       # This file - Claude Code guidance
-└── README.md       # Project overview
+├── cmd/                    # Application entry points
+│   ├── mirror/            # Main server application
+│   └── test-client/       # HTTP/3 test client
+├── internal/              # Private application code
+│   ├── config/           # Configuration management
+│   ├── errors/           # Error handling framework
+│   ├── health/           # Health check system
+│   ├── logger/           # Logging utilities
+│   └── server/           # HTTP/3 server implementation
+├── pkg/                   # Public packages
+│   └── version/          # Version information
+├── configs/              # Configuration files
+├── docker/               # Docker-related files
+├── docs/                 # Documentation
+│   └── phase-*.md       # Implementation phase docs
+├── .github/              # GitHub Actions workflows
+└── tests/                # Integration tests (future)
 ```
 
-## Common Development Tasks
+## Development Guidelines
 
-Since this is a planning/documentation repository without actual Go code implementation yet, there are no specific build, test, or lint commands. When the implementation begins, this section should be updated with:
-- Go module initialization commands
-- Build commands for different services
-- Test execution commands
-- Docker build and deployment commands
-- Performance benchmarking scripts
+### Code Style
+- Follow standard Go conventions
+- Use structured logging with proper context
+- Handle all errors explicitly
+- Write tests for all new functionality
+- Keep functions focused and under 50 lines
+- Add godoc comments for all exported types/functions
+
+### Testing
+```bash
+# Run all tests
+make test
+
+# Run with coverage
+make test-coverage
+
+# Run specific package tests
+go test ./internal/health/...
+
+# Run with race detector
+go test -race ./...
+```
+
+### Building & Running
+```bash
+# Build the application
+make build
+
+# Run locally
+make run
+
+# Run with Docker
+make docker-run
+
+# Run with hot reload (development)
+make dev
+```
+
+### Linting
+```bash
+# Run linters
+make lint
+
+# Auto-fix some issues
+make fmt
+```
+
+### Common Commands
+```bash
+# Generate self-signed certificates
+make certs
+
+# Clean build artifacts
+make clean
+
+# View logs
+docker-compose logs -f mirror
+
+# Check HTTP/3 endpoints
+./bin/test-client -url https://localhost:8443/health
+```
+
+## Configuration
+
+The application uses a hierarchical configuration system:
+1. Default values (configs/default.yaml)
+2. Environment-specific (configs/development.yaml, configs/production.yaml)
+3. Environment variables (MIRROR_* prefix)
+4. Command-line flags
+
+Example environment variables:
+```bash
+MIRROR_SERVER_HTTP3_PORT=8443
+MIRROR_REDIS_ADDR=localhost:6379
+MIRROR_LOGGING_LEVEL=debug
+```
+
+## Error Handling
+
+The application uses a custom error framework with typed errors:
+- `AppError`: Base error type with HTTP status mapping
+- Error types: Validation, NotFound, Unauthorized, Internal, etc.
+- Consistent error responses with trace IDs
+- Panic recovery middleware
+
+## Health Checks
+
+Three health endpoints:
+- `/health`: Detailed health status with all checks
+- `/ready`: Simple readiness check
+- `/live`: Basic liveness check
+
+Health checks include:
+- Redis connectivity
+- Disk space availability
+- Memory usage
+- Custom service checks (future)
+
+## Security Considerations
+- TLS 1.3 minimum for all connections
+- Request ID tracking for audit trails
+- Rate limiting on all endpoints
+- CORS configuration for browser clients
+- No sensitive data in logs
+- Environment-based secrets management
+
+## Performance Optimization
+- HTTP/3 with 0-RTT support
+- Connection pooling for Redis
+- Structured logging with minimal allocation
+- Graceful shutdown with timeout
+- Memory-efficient error handling
+
+## Monitoring
+- Prometheus metrics endpoint (:9090/metrics)
+- Request duration histograms
+- Active connection gauges
+- Error rate counters
+- Custom business metrics (future)
+
+## Future Considerations
+When implementing video streaming phases:
+- Use buffer pools for video data
+- Implement backpressure for stream ingestion
+- Consider memory-mapped files for segments
+- Plan for horizontal scaling
+- Design for CDN integration from the start

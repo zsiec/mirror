@@ -1,3 +1,9 @@
+# golangci-lint configuration
+# https://golangci-lint.run/usage/configuration/
+
+# Required in golangci-lint v2+
+version: "2"
+
 run:
   timeout: 5m
   tests: true
@@ -18,7 +24,6 @@ linters:
     - gocritic
     - funlen
     - whitespace
-    - godot
 
   disable:
     - dupl
@@ -27,6 +32,7 @@ linters:
     - gocognit
     - goconst
     - depguard
+    - godot  # Too strict about comment formatting
 
 linters-settings:
   govet:
@@ -45,6 +51,8 @@ linters-settings:
   funlen:
     lines: 100
     statements: 50
+    # Ignore test functions
+    ignore-comments: true
 
 issues:
   exclude-rules:
@@ -63,10 +71,9 @@ issues:
         - gochecknoglobals
 
     - text: "do not define dynamic errors"
+      linters:
+        - goerr113
 
   max-issues-per-linter: 0
   max-same-issues: 0
   new: false
-
-service:
-  golangci-lint-version: 1.55.x
