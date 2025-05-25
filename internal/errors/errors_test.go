@@ -11,7 +11,7 @@ import (
 func TestAppError(t *testing.T) {
 	t.Run("New creates error correctly", func(t *testing.T) {
 		err := New(ErrorTypeValidation, "Invalid input", http.StatusBadRequest)
-		
+
 		assert.Equal(t, ErrorTypeValidation, err.Type)
 		assert.Equal(t, "Invalid input", err.Message)
 		assert.Equal(t, http.StatusBadRequest, err.HTTPStatus)
@@ -21,7 +21,7 @@ func TestAppError(t *testing.T) {
 	t.Run("Wrap wraps error correctly", func(t *testing.T) {
 		originalErr := errors.New("original error")
 		err := Wrap(originalErr, ErrorTypeInternal, "Something went wrong", http.StatusInternalServerError)
-		
+
 		assert.Equal(t, ErrorTypeInternal, err.Type)
 		assert.Equal(t, "Something went wrong", err.Message)
 		assert.Equal(t, http.StatusInternalServerError, err.HTTPStatus)
@@ -36,14 +36,14 @@ func TestAppError(t *testing.T) {
 			"value": "invalid-email",
 		}
 		_ = err.WithDetails(details)
-		
+
 		assert.Equal(t, details, err.Details)
 	})
 
 	t.Run("WithCode adds code", func(t *testing.T) {
 		err := New(ErrorTypeValidation, "Invalid input", http.StatusBadRequest)
 		_ = err.WithCode("ERR_001")
-		
+
 		assert.Equal(t, "ERR_001", err.Code)
 	})
 }
@@ -155,7 +155,7 @@ func TestGetAppError(t *testing.T) {
 	t.Run("extracts AppError successfully", func(t *testing.T) {
 		originalErr := NewValidationError("test")
 		appErr, ok := GetAppError(originalErr)
-		
+
 		assert.True(t, ok)
 		assert.Equal(t, originalErr, appErr)
 	})
@@ -163,7 +163,7 @@ func TestGetAppError(t *testing.T) {
 	t.Run("returns false for non-AppError", func(t *testing.T) {
 		err := errors.New("standard error")
 		appErr, ok := GetAppError(err)
-		
+
 		assert.False(t, ok)
 		assert.Nil(t, appErr)
 	})
@@ -172,7 +172,7 @@ func TestGetAppError(t *testing.T) {
 func TestWrapInternalError(t *testing.T) {
 	originalErr := errors.New("database connection failed")
 	wrappedErr := WrapInternalError(originalErr, "Failed to fetch data")
-	
+
 	assert.Equal(t, ErrorTypeInternal, wrappedErr.Type)
 	assert.Equal(t, "Failed to fetch data", wrappedErr.Message)
 	assert.Equal(t, http.StatusInternalServerError, wrappedErr.HTTPStatus)

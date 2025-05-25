@@ -14,7 +14,11 @@ Key features:
 - Minimal runtime image with NVIDIA GPU support
 - Non-root user execution
 - Health check configuration
-- Exposed ports: 8443 (HTTP/3), 9090 (metrics)
+- Exposed ports: 
+  - 8443 (HTTP/3 API server)
+  - 9090 (Prometheus metrics)
+  - 30000 (SRT ingestion)
+  - 5004 (RTP ingestion)
 
 ### docker-compose.yml
 Development environment orchestration including:
@@ -27,8 +31,15 @@ Development environment orchestration including:
 ### prometheus.yml
 Prometheus configuration for metrics collection:
 - Scrape interval: 15s
-- Target: mirror:9090
-- Job name: mirror
+- Targets: 
+  - mirror:9090 (application metrics)
+- Jobs:
+  - mirror: Main application metrics including:
+    - Stream ingestion metrics (packets, frames, GOPs)
+    - Buffer utilization and backpressure
+    - Codec detection statistics
+    - Memory usage per stream
+    - Connection counts and states
 
 ## Usage
 
@@ -56,8 +67,11 @@ docker build -f docker/Dockerfile -t mirror:latest .
 docker run -d \
   -p 8443:8443 \
   -p 9090:9090 \
+  -p 30000:30000/udp \
+  -p 5004:5004/udp \
   -v $(pwd)/configs:/app/configs:ro \
   -v $(pwd)/certs:/app/certs:ro \
+  -v /tmp/mirror:/tmp/mirror \
   --name mirror \
   mirror:latest
 ```
@@ -83,6 +97,10 @@ environment:
   - MIRROR_SERVER_HTTP3_PORT=8443
   - MIRROR_REDIS_ADDR=redis:6379
   - MIRROR_LOGGING_LEVEL=debug
+  - MIRROR_INGESTION_SRT_PORT=30000
+  - MIRROR_INGESTION_RTP_PORT=5004
+  - MIRROR_INGESTION_MAX_CONNECTIONS=25
+  - MIRROR_INGESTION_QUEUE_DISK_PATH=/tmp/mirror
 ```
 
 ## Volumes
@@ -91,6 +109,7 @@ Important volumes to mount:
 - `/app/configs`: Configuration files
 - `/app/certs`: TLS certificates
 - `/app/logs`: Application logs (if file logging enabled)
+- `/tmp/mirror`: Queue disk overflow storage (Phase 2)
 
 ## Networking
 

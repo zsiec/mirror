@@ -22,6 +22,10 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("metrics config: %w", err)
 	}
 
+	if err := c.Ingestion.Validate(); err != nil {
+		return fmt.Errorf("ingestion config: %w", err)
+	}
+
 	return nil
 }
 
@@ -130,6 +134,156 @@ func (m *MetricsConfig) Validate() error {
 		if m.Path == "" {
 			return fmt.Errorf("metrics path cannot be empty")
 		}
+	}
+
+	return nil
+}
+
+func (i *IngestionConfig) Validate() error {
+	if err := i.SRT.Validate(); err != nil {
+		return fmt.Errorf("srt config: %w", err)
+	}
+
+	if err := i.RTP.Validate(); err != nil {
+		return fmt.Errorf("rtp config: %w", err)
+	}
+
+	if err := i.Buffer.Validate(); err != nil {
+		return fmt.Errorf("buffer config: %w", err)
+	}
+
+	if err := i.Registry.Validate(); err != nil {
+		return fmt.Errorf("registry config: %w", err)
+	}
+
+	if err := i.Memory.Validate(); err != nil {
+		return fmt.Errorf("memory config: %w", err)
+	}
+
+	if i.QueueDir == "" {
+		return fmt.Errorf("queue_dir cannot be empty")
+	}
+
+	if !i.SRT.Enabled && !i.RTP.Enabled {
+		return fmt.Errorf("at least one ingestion protocol must be enabled")
+	}
+
+	// Validate buffer pool size against max connections
+	maxConnections := 0
+	if i.SRT.Enabled {
+		maxConnections += i.SRT.MaxConnections
+	}
+	if i.RTP.Enabled {
+		maxConnections += i.RTP.MaxSessions
+	}
+
+	if i.Buffer.PoolSize < maxConnections {
+		return fmt.Errorf("buffer pool size (%d) should be >= max total connections (%d) to avoid runtime allocations",
+			i.Buffer.PoolSize, maxConnections)
+	}
+
+	return nil
+}
+
+func (s *SRTConfig) Validate() error {
+	if !s.Enabled {
+		return nil
+	}
+
+	if s.Port < 1 || s.Port > 65535 {
+		return fmt.Errorf("invalid SRT port: %d", s.Port)
+	}
+
+	if s.ListenAddr == "" {
+		return fmt.Errorf("SRT listen address cannot be empty")
+	}
+
+	if s.MaxBandwidth <= 0 {
+		return fmt.Errorf("max_bandwidth must be positive")
+	}
+
+	if s.InputBandwidth <= 0 {
+		return fmt.Errorf("input_bandwidth must be positive")
+	}
+
+	if s.InputBandwidth > s.MaxBandwidth {
+		return fmt.Errorf("input_bandwidth cannot exceed max_bandwidth")
+	}
+
+	if s.PayloadSize <= 0 || s.PayloadSize > 1500 {
+		return fmt.Errorf("payload_size must be between 1 and 1500")
+	}
+
+	if s.MaxConnections <= 0 {
+		return fmt.Errorf("max_connections must be positive")
+	}
+
+	return nil
+}
+
+func (r *RTPConfig) Validate() error {
+	if !r.Enabled {
+		return nil
+	}
+
+	if r.Port < 1 || r.Port > 65535 {
+		return fmt.Errorf("invalid RTP port: %d", r.Port)
+	}
+
+	if r.RTCPPort < 1 || r.RTCPPort > 65535 {
+		return fmt.Errorf("invalid RTCP port: %d", r.RTCPPort)
+	}
+
+	if r.Port == r.RTCPPort {
+		return fmt.Errorf("RTP and RTCP ports must be different")
+	}
+
+	if r.ListenAddr == "" {
+		return fmt.Errorf("RTP listen address cannot be empty")
+	}
+
+	if r.BufferSize <= 0 {
+		return fmt.Errorf("buffer_size must be positive")
+	}
+
+	if r.MaxSessions <= 0 {
+		return fmt.Errorf("max_sessions must be positive")
+	}
+
+	return nil
+}
+
+func (b *BufferConfig) Validate() error {
+	if b.RingSize <= 0 {
+		return fmt.Errorf("ring_size must be positive")
+	}
+
+	if b.PoolSize <= 0 {
+		return fmt.Errorf("pool_size must be positive")
+	}
+
+	return nil
+}
+
+func (m *MemoryConfig) Validate() error {
+	if m.MaxTotal <= 0 {
+		return fmt.Errorf("max_total must be positive")
+	}
+
+	if m.MaxPerStream <= 0 {
+		return fmt.Errorf("max_per_stream must be positive")
+	}
+
+	if m.MaxPerStream > m.MaxTotal {
+		return fmt.Errorf("max_per_stream (%d) cannot exceed max_total (%d)", m.MaxPerStream, m.MaxTotal)
+	}
+
+	return nil
+}
+
+func (r *RegistryConfig) Validate() error {
+	if r.MaxStreamsPerSource <= 0 {
+		return fmt.Errorf("max_streams_per_source must be positive")
 	}
 
 	return nil

@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
-	
+
 	"github.com/zsiec/mirror/internal/config"
+	"github.com/zsiec/mirror/internal/ingestion"
 	"github.com/zsiec/mirror/internal/logger"
 	"github.com/zsiec/mirror/internal/server"
 	"github.com/zsiec/mirror/pkg/version"
@@ -20,18 +22,25 @@ import (
 
 func main() {
 	var (
-		configPath  string
-		showVersion bool
+		configPath     string
+		showVersion    bool
+		mutexProfiling bool
 	)
-	
+
 	flag.StringVar(&configPath, "config", "configs/default.yaml", "Path to configuration file")
 	flag.BoolVar(&showVersion, "version", false, "Show version information")
+	flag.BoolVar(&mutexProfiling, "mutex-profiling", false, "Enable mutex profiling for debugging")
 	flag.Parse()
 
 	// Show version and exit if requested
 	if showVersion {
 		fmt.Println(version.GetInfo().String())
 		os.Exit(0)
+	}
+
+	// Enable mutex profiling if requested
+	if mutexProfiling {
+		runtime.SetMutexProfileFraction(1)
 	}
 
 	// Load configuration
@@ -86,6 +95,32 @@ func main() {
 
 	// Create server
 	srv := server.New(&cfg.Server, log, redisClient)
+
+	// Create ingestion manager if enabled
+	var ingestionMgr *ingestion.Manager
+	if cfg.Ingestion.SRT.Enabled || cfg.Ingestion.RTP.Enabled {
+		var err error
+		ingestionMgr, err = ingestion.NewManager(&cfg.Ingestion, log)
+		if err != nil {
+			log.WithError(err).Fatal("Failed to create ingestion manager")
+		}
+
+		// Register ingestion routes
+		ingestionHandlers := ingestion.NewHandlers(ingestionMgr, log)
+		srv.RegisterRoutes(ingestionHandlers.RegisterRoutes)
+
+		// Start ingestion
+		if err := ingestionMgr.Start(); err != nil {
+			log.WithError(err).Fatal("Failed to start ingestion manager")
+		}
+		log.Info("Ingestion manager started")
+
+		defer func() {
+			if err := ingestionMgr.Stop(); err != nil {
+				log.WithError(err).Error("Failed to stop ingestion manager")
+			}
+		}()
+	}
 
 	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

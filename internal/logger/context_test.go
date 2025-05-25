@@ -48,9 +48,9 @@ func TestWithRequest(t *testing.T) {
 	logger := logrus.New()
 
 	tests := []struct {
-		name          string
-		setupRequest  func() *http.Request
-		checkEntry    func(*testing.T, *logrus.Entry)
+		name         string
+		setupRequest func() *http.Request
+		checkEntry   func(*testing.T, *logrus.Entry)
 	}{
 		{
 			name: "with existing request ID",
@@ -194,7 +194,7 @@ func TestGetRemoteIP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/", nil)
 			req.RemoteAddr = "192.0.2.1:1234"
-			
+
 			for k, v := range tt.headers {
 				req.Header.Set(k, v)
 			}

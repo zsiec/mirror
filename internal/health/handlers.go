@@ -12,11 +12,11 @@ import (
 
 // Response represents the health check response.
 type Response struct {
-	Status    Status             `json:"status"`
-	Timestamp time.Time          `json:"timestamp"`
-	Version   string             `json:"version"`
-	Uptime    string             `json:"uptime"`
-	Checks    map[string]*Check  `json:"checks,omitempty"`
+	Status    Status            `json:"status"`
+	Timestamp time.Time         `json:"timestamp"`
+	Version   string            `json:"version"`
+	Uptime    string            `json:"uptime"`
+	Checks    map[string]*Check `json:"checks,omitempty"`
 }
 
 // Handler handles health check HTTP endpoints.

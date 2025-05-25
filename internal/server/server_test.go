@@ -69,7 +69,7 @@ func TestSetupRoutes(t *testing.T) {
 	})
 
 	server := New(cfg, logger, redisClient)
-	
+
 	// Manually call setupRoutes since it's normally called in Start()
 	server.setupRoutes()
 
@@ -93,7 +93,7 @@ func TestShutdown(t *testing.T) {
 	})
 
 	server := New(cfg, logger, redisClient)
-	
+
 	// Create a minimal http3 server for testing
 	server.http3Server = &http3.Server{
 		Addr: ":8443",

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Mirror API Documentation</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui.css" />
+    <style>
+        html {
+            box-sizing: border-box;
+            overflow: -moz-scrollbars-vertical;
+            overflow-y: scroll;
+        }
+        *,
+        *:before,
+        *:after {
+            box-sizing: inherit;
+        }
+        body {
+            margin: 0;
+            background: #fafafa;
+        }
+        .api-selector {
+            background: #1b1b1b;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+        }
+        .api-selector h1 {
+            margin: 0 0 20px 0;
+            font-size: 24px;
+            font-weight: 300;
+        }
+        .api-selector button {
+            background: #547800;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 0 10px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 16px;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+        .api-selector button:hover {
+            background: #61b500;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .api-selector button.active {
+            background: #61b500;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="api-selector">
+        <h1>Mirror API Documentation</h1>
+        <div>
+            <button id="server-api-btn" class="active" onclick="loadAPI('server.yaml', 'server-api-btn')">Server API</button>
+            <button id="ingestion-api-btn" onclick="loadAPI('ingestion.yaml', 'ingestion-api-btn')">Ingestion API</button>
+        </div>
+    </div>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-standalone-preset.js"></script>
+    <script>
+        function loadAPI(specUrl, buttonId) {
+            // Update active button
+            document.querySelectorAll('.api-selector button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(buttonId).classList.add('active');
+            
+            // Load new API spec
+            window.ui = SwaggerUIBundle({
+                url: "./" + specUrl,
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout",
+                validatorUrl: null
+            });
+        }
+        
+        window.onload = function() {
+            // Load server API by default
+            loadAPI('server.yaml', 'server-api-btn');
+        };
+    </script>
+</body>
+</html>

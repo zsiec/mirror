@@ -33,7 +33,20 @@ build:
 ## test: Run unit tests
 test:
 	@echo "Running tests..."
-	@go test -v -race -cover ./...
+	@go test -v -cover $(shell go list ./... | grep -v "mirror/tests")
+
+## test-race: Run tests with race detector
+test-race:
+	@echo "Running tests with race detector..."
+	@go test -v -race -cover $(shell go list ./... | grep -v "mirror/tests")
+
+## test-integration: Run integration tests
+test-integration:
+	@echo "Running integration tests..."
+	@go test -v -race -tags=integration ./...
+
+## test-all: Run all tests (unit + integration)
+test-all: test test-integration
 
 ## test-coverage: Run tests with coverage report
 test-coverage:

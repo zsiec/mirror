@@ -12,13 +12,27 @@ Core Foundation and Project Setup:
 - Health checks and monitoring
 - Docker and CI/CD
 
-### phase-2.md
+### phase-2.md ✅ COMPLETED
 Stream Ingestion Service:
 - SRT protocol implementation using datarhei/gosrt
 - RTP protocol support using pion/rtp
-- Connection management and pooling
-- Stream metadata handling
-- Backpressure and flow control
+- Video-aware buffering with GOP management
+- Automatic codec detection (H.264, HEVC, AV1, JPEGXS)
+- Frame assembly and validation
+- A/V synchronization with drift correction
+- Backpressure control and memory management
+- Stream recovery and reconnection
+- Comprehensive metrics and monitoring
+- Redis-based stream registry
+
+### phase-2-bugs-found.md
+Comprehensive bug analysis from implementation testing
+
+### phase-2-bug-analysis-summary.md
+Summary of critical bugs and their impact
+
+### phase-2-priority-fixes.md
+Prioritized list of bugs to fix before Phase 3
 
 ### phase-3.md
 Video Processing and Transcoding:
@@ -82,6 +96,20 @@ Monitoring and Observability:
 - Clustering support for scaling
 - Proven reliability
 
+### Why SRT Primary Protocol?
+- Built for live video streaming
+- Packet loss recovery
+- Low latency with reliability
+- Encryption built-in
+- Better than raw RTP for internet delivery
+
+### Video Pipeline Design (Phase 2)
+- Packet → Frame → GOP abstraction
+- Video-aware buffering prevents corruption
+- GOP boundaries for clean switching
+- Memory pools for efficiency
+- Backpressure at every stage
+
 ## Implementation Guidelines
 
 ### Code Organization
@@ -130,6 +158,23 @@ Monitoring and Observability:
 - CloudFront CDN
 - Auto-scaling groups
 - Blue-green deployments
+
+## API Documentation
+
+### OpenAPI Specifications
+The `openapi/` subdirectory contains:
+- `server.yaml`: Main API specification
+- `ingestion.yaml`: Stream ingestion API spec
+- `index.html`: Interactive API documentation
+
+View the documentation:
+```bash
+# Open in browser
+open docs/openapi/index.html
+
+# Or serve locally
+python -m http.server 8000 -d docs/openapi
+```
 
 ## Future Considerations
 

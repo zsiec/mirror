@@ -67,8 +67,8 @@ func TestHandleStreamsPlaceholder(t *testing.T) {
 	var response map[string]string
 	err = json.Unmarshal(rr.Body.Bytes(), &response)
 	require.NoError(t, err)
-	assert.Equal(t, "Streams endpoint will be implemented in Phase 2", response["message"])
-	assert.Equal(t, "1", response["phase"])
+	assert.Equal(t, "Streams endpoint requires ingestion to be enabled", response["message"])
+	assert.Equal(t, "2", response["phase"])
 }
 
 func TestWriteJSON(t *testing.T) {

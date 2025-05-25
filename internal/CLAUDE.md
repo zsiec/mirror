@@ -62,7 +62,53 @@ HTTP/3 server implementation using quic-go:
 Key components:
 - `Server`: Main server struct with HTTP/3 configuration
 - Middleware: RequestID, Metrics, CORS, Recovery, RateLimit
-- Route handlers for health, version, and future streaming endpoints
+- Route handlers for health, version, and streaming APIs
+
+### ingestion/ (Phase 2)
+Comprehensive stream ingestion system supporting SRT and RTP protocols:
+- Protocol adapters for unified stream handling
+- Video-aware buffering with GOP management
+- Automatic codec detection and frame assembly
+- A/V synchronization with drift correction
+- Backpressure control and memory management
+- Stream recovery and reconnection
+- Redis-based stream registry
+
+Key subsystems:
+- `buffer/`: Ring buffers with size limits and metrics
+- `codec/`: Depacketizers for H.264, HEVC, AV1, JPEGXS
+- `frame/`: Frame assembly and boundary detection
+- `gop/`: GOP buffering and management
+- `rtp/`, `srt/`: Protocol implementations
+- `sync/`: A/V synchronization logic
+- `pipeline/`: Video processing pipeline
+
+### metrics/
+Prometheus metrics collection and export:
+- HTTP metrics (request duration, response size)
+- Business metrics (streams, connections, codecs)
+- Custom metric types and collectors
+- Metric aggregation and labeling
+
+Key features:
+- Pre-defined metric names and labels
+- Histogram buckets for latency tracking
+- Counter and gauge implementations
+- Thread-safe metric updates
+
+### queue/
+Hybrid memory/disk queue implementation:
+- In-memory queue with configurable size
+- Automatic disk overflow for large datasets
+- Persistence across restarts
+- Efficient serialization/deserialization
+- Metrics for queue depth and throughput
+
+Key features:
+- Thread-safe operations
+- Batch processing support
+- Priority queue capabilities
+- Recovery from disk on startup
 
 ## Testing Guidelines
 
@@ -86,6 +132,18 @@ func TestSomething(t *testing.T) {
     }
 }
 ```
+
+## Package Documentation
+
+Each package has comprehensive documentation:
+- [config/README.md](config/README.md) - Configuration management details
+- [errors/README.md](errors/README.md) - Error handling patterns
+- [health/README.md](health/README.md) - Health check implementation
+- [logger/README.md](logger/README.md) - Logging best practices
+- [server/README.md](server/README.md) - HTTP/3 server details
+- [ingestion/README.md](ingestion/README.md) - Stream ingestion system
+- [metrics/README.md](metrics/README.md) - Metrics collection
+- [queue/README.md](queue/README.md) - Queue implementation
 
 ## Common Patterns
 

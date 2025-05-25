@@ -14,8 +14,8 @@ import (
 
 // mockChecker is a mock implementation of Checker for testing.
 type mockChecker struct {
-	name string
-	err  error
+	name  string
+	err   error
 	delay time.Duration
 }
 
@@ -90,7 +90,7 @@ func TestManager(t *testing.T) {
 			want     Status
 		}{
 			{
-				name:     "all healthy",
+				name: "all healthy",
 				checkers: []Checker{
 					&mockChecker{name: "c1", err: nil},
 					&mockChecker{name: "c2", err: nil},
@@ -98,7 +98,7 @@ func TestManager(t *testing.T) {
 				want: StatusOK,
 			},
 			{
-				name:     "one down",
+				name: "one down",
 				checkers: []Checker{
 					&mockChecker{name: "c1", err: nil},
 					&mockChecker{name: "c2", err: errors.New("error")},
@@ -132,7 +132,7 @@ func TestManager(t *testing.T) {
 
 	t.Run("Timeout handling", func(t *testing.T) {
 		manager := NewManager(logger)
-		
+
 		// Register a slow checker
 		manager.Register(&mockChecker{
 			name:  "slow-checker",
@@ -162,23 +162,23 @@ func TestManager(t *testing.T) {
 func TestStartPeriodicChecks(t *testing.T) {
 	logger := logrus.New()
 	logger.SetLevel(logrus.DebugLevel)
-	
+
 	manager := NewManager(logger)
-	
+
 	// Track check count using a counter that increments on each check
 	checkCount := 0
 	mu := &sync.Mutex{}
-	
+
 	manager.Register(&mockChecker{
-		name: "counter",
-		err: nil,
+		name:  "counter",
+		err:   nil,
 		delay: 0, // No delay for quick execution
 	})
 
 	// Start periodic checks with a short interval
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan bool)
-	
+
 	go func() {
 		manager.StartPeriodicChecks(ctx, 40*time.Millisecond)
 		done <- true
@@ -214,7 +214,7 @@ func TestStartPeriodicChecks(t *testing.T) {
 	mu.Lock()
 	finalCount := checkCount
 	mu.Unlock()
-	
+
 	assert.GreaterOrEqual(t, finalCount, 3, "Expected at least 3 periodic checks but got %d", finalCount)
 }
 
@@ -234,7 +234,7 @@ func TestCheckDurationTracking(t *testing.T) {
 
 	check := results["delayed"]
 	require.NotNil(t, check)
-	
+
 	// Duration should be at least the delay
 	assert.GreaterOrEqual(t, check.Duration, 50*time.Millisecond)
 	assert.GreaterOrEqual(t, check.DurationMS, float64(50))
