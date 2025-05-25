@@ -133,6 +133,18 @@ func TestSomething(t *testing.T) {
 }
 ```
 
+## Package Documentation
+
+Each package has comprehensive documentation:
+- [config/README.md](config/README.md) - Configuration management details
+- [errors/README.md](errors/README.md) - Error handling patterns
+- [health/README.md](health/README.md) - Health check implementation
+- [logger/README.md](logger/README.md) - Logging best practices
+- [server/README.md](server/README.md) - HTTP/3 server details
+- [ingestion/README.md](ingestion/README.md) - Stream ingestion system
+- [metrics/README.md](metrics/README.md) - Metrics collection
+- [queue/README.md](queue/README.md) - Queue implementation
+
 ## Common Patterns
 
 ### Error Handling

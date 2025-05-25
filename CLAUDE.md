@@ -267,6 +267,31 @@ Health checks include:
 - **Circuit Breaker**: Automatic recovery and reconnection
 - **Backpressure**: Flow control at every stage
 
+## Documentation Structure
+
+The project has comprehensive documentation at multiple levels:
+
+### Package Documentation
+Each internal package has its own detailed README:
+- [Configuration](internal/config/README.md) - Config management and validation
+- [Errors](internal/errors/README.md) - Error handling framework
+- [Health](internal/health/README.md) - Health check system
+- [Logger](internal/logger/README.md) - Structured logging
+- [Server](internal/server/README.md) - HTTP/3 server implementation
+- [Ingestion](internal/ingestion/README.md) - Stream ingestion system
+- [Metrics](internal/metrics/README.md) - Prometheus metrics
+- [Queue](internal/queue/README.md) - Hybrid memory/disk queue
+
+### Implementation Phases
+Detailed documentation for each implementation phase:
+- [Phase 1](docs/phase-1.md) - Core foundation ✅
+- [Phase 2](docs/phase-2.md) - Stream ingestion ✅
+- [Phase 3](docs/phase-3.md) - Video processing (upcoming)
+- [Phase 4](docs/phase-4.md) - HLS packaging (planned)
+- [Phase 5](docs/phase-5.md) - Multi-stream management (planned)
+- [Phase 6](docs/phase-6.md) - CDN integration (planned)
+- [Phase 7](docs/phase-7.md) - Monitoring & observability (planned)
+
 ## Future Considerations
 When implementing remaining phases:
 - Leverage existing buffer pools and memory management

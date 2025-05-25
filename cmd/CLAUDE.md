@@ -111,3 +111,11 @@ As the project evolves, additional command-line tools may be added:
 3. Use structured logging from the start
 4. Implement health checks for all services
 5. Add version information to all binaries
+
+## Related Documentation
+
+- [Main README](../README.md) - Project overview
+- [Server Package](../internal/server/README.md) - HTTP/3 server implementation
+- [Configuration Guide](../internal/config/README.md) - Configuration management
+- [Health Checks](../internal/health/README.md) - Health check implementation
+- [Logging](../internal/logger/README.md) - Structured logging
