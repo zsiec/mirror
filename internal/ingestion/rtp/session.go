@@ -49,6 +49,9 @@ type Session struct {
 	// Backpressure control
 	rtcpCallback   func(nackCount int) // Callback for RTCP feedback
 	backpressureMu sync.RWMutex
+	
+	// Ensure codec update only happens once
+	codecUpdateOnce sync.Once
 }
 
 type SessionStats struct {
@@ -197,13 +200,16 @@ func (s *Session) SetSDP(sdp string) error {
 	s.mu.Unlock()
 	
 	// Update stream in registry (do async to avoid blocking)
-	go func() {
-		stream, _ := s.registry.Get(s.ctx, s.streamID)
-		if stream != nil {
-			stream.VideoCodec = codecType.String()
-			s.registry.Update(s.ctx, stream)
-		}
-	}()
+	// Use sync.Once to ensure this only happens once to prevent race conditions
+	s.codecUpdateOnce.Do(func() {
+		go func() {
+			stream, _ := s.registry.Get(s.ctx, s.streamID)
+			if stream != nil {
+				stream.VideoCodec = codecType.String()
+				s.registry.Update(s.ctx, stream)
+			}
+		}()
+	})
 	
 	s.logger.WithFields(map[string]interface{}{
 		"codec":    codecType,
@@ -467,13 +473,16 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 			s.depacketizer = depacketizer
 			
 			// Update stream codec in registry (do this async to avoid holding lock)
-			go func() {
-				stream, _ := s.registry.Get(s.ctx, s.streamID)
-				if stream != nil {
-					stream.VideoCodec = detectedType.String()
-					s.registry.Update(s.ctx, stream)
-				}
-			}()
+			// Use sync.Once to ensure this only happens once to prevent race conditions
+			s.codecUpdateOnce.Do(func() {
+				go func() {
+					stream, _ := s.registry.Get(s.ctx, s.streamID)
+					if stream != nil {
+						stream.VideoCodec = detectedType.String()
+						s.registry.Update(s.ctx, stream)
+					}
+				}()
+			})
 			
 			s.logger.WithField("codec", detectedType).Info("Detected video codec")
 		}
