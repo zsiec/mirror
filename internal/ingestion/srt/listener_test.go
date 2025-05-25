@@ -94,17 +94,17 @@ func TestListener_NewListener(t *testing.T) {
 		ListenAddr: "127.0.0.1",
 		Port:       1234,
 	}
-	
+
 	codecsCfg := &config.CodecsConfig{
 		Supported: []string{"h264", "hevc"},
 		Preferred: "hevc",
 	}
-	
+
 	logger := logrus.New()
 	registry := &mockRegistry{}
-	
+
 	listener := NewListener(cfg, codecsCfg, registry, logger)
-	
+
 	assert.NotNil(t, listener)
 	assert.Equal(t, cfg, listener.config)
 	assert.Equal(t, codecsCfg, listener.codecsConfig)
@@ -116,7 +116,7 @@ func TestListener_ValidateStreamID(t *testing.T) {
 	listener := &Listener{
 		logger: logrus.New(),
 	}
-	
+
 	tests := []struct {
 		name     string
 		streamID string
@@ -153,7 +153,7 @@ func TestListener_ValidateStreamID(t *testing.T) {
 			wantErr:  true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := listener.validateStreamID(tt.streamID)
@@ -170,17 +170,17 @@ func TestListener_GetActiveSessions(t *testing.T) {
 	listener := &Listener{
 		connections: sync.Map{},
 	}
-	
+
 	// Initially no connections
 	assert.Equal(t, 0, listener.GetActiveSessions())
-	
+
 	// Add some connections
 	listener.connections.Store("conn1", &Connection{})
 	listener.connections.Store("conn2", &Connection{})
 	listener.connections.Store("conn3", &Connection{})
-	
+
 	assert.Equal(t, 3, listener.GetActiveSessions())
-	
+
 	// Remove one
 	listener.connections.Delete("conn2")
 	assert.Equal(t, 2, listener.GetActiveSessions())
@@ -269,12 +269,12 @@ func TestListener_ConfigureEncryption(t *testing.T) {
 				config: tt.config,
 				logger: logrus.New(),
 			}
-			
+
 			// Create a mock srt.Config
 			srtCfg := &srt.Config{}
-			
+
 			err := listener.configureEncryption(srtCfg)
-			
+
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errMsg != "" {

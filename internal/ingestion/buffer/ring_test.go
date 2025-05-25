@@ -106,7 +106,7 @@ func TestRingBuffer_Overflow(t *testing.T) {
 	n, err = rb.Write(data2)
 	require.Error(t, err)
 	assert.Equal(t, 0, n)
-	
+
 	// Check error type
 	var bufferFullErr *ErrBufferFullDetailed
 	assert.ErrorAs(t, err, &bufferFullErr)
@@ -315,7 +315,7 @@ func TestRingBuffer_GetPreview(t *testing.T) {
 
 			// Get preview
 			preview, _ := rb.GetPreview(float64(tt.seconds))
-			
+
 			// Check length is within expected range
 			assert.GreaterOrEqual(t, len(preview), tt.wantMinLen)
 			assert.LessOrEqual(t, len(preview), tt.wantMaxLen)
@@ -337,20 +337,20 @@ func TestRingBuffer_GetPreview_WithWraparound(t *testing.T) {
 		n, err := rb.Write(data)
 		require.NoError(t, err)
 		assert.Equal(t, 10, n)
-		
+
 		// Read some data to make room for next write (simulating consumption)
 		if i < 4 {
 			readBuf := make([]byte, 10)
 			_, err = rb.Read(readBuf)
 			require.NoError(t, err)
 		}
-		
+
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Get preview of last second
 	preview, _ := rb.GetPreview(1.0)
-	
+
 	// Should have recent data
 	assert.Greater(t, len(preview), 0)
 }

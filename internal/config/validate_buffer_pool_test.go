@@ -81,16 +81,16 @@ func TestBufferPoolSizeValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &IngestionConfig{
 				SRT: SRTConfig{
-					Enabled:        tt.srtEnabled,
-					ListenAddr:     "0.0.0.0",
-					Port:           6000,
-					MaxConnections: tt.srtMaxConn,
-					Latency:        120 * time.Millisecond,
-					MaxBandwidth:   60000000,
-					InputBandwidth: 55000000,
-					PayloadSize:    1316,
+					Enabled:           tt.srtEnabled,
+					ListenAddr:        "0.0.0.0",
+					Port:              6000,
+					MaxConnections:    tt.srtMaxConn,
+					Latency:           120 * time.Millisecond,
+					MaxBandwidth:      60000000,
+					InputBandwidth:    55000000,
+					PayloadSize:       1316,
 					FlowControlWindow: 25600,
-					PeerIdleTimeout: 30 * time.Second,
+					PeerIdleTimeout:   30 * time.Second,
 				},
 				RTP: RTPConfig{
 					Enabled:        tt.rtpEnabled,
@@ -146,14 +146,14 @@ func TestValidateWarnsAboutPerformance(t *testing.T) {
 			// ... other required fields
 		},
 	}
-	
+
 	// When pool size is too small, we'll need to allocate buffers at runtime
 	// This causes:
 	// 1. Memory allocation spikes during connection surges
 	// 2. Increased GC pressure
 	// 3. Potential latency spikes
 	// 4. Less predictable performance
-	
+
 	// The validation helps catch this configuration issue early
 	_ = cfg // We don't run full validation here as it needs all fields
 }

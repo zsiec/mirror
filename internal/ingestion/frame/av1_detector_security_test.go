@@ -66,16 +66,16 @@ func TestAV1DetectorBufferOverflowProtection(t *testing.T) {
 		{
 			name: "malformed_leb128_size",
 			data: []byte{
-				0x0A, // Has size flag
+				0x0A,                                                             // Has size flag
 				0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // Invalid LEB128
 			},
 			expectError: true,
 			desc:        "Malformed LEB128 size should fail",
 		},
 		{
-			name: "truncated_obu_header",
-			data: []byte{0x0E}, // Has extension flag but no extension byte
-			expectError: false,  // Should handle gracefully by returning partial results
+			name:        "truncated_obu_header",
+			data:        []byte{0x0E}, // Has extension flag but no extension byte
+			expectError: false,        // Should handle gracefully by returning partial results
 			desc:        "Truncated OBU should be handled gracefully",
 		},
 		{
@@ -91,8 +91,8 @@ func TestAV1DetectorBufferOverflowProtection(t *testing.T) {
 		{
 			name: "valid_sequence_header",
 			data: []byte{
-				0x0A, // Type=1 (seq header), has_size=1
-				0x05, // Size = 5
+				0x0A,                         // Type=1 (seq header), has_size=1
+				0x05,                         // Size = 5
 				0x00, 0x00, 0x00, 0x00, 0x00, // 5 bytes of data
 			},
 			expectError: false,
@@ -101,7 +101,7 @@ func TestAV1DetectorBufferOverflowProtection(t *testing.T) {
 		{
 			name: "obu_without_size",
 			data: []byte{
-				0x08, // Type=1, no size flag
+				0x08,             // Type=1, no size flag
 				0x00, 0x00, 0x00, // Data extends to end
 			},
 			expectError: false,
@@ -122,21 +122,21 @@ func TestAV1DetectorBufferOverflowProtection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			obus, err := detector.parseOBUs(tt.data)
-			
+
 			if tt.expectError && err == nil {
 				t.Errorf("%s: expected error but got none", tt.desc)
 			}
 			if !tt.expectError && err != nil {
 				t.Errorf("%s: unexpected error: %v", tt.desc, err)
 			}
-			
+
 			// Verify no buffer overread occurred (test completes without panic)
 			if !tt.expectError && err == nil && obus != nil {
 				// Verify all OBUs are within bounds
 				totalSize := 0
 				for i, obu := range obus {
 					if obu.Size > security.MaxNALUnitSize {
-						t.Errorf("OBU %d exceeds max size: %d > %d", 
+						t.Errorf("OBU %d exceeds max size: %d > %d",
 							i, obu.Size, security.MaxNALUnitSize)
 					}
 					totalSize += obu.Size
@@ -151,10 +151,10 @@ func TestAV1DetectorLEB128Integration(t *testing.T) {
 	detector := NewAV1Detector()
 
 	tests := []struct {
-		name     string
-		size     uint64
-		wantErr  bool
-		desc     string
+		name    string
+		size    uint64
+		wantErr bool
+		desc    string
 	}{
 		{
 			name:    "small_size",
@@ -188,19 +188,19 @@ func TestAV1DetectorLEB128Integration(t *testing.T) {
 			data := []byte{0x0A} // Has size flag
 			sizeBytes := security.WriteLEB128(tt.size)
 			data = append(data, sizeBytes...)
-			
+
 			// Add dummy data (just a few bytes, actual parsing will check bounds)
 			data = append(data, 0x00, 0x00, 0x00)
-			
+
 			obus, err := detector.parseOBUs(data)
-			
+
 			if tt.wantErr && err == nil {
 				t.Errorf("%s: expected error but got none", tt.desc)
 			}
 			if !tt.wantErr && err != nil {
 				t.Errorf("%s: unexpected error: %v", tt.desc, err)
 			}
-			
+
 			// For valid cases, check the parsed size
 			if !tt.wantErr && len(obus) > 0 {
 				// The actual OBU data will be limited by available bytes
@@ -216,12 +216,12 @@ func TestAV1DetectorOBUTypes(t *testing.T) {
 	detector := NewAV1Detector()
 
 	tests := []struct {
-		name       string
-		obuType    uint8
-		hasSize    bool
-		hasExt     bool
-		dataSize   int
-		desc       string
+		name     string
+		obuType  uint8
+		hasSize  bool
+		hasExt   bool
+		dataSize int
+		desc     string
 	}{
 		{
 			name:     "sequence_header",
@@ -271,34 +271,34 @@ func TestAV1DetectorOBUTypes(t *testing.T) {
 			if tt.hasSize {
 				header |= 0x02
 			}
-			
+
 			data := []byte{header}
-			
+
 			// Add extension if present
 			if tt.hasExt {
 				data = append(data, 0x00) // Extension byte
 			}
-			
+
 			// Add size if present
 			if tt.hasSize {
 				data = append(data, byte(tt.dataSize))
 			}
-			
+
 			// Add data
 			for i := 0; i < tt.dataSize; i++ {
 				data = append(data, byte(i))
 			}
-			
+
 			obus, err := detector.parseOBUs(data)
 			if err != nil {
 				t.Fatalf("%s: unexpected error: %v", tt.desc, err)
 			}
-			
+
 			if len(obus) != 1 {
 				t.Errorf("%s: expected 1 OBU, got %d", tt.desc, len(obus))
 				return
 			}
-			
+
 			obu := obus[0]
 			if obu.Type != tt.obuType {
 				t.Errorf("%s: OBU type = %d, want %d", tt.desc, obu.Type, tt.obuType)
@@ -316,10 +316,10 @@ func TestAV1DetectorOBUTypes(t *testing.T) {
 // TestAV1DetectorStressTest performs stress testing with random data
 func TestAV1DetectorStressTest(t *testing.T) {
 	detector := NewAV1Detector()
-	
+
 	// Test with various sizes of random-ish data
 	sizes := []int{0, 1, 2, 3, 4, 100, 1024, 10240}
-	
+
 	for _, size := range sizes {
 		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
 			data := make([]byte, size)
@@ -328,7 +328,7 @@ func TestAV1DetectorStressTest(t *testing.T) {
 				// Avoid forbidden bit, create various OBU patterns
 				data[i] = byte((i * 7) & 0x7F)
 			}
-			
+
 			// Should not panic regardless of input
 			obus, err := detector.parseOBUs(data)
 			if err != nil {
@@ -344,7 +344,7 @@ func TestAV1DetectorStressTest(t *testing.T) {
 // BenchmarkAV1DetectorSecurity benchmarks the performance impact of security checks
 func BenchmarkAV1DetectorSecurity(b *testing.B) {
 	detector := NewAV1Detector()
-	
+
 	// Create realistic AV1 data with multiple OBUs
 	data := make([]byte, 0, 10000)
 	for i := 0; i < 50; i++ {
@@ -357,10 +357,10 @@ func BenchmarkAV1DetectorSecurity(b *testing.B) {
 		payload := make([]byte, 100)
 		data = append(data, payload...)
 	}
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		obus, err := detector.parseOBUs(data)
 		if err != nil {

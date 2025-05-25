@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	
+
 	"github.com/pion/rtp"
 	"github.com/zsiec/mirror/internal/ingestion/memory"
 )
@@ -26,7 +26,6 @@ const (
 	// Fragmentation unit
 	nalTypeFU = 49
 )
-
 
 // Depacketize processes an RTP packet and returns complete NAL units
 func (d *HEVCDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
@@ -60,7 +59,7 @@ func (d *HEVCDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 		nalUnit, complete := d.handleFragmentationUnit(payload, sequenceNumber)
 		d.lastSeq = sequenceNumber
 		d.mu.Unlock()
-		
+
 		if complete && nalUnit != nil {
 			nalUnits = append(nalUnits, nalUnit)
 		}
@@ -75,7 +74,7 @@ func (d *HEVCDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 		d.lastSeq = sequenceNumber
 		d.mu.Unlock()
 	}
-	
+
 	return nalUnits, nil
 }
 
@@ -127,12 +126,12 @@ func (d *HEVCDepacketizer) handleFragmentationUnit(payload []byte, sequenceNumbe
 	if startBit {
 		// Start of a new fragmented NAL unit
 		d.fragments = [][]byte{}
-		
+
 		// Reconstruct NAL unit header
 		nalHeader := make([]byte, 2)
 		nalHeader[0] = (payload[0] & 0x81) | (fuType << 1)
 		nalHeader[1] = payload[1]
-		
+
 		d.fragments = append(d.fragments, nalHeader)
 	}
 
@@ -200,22 +199,22 @@ func NewHEVCDepacketizerWithMemory(streamID string, memController *memory.Contro
 func (d *HEVCDepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 	// Estimate memory needed for this packet
 	estimatedSize := int64(len(packet.Payload) * 2) // Conservative estimate
-	
+
 	// Check if we would exceed memory limit
 	if d.currentUsage+estimatedSize > d.memoryLimit {
 		return nil, fmt.Errorf("frame size would exceed memory limit: current=%d, needed=%d, limit=%d",
 			d.currentUsage, estimatedSize, d.memoryLimit)
 	}
-	
+
 	// Request memory from controller
 	if err := d.memController.RequestMemory(d.streamID, estimatedSize); err != nil {
 		return nil, fmt.Errorf("memory allocation failed: %w", err)
 	}
 	d.currentUsage += estimatedSize
-	
+
 	// Process packet
 	nalUnits, err := d.HEVCDepacketizer.Depacketize(packet)
-	
+
 	// If we got complete NAL units, release fragment memory
 	if len(nalUnits) > 0 {
 		// Calculate actual memory used
@@ -223,18 +222,18 @@ func (d *HEVCDepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, 
 		for _, unit := range nalUnits {
 			actualSize += int64(len(unit))
 		}
-		
+
 		// Release excess memory
 		if estimatedSize > actualSize {
 			excessMemory := estimatedSize - actualSize
 			d.memController.ReleaseMemory(d.streamID, excessMemory)
 			d.currentUsage -= excessMemory
 		}
-		
+
 		// Reset fragment memory tracking
 		d.currentUsage = 0
 	}
-	
+
 	return nalUnits, err
 }
 
@@ -245,6 +244,6 @@ func (d *HEVCDepacketizerWithMemory) Reset() {
 		d.memController.ReleaseMemory(d.streamID, d.currentUsage)
 		d.currentUsage = 0
 	}
-	
+
 	d.HEVCDepacketizer.Reset()
 }

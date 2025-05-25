@@ -162,7 +162,7 @@ func TestH264Depacketizer_STAPA(t *testing.T) {
 		{
 			name: "STAP-A with truncated NAL data",
 			payload: []byte{
-				0x78, // STAP-A NAL header
+				0x78,       // STAP-A NAL header
 				0x00, 0x05, // Size = 5
 				0x65, 0x88, // Only 2 bytes instead of 5
 			},
@@ -183,9 +183,9 @@ func TestH264Depacketizer_STAPA(t *testing.T) {
 			nalUnits, err := d.Depacketize(packet)
 
 			// For truncated/malformed packets, we now correctly return errors
-			isTruncated := tt.name == "STAP-A with truncated size field" || 
+			isTruncated := tt.name == "STAP-A with truncated size field" ||
 				tt.name == "STAP-A with truncated NAL data"
-			
+
 			if isTruncated {
 				// These should now return errors due to security fixes
 				if err == nil {
@@ -262,8 +262,8 @@ func TestH264Depacketizer_FUA(t *testing.T) {
 				},
 				// Last fragment (end bit set)
 				{
-					0x7c,             // FU-A indicator
-					0x45,             // FU header (S=0, E=1, R=0, type=5)
+					0x7c,               // FU-A indicator
+					0x45,               // FU header (S=0, E=1, R=0, type=5)
 					10, 11, 12, 13, 14, // Fragment data
 				},
 			},
@@ -285,8 +285,8 @@ func TestH264Depacketizer_FUA(t *testing.T) {
 				// Missing middle fragment (sequence jump)
 				// Last fragment (end bit set)
 				{
-					0x7c,          // FU-A indicator
-					0x45,          // FU header (S=0, E=1, R=0, type=5)
+					0x7c,           // FU-A indicator
+					0x45,           // FU header (S=0, E=1, R=0, type=5)
 					10, 11, 12, 13, // Fragment data
 				},
 			},
@@ -397,7 +397,7 @@ func TestH264Depacketizer_MixedPackets(t *testing.T) {
 
 	// 2. STAP-A with PPS and SEI
 	stapA := []byte{
-		0x78, // STAP-A
+		0x78,                         // STAP-A
 		0x00, 0x03, 0x68, 0xce, 0x3c, // PPS
 		0x00, 0x02, 0x06, 0x05, // SEI
 	}
@@ -506,15 +506,15 @@ func TestGetNALType(t *testing.T) {
 
 func TestIsKeyFrame(t *testing.T) {
 	tests := []struct {
-		nalType     byte
+		nalType      byte
 		wantKeyFrame bool
 	}{
-		{1, false},  // Non-IDR slice
-		{5, true},   // IDR slice
-		{7, true},   // SPS (often sent with key frames)
-		{8, false},  // PPS
-		{6, false},  // SEI
-		{9, false},  // Access unit delimiter
+		{1, false}, // Non-IDR slice
+		{5, true},  // IDR slice
+		{7, true},  // SPS (often sent with key frames)
+		{8, false}, // PPS
+		{6, false}, // SEI
+		{9, false}, // Access unit delimiter
 	}
 
 	for _, tt := range tests {

@@ -33,13 +33,13 @@ func (m *Manager) HandleStreamData(w http.ResponseWriter, r *http.Request) {
 
 	// Get recent frames for streaming
 	previewData, frameCount := handler.GetFramePreview(5.0) // Get last 5 seconds
-	
+
 	// Write frame statistics first
 	stats := handler.GetStats()
-	header := fmt.Sprintf("STREAM_DATA_FRAMES:%d_KEYFRAMES:%d_COUNT:%d\n", 
+	header := fmt.Sprintf("STREAM_DATA_FRAMES:%d_KEYFRAMES:%d_COUNT:%d\n",
 		stats.FramesAssembled, stats.KeyframeCount, frameCount)
 	w.Write([]byte(header))
-	
+
 	// Write preview data
 	w.Write(previewData)
 	if flusher, ok := w.(http.Flusher); ok {
@@ -91,12 +91,12 @@ func (m *Manager) HandleStreamBuffer(w http.ResponseWriter, r *http.Request) {
 			BFrameRatio     float64 `json:"b_frame_ratio"`
 		} `json:"gop"`
 		GOPBuffer struct {
-			GOPCount      int     `json:"gop_count"`
-			FrameCount    int     `json:"frame_count"`
-			TotalBytes    int64   `json:"total_bytes"`
-			Duration      int64   `json:"duration_ms"`
-			DroppedGOPs   uint64  `json:"dropped_gops"`
-			DroppedFrames uint64  `json:"dropped_frames"`
+			GOPCount      int    `json:"gop_count"`
+			FrameCount    int    `json:"frame_count"`
+			TotalBytes    int64  `json:"total_bytes"`
+			Duration      int64  `json:"duration_ms"`
+			DroppedGOPs   uint64 `json:"dropped_gops"`
+			DroppedFrames uint64 `json:"dropped_frames"`
 		} `json:"gop_buffer"`
 	}{
 		Capacity:        100, // Default frame buffer capacity
@@ -128,12 +128,12 @@ func (m *Manager) HandleStreamBuffer(w http.ResponseWriter, r *http.Request) {
 			BFrameRatio:     stats.GOPStats.BFrameRatio,
 		},
 		GOPBuffer: struct {
-			GOPCount      int     `json:"gop_count"`
-			FrameCount    int     `json:"frame_count"`
-			TotalBytes    int64   `json:"total_bytes"`
-			Duration      int64   `json:"duration_ms"`
-			DroppedGOPs   uint64  `json:"dropped_gops"`
-			DroppedFrames uint64  `json:"dropped_frames"`
+			GOPCount      int    `json:"gop_count"`
+			FrameCount    int    `json:"frame_count"`
+			TotalBytes    int64  `json:"total_bytes"`
+			Duration      int64  `json:"duration_ms"`
+			DroppedGOPs   uint64 `json:"dropped_gops"`
+			DroppedFrames uint64 `json:"dropped_frames"`
 		}{
 			GOPCount:      stats.GOPBufferStats.GOPCount,
 			FrameCount:    stats.GOPBufferStats.FrameCount,
@@ -171,10 +171,10 @@ func (m *Manager) HandleStreamPreview(w http.ResponseWriter, r *http.Request) {
 	previewData, frameCount := handler.GetFramePreview(duration)
 
 	response := struct {
-		StreamID   string `json:"stream_id"`
-		Duration   float64 `json:"duration_seconds"`
-		FrameCount int    `json:"frame_count"`
-		Preview    string `json:"preview"`
+		StreamID   string    `json:"stream_id"`
+		Duration   float64   `json:"duration_seconds"`
+		FrameCount int       `json:"frame_count"`
+		Preview    string    `json:"preview"`
 		Timestamp  time.Time `json:"timestamp"`
 	}{
 		StreamID:   streamID,
@@ -201,21 +201,21 @@ func (m *Manager) HandleStreamBackpressure(w http.ResponseWriter, r *http.Reques
 	}
 
 	stats := handler.GetStats()
-	
+
 	response := struct {
-		StreamID    string                      `json:"stream_id"`
-		Pressure    float64                     `json:"current_pressure"`
-		Rate        int64                       `json:"current_rate_bps"`
-		Statistics  backpressure.Statistics     `json:"statistics"`
-		ShouldDrop  bool                        `json:"should_drop_gop"`
-		Timestamp   time.Time                   `json:"timestamp"`
+		StreamID   string                  `json:"stream_id"`
+		Pressure   float64                 `json:"current_pressure"`
+		Rate       int64                   `json:"current_rate_bps"`
+		Statistics backpressure.Statistics `json:"statistics"`
+		ShouldDrop bool                    `json:"should_drop_gop"`
+		Timestamp  time.Time               `json:"timestamp"`
 	}{
-		StreamID:    streamID,
-		Pressure:    stats.BackpressureStats.CurrentPressure,
-		Rate:        stats.BackpressureStats.CurrentRate,
-		Statistics:  stats.BackpressureStats,
-		ShouldDrop:  stats.BackpressureStats.CurrentPressure >= 0.9,
-		Timestamp:   time.Now(),
+		StreamID:   streamID,
+		Pressure:   stats.BackpressureStats.CurrentPressure,
+		Rate:       stats.BackpressureStats.CurrentRate,
+		Statistics: stats.BackpressureStats,
+		ShouldDrop: stats.BackpressureStats.CurrentPressure >= 0.9,
+		Timestamp:  time.Now(),
 	}
 
 	writeJSON(r.Context(), w, http.StatusOK, response)
@@ -235,8 +235,8 @@ func (m *Manager) HandleStreamBackpressureControl(w http.ResponseWriter, r *http
 	}
 
 	var request struct {
-		Action    string  `json:"action"`     // "set_pressure", "reset", "drop_gop"
-		Pressure  float64 `json:"pressure"`   // For set_pressure
+		Action   string  `json:"action"`   // "set_pressure", "reset", "drop_gop"
+		Pressure float64 `json:"pressure"` // For set_pressure
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -248,7 +248,7 @@ func (m *Manager) HandleStreamBackpressureControl(w http.ResponseWriter, r *http
 	case "set_pressure":
 		// Validate pressure is between 0 and 1
 		if request.Pressure < 0 || request.Pressure > 1 {
-			writeError(r.Context(), w, http.StatusBadRequest, 
+			writeError(r.Context(), w, http.StatusBadRequest,
 				"Pressure must be between 0 and 1", nil)
 			return
 		}
@@ -291,17 +291,17 @@ func (m *Manager) HandleStreamRecovery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stats := handler.GetStats()
-	
+
 	response := struct {
-		StreamID         string                 `json:"stream_id"`
-		State            string                 `json:"state"`
-		IsHealthy        bool                   `json:"is_healthy"`
-		RecoveryCount    uint64                 `json:"recovery_count"`
-		CorruptionCount  uint64                 `json:"corruption_count"`
-		ResyncCount      uint64                 `json:"resync_count"`
-		LastRecoveryTime time.Time              `json:"last_recovery_time"`
-		Statistics       recovery.Statistics    `json:"statistics"`
-		Timestamp        time.Time              `json:"timestamp"`
+		StreamID         string              `json:"stream_id"`
+		State            string              `json:"state"`
+		IsHealthy        bool                `json:"is_healthy"`
+		RecoveryCount    uint64              `json:"recovery_count"`
+		CorruptionCount  uint64              `json:"corruption_count"`
+		ResyncCount      uint64              `json:"resync_count"`
+		LastRecoveryTime time.Time           `json:"last_recovery_time"`
+		Statistics       recovery.Statistics `json:"statistics"`
+		Timestamp        time.Time           `json:"timestamp"`
 	}{
 		StreamID:         streamID,
 		State:            getRecoveryStateString(stats.RecoveryStats.State),

@@ -257,11 +257,11 @@ func TestBFrameReorderer_AutoDTSAssignment(t *testing.T) {
 
 	output, err := r.AddFrame(frame)
 	require.NoError(t, err)
-	
+
 	// When we eventually get the frame out, DTS should equal PTS
 	flushed := r.Flush()
 	allFrames := append(output, flushed...)
-	
+
 	require.Len(t, allFrames, 1)
 	assert.Equal(t, int64(1000), allFrames[0].DTS)
 }
@@ -271,7 +271,7 @@ func TestBFrameReorderer_BufferOverflow(t *testing.T) {
 	now := time.Now()
 
 	var totalOutput int
-	
+
 	// Add more frames than buffer can hold
 	for i := 0; i < 5; i++ {
 		frame := &types.VideoFrame{
@@ -288,7 +288,7 @@ func TestBFrameReorderer_BufferOverflow(t *testing.T) {
 
 	// Should have output some frames due to buffer pressure
 	assert.Greater(t, totalOutput, 0)
-	
+
 	stats := r.GetStats()
 	assert.LessOrEqual(t, stats.CurrentBuffer, 2)
 }
@@ -307,7 +307,7 @@ func TestBFrameReorderer_DelayTimeout(t *testing.T) {
 	}
 	output1, err := r.AddFrame(frame1)
 	require.NoError(t, err)
-	
+
 	// Add frame with much later capture time
 	frame2 := &types.VideoFrame{
 		ID:          2,
@@ -318,7 +318,7 @@ func TestBFrameReorderer_DelayTimeout(t *testing.T) {
 	}
 	output2, err := r.AddFrame(frame2)
 	require.NoError(t, err)
-	
+
 	// Should have forced output due to delay
 	totalOutput := len(output1) + len(output2)
 	assert.Greater(t, totalOutput, 0)
@@ -338,7 +338,7 @@ func TestBFrameReorderer_IFrameHandling(t *testing.T) {
 	}
 	output1, err := r.AddFrame(iframe)
 	require.NoError(t, err)
-	
+
 	// Add another frame to trigger I-frame output
 	pframe := &types.VideoFrame{
 		ID:          2,
@@ -349,11 +349,11 @@ func TestBFrameReorderer_IFrameHandling(t *testing.T) {
 	}
 	output2, err := r.AddFrame(pframe)
 	require.NoError(t, err)
-	
+
 	// I-frame should be output once we have the next frame
 	totalOutput := append(output1, output2...)
 	assert.GreaterOrEqual(t, len(totalOutput), 1)
-	
+
 	foundIFrame := false
 	for _, f := range totalOutput {
 		if f.ID == 1 {
@@ -482,10 +482,10 @@ func TestDTSCalculator_WithBFrames(t *testing.T) {
 
 func TestDTSCalculator_FrameDuration(t *testing.T) {
 	testCases := []struct {
-		name          string
-		frameRate     float64
-		timeBase      types.Rational
-		wantDuration  int64
+		name         string
+		frameRate    float64
+		timeBase     types.Rational
+		wantDuration int64
 	}{
 		{
 			name:         "30fps with 90kHz",
@@ -522,7 +522,7 @@ func TestBFrameReorderer_ConcurrentAccess(t *testing.T) {
 
 	// Test concurrent access doesn't cause races
 	done := make(chan bool)
-	
+
 	// Writer goroutine
 	go func() {
 		for i := 0; i < 100; i++ {

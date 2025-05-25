@@ -70,7 +70,7 @@ func (i *Info) Validate() error {
 	if !i.Type.IsValid() {
 		return fmt.Errorf("invalid codec type: %s", i.Type)
 	}
-	
+
 	// Codec-specific validation
 	switch i.Type {
 	case TypeH264:
@@ -82,7 +82,7 @@ func (i *Info) Validate() error {
 	case TypeJPEGXS:
 		return i.validateJPEGXS()
 	}
-	
+
 	return nil
 }
 
@@ -95,11 +95,11 @@ func (i *Info) validateH264() error {
 		"high422":  true,
 		"high444":  true,
 	}
-	
+
 	if i.Profile != "" && !validProfiles[strings.ToLower(i.Profile)] {
 		return fmt.Errorf("invalid H.264 profile: %s", i.Profile)
 	}
-	
+
 	return nil
 }
 
@@ -110,11 +110,11 @@ func (i *Info) validateHEVC() error {
 		"main444": true,
 		"mainsp":  true,
 	}
-	
+
 	if i.Profile != "" && !validProfiles[strings.ToLower(i.Profile)] {
 		return fmt.Errorf("invalid HEVC profile: %s", i.Profile)
 	}
-	
+
 	return nil
 }
 
@@ -128,27 +128,27 @@ func (i *Info) validateAV1() error {
 		"high":         true,
 		"professional": true,
 	}
-	
+
 	if i.Profile != "" && !validProfiles[strings.ToLower(i.Profile)] {
 		return fmt.Errorf("invalid AV1 profile: %s", i.Profile)
 	}
-	
+
 	return nil
 }
 
 func (i *Info) validateJPEGXS() error {
 	validProfiles := map[string]bool{
-		"light":       true,
-		"main":        true,
-		"high":        true,
-		"high444.12":  true,
+		"light":         true,
+		"main":          true,
+		"high":          true,
+		"high444.12":    true,
 		"light-subline": true,
 		"main-subline":  true,
 	}
-	
+
 	if i.Profile != "" && !validProfiles[strings.ToLower(i.Profile)] {
 		return fmt.Errorf("invalid JPEG XS profile: %s", i.Profile)
 	}
-	
+
 	return nil
 }

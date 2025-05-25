@@ -74,11 +74,11 @@ func (m *Manager) InitializeVideo(timeBase types.Rational) error {
 
 	m.videoSync = NewTrackSyncManager(TrackTypeVideo, m.streamID, timeBase, m.config)
 	m.status.VideoSync = m.videoSync.GetSyncState()
-	
+
 	m.logger.Info("Initialized video sync",
 		"stream_id", m.streamID,
 		"time_base", fmt.Sprintf("%d/%d", timeBase.Num, timeBase.Den))
-	
+
 	return nil
 }
 
@@ -93,11 +93,11 @@ func (m *Manager) InitializeAudio(timeBase types.Rational) error {
 
 	m.audioSync = NewTrackSyncManager(TrackTypeAudio, m.streamID, timeBase, m.config)
 	m.status.AudioSync = m.audioSync.GetSyncState()
-	
+
 	m.logger.Info("Initialized audio sync",
 		"stream_id", m.streamID,
 		"time_base", fmt.Sprintf("%d/%d", timeBase.Num, timeBase.Den))
-	
+
 	return nil
 }
 
@@ -176,19 +176,19 @@ func (m *Manager) measureDrift() {
 	// Method 1: Compare presentation times based on PTS
 	videoPresentationTime := m.videoSync.GetPresentationTime(videoState.LastPTS)
 	audioPresentationTime := m.audioSync.GetPresentationTime(audioState.LastPTS).Add(m.audioOffset)
-	
+
 	// Method 2: Also consider the actual wall clock times when packets arrived
 	// This helps detect network/processing delays
 	wallClockDrift := videoState.LastWallTime.Sub(audioState.LastWallTime)
-	
+
 	// The total drift combines both PTS-based drift and wall clock drift
 	// This catches both timestamp issues and delivery delays
 	ptsDrift := videoPresentationTime.Sub(audioPresentationTime)
-	
+
 	// Calculate total drift considering both factors properly
 	// PTS drift is the actual synchronization error we need to correct
 	// Wall clock drift indicates processing delays or network jitter
-	
+
 	var totalDrift time.Duration
 	if abs(int64(wallClockDrift)) < int64(10*time.Millisecond) {
 		// Small wall clock difference is just jitter, ignore it
@@ -258,7 +258,7 @@ func (m *Manager) applyDriftCorrection() {
 
 	// Calculate correction amount
 	correctionAmount := time.Duration(float64(avgDrift) * m.config.CorrectionFactor)
-	
+
 	// Limit correction step size
 	if abs(int64(correctionAmount)) > int64(m.config.MaxCorrectionStep) {
 		if correctionAmount > 0 {

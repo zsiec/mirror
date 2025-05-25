@@ -24,11 +24,11 @@ func NewTrackSyncManager(trackType TrackType, streamID string, timeBase types.Ra
 
 	return &TrackSyncManager{
 		sync: &TrackSync{
-			Type:      trackType,
-			StreamID:  streamID,
-			TimeBase:  timeBase,
-			BaseTime:  time.Time{}, // Will be set on first sample
-			BasePTS:   0,
+			Type:     trackType,
+			StreamID: streamID,
+			TimeBase: timeBase,
+			BaseTime: time.Time{}, // Will be set on first sample
+			BasePTS:  0,
 		},
 		config:       config,
 		wrapDetector: NewPTSWrapDetector(timeBase),
@@ -59,18 +59,18 @@ func (t *TrackSyncManager) ProcessTimestamp(pts, dts int64, wallTime time.Time) 
 	// Check for PTS jump/discontinuity
 	// We keep expectedPTS for potential future use (e.g., frame drop detection)
 	_ = t.sync.LastPTS + t.estimateFrameDuration()
-	
+
 	// Check absolute difference from last PTS for large jumps
 	absoluteDiff := abs(pts - t.sync.LastPTS)
-	
+
 	// Detect significant jumps (more than 1 second)
 	// Calculate PTS units per second: Den/Num
 	oneSecondInPTS := int64(t.sync.TimeBase.Den) / int64(t.sync.TimeBase.Num)
-	
+
 	// Use the absolute difference for jump detection, not the difference from expected
 	if absoluteDiff > oneSecondInPTS {
 		t.sync.PTSJumps++
-		
+
 		// Reset base time on very large jumps (>10 seconds)
 		if absoluteDiff > 10*oneSecondInPTS {
 			t.sync.BaseTime = wallTime
@@ -177,13 +177,49 @@ func (t *TrackSyncManager) calculatePTSDelta(pts int64) int64 {
 func (t *TrackSyncManager) estimateFrameDuration() int64 {
 	switch t.sync.Type {
 	case TrackTypeVideo:
-		// For most video streams, PTS increments by a fixed amount per frame
-		// Common cases:
-		// - 90kHz timebase: 3000-3003 per frame (30fps/29.97fps)
-		// - Frame-based: 1 per frame
-		// We'll use a simple heuristic based on timebase
+		// Try to calculate actual frame rate from recent frame history
+		if t.sync.FrameCount > 1 && !t.sync.BaseTime.IsZero() {
+			// Calculate elapsed time and frames to estimate frame rate
+			elapsedTime := t.sync.LastWallTime.Sub(t.sync.BaseTime)
+			if elapsedTime > 0 {
+				estimatedFPS := float64(t.sync.FrameCount-1) / elapsedTime.Seconds()
+
+				// Sanity check: frame rate should be between 1 and 120 fps
+				if estimatedFPS >= 1.0 && estimatedFPS <= 120.0 {
+					// Calculate frame duration in PTS units
+					return int64(float64(t.sync.TimeBase.Den) / (estimatedFPS * float64(t.sync.TimeBase.Num)))
+				}
+			}
+		}
+
+		// Fallback to common frame rates based on timebase
 		if t.sync.TimeBase.Den >= 90000 {
-			// High frequency timebase (like 90kHz), assume ~30fps
+			// High frequency timebase (like 90kHz)
+			// Use precise calculations for standard rates
+			if t.sync.TimeBase.Den == 90000 && t.sync.TimeBase.Num == 1 {
+				// Standard 90kHz timebase - use exact values
+				return 3000 // 30fps: 90000/30 = 3000
+			}
+
+			// For NTSC 29.97fps: 90000 * 1001 / 30000 = 3003
+			if t.sync.TimeBase.Den == 90000 && t.sync.TimeBase.Num == 1 {
+				// Check if this might be NTSC by looking at recent frame timing
+				// For now, default to 30fps exact
+				return 3000
+			}
+
+			// Try common frame rates: 29.97, 30, 25, 24, 60, 50
+			commonRates := []float64{30.0, 29.97, 25.0, 24.0, 60.0, 50.0, 23.976}
+
+			for _, rate := range commonRates {
+				duration := int64(float64(t.sync.TimeBase.Den) / (rate * float64(t.sync.TimeBase.Num)))
+				// Check if this gives a reasonable integer duration
+				if duration > 0 && duration < int64(t.sync.TimeBase.Den) {
+					return duration
+				}
+			}
+
+			// Ultimate fallback for 90kHz timebase
 			return int64(t.sync.TimeBase.Den) / (30 * int64(t.sync.TimeBase.Num))
 		} else {
 			// Low frequency timebase, likely frame-based
@@ -192,8 +228,19 @@ func (t *TrackSyncManager) estimateFrameDuration() int64 {
 	case TrackTypeAudio:
 		// For audio, assume 1024 samples per frame (typical for AAC)
 		// Duration = samples * timeBase.Den / (sampleRate * timeBase.Num)
-		// Assuming 48kHz sample rate: 1024 / 48000 * Den/Num
-		return (1024 * int64(t.sync.TimeBase.Den)) / (48000 * int64(t.sync.TimeBase.Num))
+		// Try common audio sample rates: 48kHz, 44.1kHz, 32kHz, 16kHz
+		sampleRates := []int64{48000, 44100, 32000, 16000}
+		samplesPerFrame := int64(1024)
+
+		for _, sampleRate := range sampleRates {
+			duration := (samplesPerFrame * int64(t.sync.TimeBase.Den)) / (sampleRate * int64(t.sync.TimeBase.Num))
+			if duration > 0 {
+				return duration
+			}
+		}
+
+		// Fallback calculation
+		return (samplesPerFrame * int64(t.sync.TimeBase.Den)) / (48000 * int64(t.sync.TimeBase.Num))
 	default:
 		return 0
 	}

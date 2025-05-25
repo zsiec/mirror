@@ -69,12 +69,12 @@ func TestPressureValidation(t *testing.T) {
 			valid:    false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// This is the validation logic from HandleStreamBackpressureControl
 			isValid := tt.pressure >= 0 && tt.pressure <= 1
-			assert.Equal(t, tt.valid, isValid, 
+			assert.Equal(t, tt.valid, isValid,
 				"Pressure %.4f should be valid=%v", tt.pressure, tt.valid)
 		})
 	}
@@ -84,7 +84,7 @@ func TestPressureValidation(t *testing.T) {
 func TestPressureValidationErrorMessage(t *testing.T) {
 	// The error message we use in the handler
 	expectedError := "Pressure must be between 0 and 1"
-	
+
 	// Verify it's descriptive
 	assert.Contains(t, expectedError, "Pressure")
 	assert.Contains(t, expectedError, "between")

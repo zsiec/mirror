@@ -11,9 +11,9 @@ import (
 
 func TestGOP_UpdateDuration_AfterDropping(t *testing.T) {
 	tests := []struct {
-		name            string
-		setupGOP        func() *GOP
-		dropFrames      func(g *GOP)
+		name             string
+		setupGOP         func() *GOP
+		dropFrames       func(g *GOP)
 		expectedStartPTS int64
 		expectedEndPTS   int64
 		expectedDuration time.Duration
@@ -107,18 +107,18 @@ func TestGOP_UpdateDuration_AfterDropping(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup GOP
 			gop := tt.setupGOP()
-			
+
 			// Drop frames
 			tt.dropFrames(gop)
-			
+
 			// Update duration
 			gop.UpdateDuration()
-			
+
 			// Verify
 			assert.Equal(t, tt.expectedStartPTS, gop.StartPTS)
 			assert.Equal(t, tt.expectedEndPTS, gop.EndPTS)
 			assert.Equal(t, tt.expectedDuration, gop.Duration)
-			
+
 			// Verify bitrate calculation
 			if gop.Duration > 0 {
 				assert.Greater(t, gop.BitRate, int64(0))
@@ -138,7 +138,7 @@ func TestBuffer_DropFrames_UpdatesDuration(t *testing.T) {
 		MaxDuration: time.Minute,
 	}
 	buffer := NewBuffer("test-stream", config, logger)
-	
+
 	// Create a GOP with B frames
 	gop := &GOP{
 		ID:       1,
@@ -164,24 +164,24 @@ func TestBuffer_DropFrames_UpdatesDuration(t *testing.T) {
 		PFrames:    1,
 		TotalSize:  2100,
 	}
-	
+
 	// Add GOP to buffer
 	buffer.AddGOP(gop)
-	
+
 	// Verify initial state
 	assert.Equal(t, time.Millisecond*100, gop.Duration)
 	assert.Equal(t, int64(9000), gop.EndPTS)
-	
+
 	// Drop B frames (should trigger duration update)
 	dropped := buffer.dropBFrames(1)
-	
+
 	// Verify frames were dropped
 	assert.Equal(t, 2, len(dropped))
 	assert.Equal(t, 2, len(gop.Frames))
-	
+
 	// Verify duration was updated
 	expectedDuration := time.Duration(33333333) // ~33.3ms (3000 PTS units at 90kHz)
 	assert.Equal(t, expectedDuration, gop.Duration)
-	assert.Equal(t, int64(3000), gop.EndPTS)   // End PTS should be updated
-	assert.Equal(t, int64(0), gop.StartPTS)    // Start PTS should remain 0
+	assert.Equal(t, int64(3000), gop.EndPTS) // End PTS should be updated
+	assert.Equal(t, int64(0), gop.StartPTS)  // Start PTS should remain 0
 }

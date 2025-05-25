@@ -86,7 +86,7 @@ func TestVideoPipeline_OutputChannelSafety(t *testing.T) {
 				return
 			}
 		}()
-		
+
 		// Try to read from output again - should get nothing (channel is closed)
 		output2 := pipeline.GetOutput()
 		select {
@@ -212,7 +212,7 @@ func TestVideoPipeline_OutputChannelCloseOnce(t *testing.T) {
 	// Stop multiple times - should not panic
 	var wg sync.WaitGroup
 	errors := make([]error, 10)
-	
+
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		idx := i

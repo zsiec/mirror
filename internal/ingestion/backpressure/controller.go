@@ -13,45 +13,45 @@ import (
 // Controller implements video-aware backpressure control
 type Controller struct {
 	streamID string
-	
+
 	// Pressure levels
-	currentPressure  atomic.Value // float64
-	targetPressure   float64
-	
+	currentPressure atomic.Value // float64
+	targetPressure  float64
+
 	// Rate control
-	currentRate      atomic.Int64  // bytes per second
-	minRate          int64         // minimum allowed rate
-	maxRate          int64         // maximum allowed rate
-	
+	currentRate atomic.Int64 // bytes per second
+	minRate     int64        // minimum allowed rate
+	maxRate     int64        // maximum allowed rate
+
 	// GOP-aware adjustments
-	gopStats         *gop.GOPStatistics
-	avgGOPSize       int64
-	avgGOPDuration   time.Duration
-	
+	gopStats       *gop.GOPStatistics
+	avgGOPSize     int64
+	avgGOPDuration time.Duration
+
 	// Adjustment parameters
-	increaseRatio    float64       // How much to increase rate when pressure is low
-	decreaseRatio    float64       // How much to decrease rate when pressure is high
-	adjustInterval   time.Duration // How often to adjust rates
-	
+	increaseRatio  float64       // How much to increase rate when pressure is low
+	decreaseRatio  float64       // How much to decrease rate when pressure is high
+	adjustInterval time.Duration // How often to adjust rates
+
 	// History for smoothing
-	pressureHistory  []float64
-	historySize      int
-	
+	pressureHistory []float64
+	historySize     int
+
 	// Callbacks
-	onRateChange     func(newRate int64)
-	onDropGOP        func(gopID uint64)
-	
+	onRateChange func(newRate int64)
+	onDropGOP    func(gopID uint64)
+
 	// Statistics
-	adjustmentCount  atomic.Uint64
-	gopsDropped      atomic.Uint64
-	lastAdjustment   time.Time
-	
+	adjustmentCount atomic.Uint64
+	gopsDropped     atomic.Uint64
+	lastAdjustment  time.Time
+
 	// Lifecycle
-	ctx              context.Context
-	cancel           context.CancelFunc
-	
-	mu               sync.RWMutex
-	logger           logger.Logger
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	mu     sync.RWMutex
+	logger logger.Logger
 }
 
 // Config configures the backpressure controller
@@ -68,7 +68,7 @@ type Config struct {
 // NewController creates a new backpressure controller
 func NewController(streamID string, config Config, logger logger.Logger) *Controller {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	c := &Controller{
 		streamID:        streamID,
 		targetPressure:  config.TargetPressure,
@@ -83,11 +83,11 @@ func NewController(streamID string, config Config, logger logger.Logger) *Contro
 		cancel:          cancel,
 		logger:          logger.WithField("component", "backpressure_controller"),
 	}
-	
+
 	// Set initial rate to max
 	c.currentRate.Store(config.MaxRate)
 	c.currentPressure.Store(0.0)
-	
+
 	return c
 }
 
@@ -105,7 +105,7 @@ func (c *Controller) Stop() {
 func (c *Controller) controlLoop() {
 	ticker := time.NewTicker(c.adjustInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -120,10 +120,10 @@ func (c *Controller) controlLoop() {
 // UpdatePressure updates the current pressure reading
 func (c *Controller) UpdatePressure(pressure float64) {
 	c.currentPressure.Store(pressure)
-	
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	// Add to history
 	c.pressureHistory = append(c.pressureHistory, pressure)
 	if len(c.pressureHistory) > c.historySize {
@@ -135,9 +135,9 @@ func (c *Controller) UpdatePressure(pressure float64) {
 func (c *Controller) UpdateGOPStats(stats *gop.GOPStatistics) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	c.gopStats = stats
-	
+
 	// Calculate average GOP size if we have data
 	if stats.AverageGOPSize > 0 && stats.AverageDuration > 0 {
 		// Average GOP size in bytes (assuming average frame size * GOP size)
@@ -151,10 +151,10 @@ func (c *Controller) adjustRate() {
 	currentPressure := c.GetPressure()
 	smoothedPressure := c.GetSmoothedPressure()
 	currentRate := c.currentRate.Load()
-	
+
 	// Use current pressure for immediate responsiveness, but consider smoothed for stability
 	pressure := currentPressure
-	
+
 	// If there's a significant difference between current and smoothed pressure,
 	// use a weighted blend favoring immediate response to rapid changes
 	pressureDiff := currentPressure - smoothedPressure
@@ -165,9 +165,9 @@ func (c *Controller) adjustRate() {
 		// Stable conditions, use smoothed pressure
 		pressure = smoothedPressure
 	}
-	
+
 	var newRate int64
-	
+
 	if pressure < c.targetPressure*0.9 {
 		// Low pressure - increase rate
 		newRate = c.calculateIncreaseRate(currentRate, pressure)
@@ -178,13 +178,13 @@ func (c *Controller) adjustRate() {
 		// Within target range - minor adjustments
 		newRate = c.calculateStableRate(currentRate, pressure)
 	}
-	
+
 	// Apply GOP-aware adjustments
 	newRate = c.applyGOPAdjustments(newRate, pressure)
-	
+
 	// Enforce limits
 	newRate = c.enforceRateLimits(newRate)
-	
+
 	// Apply new rate if changed at all (even small changes matter for responsiveness)
 	if newRate != currentRate {
 		c.currentRate.Store(newRate)
@@ -192,18 +192,18 @@ func (c *Controller) adjustRate() {
 		c.mu.Lock()
 		c.lastAdjustment = time.Now()
 		c.mu.Unlock()
-		
+
 		if c.onRateChange != nil {
 			c.onRateChange(newRate)
 		}
-		
+
 		c.logger.WithFields(map[string]interface{}{
-			"old_rate":        currentRate,
-			"new_rate":        newRate,
-			"pressure":        pressure,
-			"current_pressure": currentPressure,
+			"old_rate":          currentRate,
+			"new_rate":          newRate,
+			"pressure":          pressure,
+			"current_pressure":  currentPressure,
 			"smoothed_pressure": smoothedPressure,
-			"target":          c.targetPressure,
+			"target":            c.targetPressure,
 		}).Info("Rate adjusted")
 	}
 }
@@ -215,7 +215,7 @@ func (c *Controller) calculateIncreaseRate(currentRate int64, pressure float64) 
 	if pressure < c.targetPressure*0.5 {
 		multiplier *= 1.5
 	}
-	
+
 	return int64(float64(currentRate) * multiplier)
 }
 
@@ -228,7 +228,7 @@ func (c *Controller) calculateDecreaseRate(currentRate int64, pressure float64) 
 	} else if pressure > 0.8 {
 		multiplier *= 0.7
 	}
-	
+
 	return int64(float64(currentRate) * multiplier)
 }
 
@@ -237,7 +237,7 @@ func (c *Controller) calculateStableRate(currentRate int64, pressure float64) in
 	// Small proportional adjustment
 	error := c.targetPressure - pressure
 	adjustment := 1.0 + (error * 0.1) // 10% adjustment per unit error
-	
+
 	return int64(float64(currentRate) * adjustment)
 }
 
@@ -245,18 +245,18 @@ func (c *Controller) calculateStableRate(currentRate int64, pressure float64) in
 func (c *Controller) applyGOPAdjustments(rate int64, pressure float64) int64 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	if c.avgGOPSize == 0 || c.avgGOPDuration == 0 {
 		return rate
 	}
-	
+
 	// Calculate GOPs per second we can handle at this rate
 	gopsPerSecond := float64(rate) / float64(c.avgGOPSize)
 	if gopsPerSecond < 0.1 {
 		gopsPerSecond = 0.1 // Minimum 0.1 GOPs per second
 	}
 	gopInterval := time.Duration(float64(time.Second) / gopsPerSecond)
-	
+
 	// If we're dropping below 1 GOP per second, snap to GOP boundaries
 	if gopInterval > time.Second {
 		// Round to nearest GOP rate
@@ -267,14 +267,14 @@ func (c *Controller) applyGOPAdjustments(rate int64, pressure float64) int64 {
 			// Otherwise, maintain at least 1 GOP per second
 			rate = c.avgGOPSize
 		}
-		
+
 		c.logger.WithFields(map[string]interface{}{
-			"gops_per_sec": gopsPerSecond,
-			"gop_interval": gopInterval,
+			"gops_per_sec":  gopsPerSecond,
+			"gop_interval":  gopInterval,
 			"adjusted_rate": rate,
 		}).Debug("Applied GOP boundary adjustment")
 	}
-	
+
 	return rate
 }
 
@@ -293,11 +293,11 @@ func (c *Controller) enforceRateLimits(rate int64) int64 {
 func (c *Controller) GetSmoothedPressure() float64 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	if len(c.pressureHistory) == 0 {
 		return c.currentPressure.Load().(float64)
 	}
-	
+
 	// Calculate weighted average (recent values weighted more)
 	var sum, weightSum float64
 	for i, p := range c.pressureHistory {
@@ -305,7 +305,7 @@ func (c *Controller) GetSmoothedPressure() float64 {
 		sum += p * weight
 		weightSum += weight
 	}
-	
+
 	return sum / weightSum
 }
 
@@ -325,23 +325,23 @@ func (c *Controller) ShouldDropGOP(pressure float64) bool {
 	if pressure < 0.9 {
 		return false
 	}
-	
+
 	// Check if we're already at minimum rate
 	currentRate := c.currentRate.Load()
 	if currentRate <= c.minRate {
 		return true
 	}
-	
+
 	// Check if we're below 1 GOP per second
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	if c.avgGOPSize > 0 {
 		gopsPerSecond := float64(currentRate) / float64(c.avgGOPSize)
 		// Under extreme pressure, drop GOPs if rate is low relative to GOP size
 		return gopsPerSecond < 3.0 || pressure >= 0.95
 	}
-	
+
 	return false
 }
 
@@ -359,7 +359,7 @@ func (c *Controller) SetGOPDropCallback(callback func(gopID uint64)) {
 func (c *Controller) GetStatistics() Statistics {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	stats := Statistics{
 		CurrentRate:      c.currentRate.Load(),
 		CurrentPressure:  c.currentPressure.Load().(float64),
@@ -371,11 +371,11 @@ func (c *Controller) GetStatistics() Statistics {
 		MinRate:          c.minRate,
 		MaxRate:          c.maxRate,
 	}
-	
+
 	if c.gopStats != nil {
 		stats.GOPsPerSecond = float64(c.currentRate.Load()) / float64(c.avgGOPSize)
 	}
-	
+
 	return stats
 }
 

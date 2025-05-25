@@ -23,7 +23,7 @@ type ExponentialBackoff struct {
 	MaxDelay     time.Duration
 	Multiplier   float64
 	MaxRetries   int
-	
+
 	currentDelay time.Duration
 	retryCount   int
 	mu           sync.Mutex
@@ -67,22 +67,22 @@ func (e *ExponentialBackoff) NextDelay() (time.Duration, bool) {
 func (e *ExponentialBackoff) Reset() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	
+
 	e.currentDelay = e.InitialDelay
 	e.retryCount = 0
 }
 
 // Manager handles reconnection logic for a connection
 type Manager struct {
-	strategy   Strategy
-	logger     *logrus.Logger
-	onConnect  func(ctx context.Context) error
-	onSuccess  func()
-	onFailure  func(err error)
-	
-	mu       sync.Mutex
-	running  bool
-	stopCh   chan struct{}
+	strategy  Strategy
+	logger    *logrus.Logger
+	onConnect func(ctx context.Context) error
+	onSuccess func()
+	onFailure func(err error)
+
+	mu      sync.Mutex
+	running bool
+	stopCh  chan struct{}
 }
 
 // NewManager creates a new reconnection manager
@@ -98,7 +98,7 @@ func NewManager(strategy Strategy, logger *logrus.Logger) *Manager {
 func (m *Manager) SetCallbacks(onConnect func(context.Context) error, onSuccess func(), onFailure func(error)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.onConnect = onConnect
 	m.onSuccess = onSuccess
 	m.onFailure = onFailure
@@ -121,11 +121,11 @@ func (m *Manager) Start(ctx context.Context) {
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if !m.running {
 		return
 	}
-	
+
 	m.running = false
 	close(m.stopCh)
 }
@@ -188,7 +188,7 @@ func (m *Manager) reconnectLoop(ctx context.Context) {
 type LinearBackoff struct {
 	Delay      time.Duration
 	MaxRetries int
-	
+
 	retryCount int
 	mu         sync.Mutex
 }
@@ -226,7 +226,7 @@ func calculateBackoff(attempt int, base time.Duration, max time.Duration) time.D
 	if attempt <= 0 {
 		return base
 	}
-	
+
 	backoff := base * time.Duration(math.Pow(2, float64(attempt-1)))
 	if backoff > max {
 		return max

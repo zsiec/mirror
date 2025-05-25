@@ -12,74 +12,74 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/zsiec/mirror/internal/config"
-	"github.com/zsiec/mirror/internal/metrics"
 	"github.com/zsiec/mirror/internal/ingestion/codec"
 	"github.com/zsiec/mirror/internal/ingestion/ratelimit"
 	"github.com/zsiec/mirror/internal/ingestion/registry"
 	"github.com/zsiec/mirror/internal/ingestion/types"
 	"github.com/zsiec/mirror/internal/logger"
+	"github.com/zsiec/mirror/internal/metrics"
 )
 
 type Session struct {
-	streamID       string
-	remoteAddr     *net.UDPAddr
-	ssrc           uint32
-	registry       registry.Registry
-	rateLimiter    ratelimit.RateLimiter
-	logger         logger.Logger
-	depacketizer   codec.Depacketizer
-	codecType      codec.Type
-	codecDetector  *codec.Detector
-	codecFactory   *codec.DepacketizerFactory
-	lastPacket     time.Time
+	streamID        string
+	remoteAddr      *net.UDPAddr
+	ssrc            uint32
+	registry        registry.Registry
+	rateLimiter     ratelimit.RateLimiter
+	logger          logger.Logger
+	depacketizer    codec.Depacketizer
+	codecType       codec.Type
+	codecDetector   *codec.Detector
+	codecFactory    *codec.DepacketizerFactory
+	lastPacket      time.Time
 	firstPacketTime time.Time
-	stats          *SessionStats
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	mu             sync.RWMutex
-	paused         int32
-	timeout        time.Duration
-	
+	stats           *SessionStats
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	mu              sync.RWMutex
+	paused          int32
+	timeout         time.Duration
+
 	// Codec detection results
 	detectedClockRate uint32
 	mediaFormat       string
 	encodingName      string
-	
+
 	// Backpressure control
 	rtcpCallback   func(nackCount int) // Callback for RTCP feedback
 	backpressureMu sync.RWMutex
-	
+
 	// Ensure codec update only happens once
 	codecUpdateOnce sync.Once
 }
 
 type SessionStats struct {
-	PacketsReceived  uint64
-	BytesReceived    uint64
-	LastPayloadType  uint8
-	PacketsLost      uint64
-	RateLimitDrops   uint64
-	BufferOverflows  uint64
-	LastSequence     uint16
-	InitialSequence  uint16
-	Jitter           float64
-	LastPacketTime   time.Time
-	StartTime        time.Time
+	PacketsReceived   uint64
+	BytesReceived     uint64
+	LastPayloadType   uint8
+	PacketsLost       uint64
+	RateLimitDrops    uint64
+	BufferOverflows   uint64
+	LastSequence      uint16
+	InitialSequence   uint16
+	Jitter            float64
+	LastPacketTime    time.Time
+	StartTime         time.Time
 	LastBytesReceived uint64 // For delta calculation
-	LastStatsTime    time.Time
+	LastStatsTime     time.Time
 }
 
-func NewSession(streamID string, remoteAddr *net.UDPAddr, ssrc uint32, 
+func NewSession(streamID string, remoteAddr *net.UDPAddr, ssrc uint32,
 	reg registry.Registry, codecsCfg *config.CodecsConfig, logger logger.Logger) (*Session, error) {
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Create codec detector and factory
 	// TODO: Pass memory controller from listener/manager
 	codecDetector := codec.NewDetector()
 	codecFactory := codec.NewDepacketizerFactory(nil)
-	
+
 	session := &Session{
 		streamID:      streamID,
 		remoteAddr:    remoteAddr,
@@ -96,7 +96,7 @@ func NewSession(streamID string, remoteAddr *net.UDPAddr, ssrc uint32,
 		ctx:    ctx,
 		cancel: cancel,
 	}
-	
+
 	// Register stream with unknown codec initially
 	stream := &registry.Stream{
 		ID:         streamID,
@@ -106,12 +106,12 @@ func NewSession(streamID string, remoteAddr *net.UDPAddr, ssrc uint32,
 		CreatedAt:  time.Now(),
 		VideoCodec: codecsCfg.Preferred, // Use preferred codec as default
 	}
-	
+
 	if err := reg.Register(ctx, stream); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to register stream: %w", err)
 	}
-	
+
 	return session, nil
 }
 
@@ -136,27 +136,24 @@ func (s *Session) Start() {
 func (s *Session) Stop() {
 	s.cancel()
 	s.wg.Wait()
-	
+
 	// Unregister stream
 	if err := s.registry.Unregister(s.ctx, s.streamID); err != nil {
 		s.logger.WithError(err).Error("Failed to unregister stream")
 	}
-	
-	
+
 	s.logger.Info("RTP session stopped")
 }
-
-
 
 func (s *Session) updateStats(packet *rtp.Packet, size int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Update basic stats
 	atomic.AddUint64(&s.stats.PacketsReceived, 1)
 	atomic.AddUint64(&s.stats.BytesReceived, uint64(size))
 	s.stats.LastPacketTime = time.Now()
-	
+
 	// Check for packet loss
 	if s.stats.PacketsReceived == 1 {
 		s.stats.InitialSequence = packet.SequenceNumber
@@ -181,13 +178,13 @@ func (s *Session) SetSDP(sdp string) error {
 	if err != nil {
 		return fmt.Errorf("failed to detect codec from SDP: %w", err)
 	}
-	
+
 	// Create depacketizer for detected codec
 	depacketizer, err := s.codecFactory.Create(codecType, s.streamID)
 	if err != nil {
 		return fmt.Errorf("failed to create depacketizer for codec %s: %w", codecType, err)
 	}
-	
+
 	s.mu.Lock()
 	// Only update if not already detected (avoid race with handleCodecDetection)
 	if s.codecType == codec.TypeUnknown {
@@ -198,7 +195,7 @@ func (s *Session) SetSDP(sdp string) error {
 		return fmt.Errorf("codec mismatch: SDP indicates %s but already detected %s", codecType, s.codecType)
 	}
 	s.mu.Unlock()
-	
+
 	// Update stream in registry (do async to avoid blocking)
 	// Use sync.Once to ensure this only happens once to prevent race conditions
 	s.codecUpdateOnce.Do(func() {
@@ -210,16 +207,16 @@ func (s *Session) SetSDP(sdp string) error {
 			}
 		}()
 	})
-	
+
 	s.logger.WithFields(map[string]interface{}{
-		"codec":    codecType,
-		"profile":  codecInfo.Profile,
-		"level":    codecInfo.Level,
-		"width":    codecInfo.Width,
-		"height":   codecInfo.Height,
-		"fps":      codecInfo.FrameRate,
+		"codec":   codecType,
+		"profile": codecInfo.Profile,
+		"level":   codecInfo.Level,
+		"width":   codecInfo.Width,
+		"height":  codecInfo.Height,
+		"fps":     codecInfo.FrameRate,
 	}).Info("Configured session from SDP")
-	
+
 	return nil
 }
 
@@ -227,11 +224,11 @@ func (s *Session) SetSDP(sdp string) error {
 func (s *Session) IsTimedOut() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	if s.timeout <= 0 {
 		return false // No timeout configured
 	}
-	
+
 	return time.Since(s.lastPacket) > s.timeout
 }
 
@@ -244,10 +241,10 @@ func (s *Session) GetLastPacketTime() time.Time {
 
 func (s *Session) reportStats() {
 	defer s.wg.Done()
-	
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -256,12 +253,12 @@ func (s *Session) reportStats() {
 			s.mu.RLock()
 			stats := *s.stats
 			s.mu.RUnlock()
-			
+
 			now := time.Now()
 			packetsReceived := atomic.LoadUint64(&stats.PacketsReceived)
 			bytesReceived := atomic.LoadUint64(&stats.BytesReceived)
 			packetsLost := atomic.LoadUint64(&stats.PacketsLost)
-			
+
 			// Calculate bitrate from delta
 			bitrate := float64(0)
 			if !stats.LastStatsTime.IsZero() {
@@ -281,13 +278,13 @@ func (s *Session) reportStats() {
 					}
 				}
 			}
-			
+
 			// Update last values for next calculation
 			s.mu.Lock()
 			s.stats.LastBytesReceived = bytesReceived
 			s.stats.LastStatsTime = now
 			s.mu.Unlock()
-			
+
 			// Update Prometheus metrics
 			metrics.UpdateStreamMetrics(
 				s.streamID,
@@ -297,19 +294,19 @@ func (s *Session) reportStats() {
 				int64(packetsLost),
 				bitrate,
 			)
-			
+
 			// Update jitter metric if available
 			if stats.Jitter > 0 {
 				metrics.SetRTPJitter(s.streamID, stats.Jitter*1000) // Convert to ms
 			}
-			
+
 			// Calculate total duration for logging
 			totalDuration := time.Since(stats.StartTime).Seconds()
 			packetRate := float64(0)
 			if totalDuration > 0 {
 				packetRate = float64(packetsReceived) / totalDuration
 			}
-			
+
 			s.logger.WithFields(map[string]interface{}{
 				"packets_received": packetsReceived,
 				"bytes_received":   bytesReceived,
@@ -317,14 +314,14 @@ func (s *Session) reportStats() {
 				"bitrate_mbps":     bitrate / 1e6,
 				"packet_rate":      packetRate,
 			}).Info("RTP session statistics")
-			
+
 			// Update stream in registry with stats
 			stream, err := s.registry.Get(s.ctx, s.streamID)
 			if err != nil {
 				s.logger.WithError(err).Error("Failed to get stream from registry")
 				continue
 			}
-			
+
 			// Update stream stats
 			stream.PacketsReceived = int64(packetsReceived)
 			stream.BytesReceived = int64(bytesReceived)
@@ -333,7 +330,7 @@ func (s *Session) reportStats() {
 			bitrateKbps := int64(bitrate / 1000)
 			_ = bitrateKbps // TODO: Add BitrateKbps field to Stream struct
 			stream.LastHeartbeat = time.Now()
-			
+
 			// Update stream in registry by re-registering
 			if err := s.registry.Register(s.ctx, stream); err != nil {
 				s.logger.WithError(err).Error("Failed to update stream in registry")
@@ -383,17 +380,17 @@ func (s *Session) GetEncodingName() string {
 func (s *Session) GetClockRate() uint32 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	// Return detected clock rate if available (from SDP)
 	if s.detectedClockRate > 0 {
 		return s.detectedClockRate
 	}
-	
+
 	// Try to get clock rate from static payload type
 	if clockRate := types.GetClockRateForPayloadType(s.stats.LastPayloadType); clockRate > 0 {
 		return clockRate
 	}
-	
+
 	// Default based on codec type if known
 	if s.codecType != codec.TypeUnknown {
 		switch s.codecType {
@@ -407,7 +404,7 @@ func (s *Session) GetClockRate() uint32 {
 			return 8000 // Default audio clock rate
 		}
 	}
-	
+
 	return 90000 // Default video clock rate
 }
 
@@ -415,15 +412,15 @@ func (s *Session) GetClockRate() uint32 {
 func (s *Session) SetSDPInfo(mediaFormat, encodingName string, clockRate uint32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	s.mediaFormat = mediaFormat
 	s.encodingName = encodingName
 	s.detectedClockRate = clockRate
-	
+
 	s.logger.WithFields(map[string]interface{}{
-		"media_format": mediaFormat,
+		"media_format":  mediaFormat,
 		"encoding_name": encodingName,
-		"clock_rate": clockRate,
+		"clock_rate":    clockRate,
 	}).Debug("Updated session with SDP info")
 }
 
@@ -433,15 +430,15 @@ func (s *Session) ProcessRTCPPacket(data []byte) {
 	if atomic.LoadInt32(&s.paused) == 1 {
 		return
 	}
-	
+
 	// Update last packet time
 	s.mu.Lock()
 	s.lastPacket = time.Now()
 	s.mu.Unlock()
-	
+
 	// Log RTCP packet (simplified for now - can be enhanced later)
 	s.logger.WithField("size", len(data)).Debug("Received RTCP packet")
-	
+
 	// TODO: Parse and process RTCP packet for statistics, feedback, etc.
 }
 
@@ -456,7 +453,7 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 		s.mu.Unlock()
 		detectedType, err := s.codecDetector.DetectFromRTPPacket(packet)
 		s.mu.Lock()
-		
+
 		// Check again in case another goroutine detected it
 		if s.codecType == codec.TypeUnknown && err == nil && detectedType != codec.TypeUnknown {
 			s.codecType = detectedType
@@ -471,7 +468,7 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 				return false
 			}
 			s.depacketizer = depacketizer
-			
+
 			// Update stream codec in registry (do this async to avoid holding lock)
 			// Use sync.Once to ensure this only happens once to prevent race conditions
 			s.codecUpdateOnce.Do(func() {
@@ -483,11 +480,11 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 					}
 				}()
 			})
-			
+
 			s.logger.WithField("codec", detectedType).Info("Detected video codec")
 		}
 	}
-	
+
 	// Skip if depacketizer not yet initialized (codec not detected)
 	if s.depacketizer == nil {
 		// Check for codec detection timeout (10 seconds)
@@ -502,14 +499,14 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 			atomic.StoreInt32(&s.paused, 1)
 			return false
 		}
-		
+
 		// Log once per second to avoid spam
 		if time.Since(s.lastPacket) > time.Second {
 			s.logger.Warn("Dropping RTP packets: codec not detected yet")
 		}
 		return false
 	}
-	
+
 	return true
 }
 
@@ -518,7 +515,7 @@ func (s *Session) ProcessPacket(packet *rtp.Packet) {
 	if atomic.LoadInt32(&s.paused) == 1 {
 		return
 	}
-	
+
 	// Apply rate limiting if configured
 	packetSize := len(packet.Payload) + 12 // RTP header is 12 bytes
 	if s.rateLimiter != nil {
@@ -527,19 +524,19 @@ func (s *Session) ProcessPacket(packet *rtp.Packet) {
 			return
 		}
 	}
-	
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Update last packet time
 	s.lastPacket = time.Now()
-	
+
 	// Update statistics
 	s.stats.PacketsReceived++
 	s.stats.BytesReceived += uint64(len(packet.Payload))
 	s.stats.LastPacketTime = s.lastPacket
 	s.stats.LastPayloadType = packet.PayloadType
-	
+
 	// Check for packet loss
 	if s.stats.LastSequence != 0 {
 		expectedSeq := s.stats.LastSequence + 1
@@ -555,19 +552,19 @@ func (s *Session) ProcessPacket(packet *rtp.Packet) {
 		s.stats.InitialSequence = packet.SequenceNumber
 	}
 	s.stats.LastSequence = packet.SequenceNumber
-	
+
 	// Handle codec detection with depacketizer initialization
 	if !s.handleCodecDetection(packet) {
 		return
 	}
-	
+
 	// Depacketize RTP payload
 	_, err := s.depacketizer.Depacketize(packet)
 	if err != nil {
 		s.logger.WithError(err).Debug("Failed to depacketize RTP payload")
 		return
 	}
-	
+
 	// Handler will process the NAL units, session just tracks stats
 }
 
@@ -576,7 +573,7 @@ func (s *Session) ProcessRTCP(data []byte) {
 	// For now, just log that we received RTCP
 	// In a full implementation, we would parse SR/RR packets and send feedback
 	s.logger.WithField("size", len(data)).Debug("Received RTCP packet")
-	
+
 	// TODO: Parse RTCP packets and extract useful information:
 	// - Sender Reports (SR) for synchronization
 	// - Receiver Reports (RR) for feedback
@@ -608,17 +605,17 @@ func (s *Session) SendRTCPFeedback(nackCount int) error {
 	s.backpressureMu.RLock()
 	callback := s.rtcpCallback
 	s.backpressureMu.RUnlock()
-	
+
 	if callback != nil {
 		callback(nackCount)
 	}
-	
+
 	// In a real implementation, we would send actual RTCP NACK packets here
 	s.logger.WithFields(map[string]interface{}{
 		"stream_id":  s.streamID,
 		"nack_count": nackCount,
 	}).Debug("Sending RTCP feedback")
-	
+
 	return nil
 }
 
@@ -636,14 +633,14 @@ func (s *Session) GetProtocol() string {
 func (s *Session) GetBitrate() int64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	// Calculate bitrate from stats
 	now := time.Now()
 	duration := now.Sub(s.firstPacketTime).Seconds()
 	if duration <= 0 {
 		return 0
 	}
-	
+
 	bytesReceived := atomic.LoadUint64(&s.stats.BytesReceived)
 	return int64(float64(bytesReceived*8) / duration)
 }

@@ -111,23 +111,23 @@ func (c *TimeBaseConverterChain) Convert(pts int64) int64 {
 
 // CommonTimeBases provides commonly used time bases
 var CommonTimeBases = struct {
-	Video90kHz     types.Rational
-	Video48kHz     types.Rational
-	Audio48kHz     types.Rational
-	Audio44_1kHz   types.Rational
-	NTSC29_97fps   types.Rational
-	Film23_976fps  types.Rational
-	Milliseconds   types.Rational
-	Microseconds   types.Rational
+	Video90kHz    types.Rational
+	Video48kHz    types.Rational
+	Audio48kHz    types.Rational
+	Audio44_1kHz  types.Rational
+	NTSC29_97fps  types.Rational
+	Film23_976fps types.Rational
+	Milliseconds  types.Rational
+	Microseconds  types.Rational
 }{
-	Video90kHz:     types.Rational{Num: 1, Den: 90000},
-	Video48kHz:     types.Rational{Num: 1, Den: 48000},
-	Audio48kHz:     types.Rational{Num: 1, Den: 48000},
-	Audio44_1kHz:   types.Rational{Num: 1, Den: 44100},
-	NTSC29_97fps:   types.Rational{Num: 1001, Den: 30000},
-	Film23_976fps:  types.Rational{Num: 1001, Den: 24000},
-	Milliseconds:   types.Rational{Num: 1, Den: 1000},
-	Microseconds:   types.Rational{Num: 1, Den: 1000000},
+	Video90kHz:    types.Rational{Num: 1, Den: 90000},
+	Video48kHz:    types.Rational{Num: 1, Den: 48000},
+	Audio48kHz:    types.Rational{Num: 1, Den: 48000},
+	Audio44_1kHz:  types.Rational{Num: 1, Den: 44100},
+	NTSC29_97fps:  types.Rational{Num: 1001, Den: 30000},
+	Film23_976fps: types.Rational{Num: 1001, Den: 24000},
+	Milliseconds:  types.Rational{Num: 1, Den: 1000},
+	Microseconds:  types.Rational{Num: 1, Den: 1000000},
 }
 
 // ConvertToMilliseconds is a convenience function to convert any time base to milliseconds

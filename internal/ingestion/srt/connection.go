@@ -10,7 +10,7 @@ import (
 	"time"
 
 	srt "github.com/datarhei/gosrt"
-	
+
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/internal/ingestion/buffer"
 	"github.com/zsiec/mirror/internal/ingestion/ratelimit"
@@ -28,17 +28,17 @@ type Connection struct {
 	logger      logger.Logger
 	config      *config.SRTConfig
 
-	startTime       time.Time
-	lastActive      time.Time
-	stats           ConnectionStats
-	closed          int32
-	paused          int32
-	statsInterval   time.Duration
-	
+	startTime     time.Time
+	lastActive    time.Time
+	stats         ConnectionStats
+	closed        int32
+	paused        int32
+	statsInterval time.Duration
+
 	// Backpressure control
-	maxBandwidth    int64 // Current max bandwidth setting
-	backpressureMu  sync.RWMutex
-	
+	maxBandwidth   int64 // Current max bandwidth setting
+	backpressureMu sync.RWMutex
+
 	// Cleanup synchronization
 	done      chan struct{}
 	closeOnce sync.Once
@@ -46,13 +46,13 @@ type Connection struct {
 
 // ConnectionStats holds connection statistics
 type ConnectionStats struct {
-	BytesReceived   int64
-	PacketsReceived int64
-	PacketsLost     int64
-	Bitrate         int64
-	RateLimitDrops  int64
-	BufferOverflows int64
-	LastUpdate      time.Time
+	BytesReceived     int64
+	PacketsReceived   int64
+	PacketsLost       int64
+	Bitrate           int64
+	RateLimitDrops    int64
+	BufferOverflows   int64
+	LastUpdate        time.Time
 	LastBytesReceived int64 // For delta calculation
 }
 
@@ -71,20 +71,20 @@ func (c *Connection) ReadLoop(ctx context.Context) error {
 	// Create a child context that we control
 	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	
+
 	// Ensure cleanup happens
 	defer func() {
 		c.closeOnce.Do(func() {
 			close(c.done)
 			c.conn.Close()
-			
+
 			// Log any cleanup errors
 			if err := recover(); err != nil {
 				c.logger.Errorf("Panic during cleanup: %v", err)
 			}
 		})
 	}()
-	
+
 	readBuffer := make([]byte, buffer.MaxPacketSize)
 
 	// Stats ticker - use configurable interval or default to 5 seconds
@@ -141,10 +141,10 @@ func (c *Connection) ReadLoop(ctx context.Context) error {
 
 				// Log error and apply backoff
 				c.logger.Errorf("Read error for stream %s: %v", c.streamID, err)
-				
+
 				// Update status to error
 				c.registry.UpdateStatus(ctx, c.streamID, registry.StatusError)
-				
+
 				// Wait with backoff before retrying
 				select {
 				case <-ctx.Done():
@@ -192,7 +192,7 @@ func (c *Connection) updateStats() {
 		currentBytes := atomic.LoadInt64(&c.stats.BytesReceived)
 		lastBytes := atomic.LoadInt64(&c.stats.LastBytesReceived)
 		deltaBytes := currentBytes - lastBytes
-		
+
 		// Calculate bitrate from delta
 		var bitrate int64
 		if deltaBytes < 0 {
@@ -206,7 +206,7 @@ func (c *Connection) updateStats() {
 			bitrate = int64(float64(deltaBytes*8) / duration)
 		}
 		atomic.StoreInt64(&c.stats.Bitrate, bitrate)
-		
+
 		// Update last bytes for next calculation
 		atomic.StoreInt64(&c.stats.LastBytesReceived, currentBytes)
 	}
@@ -259,7 +259,7 @@ func (c *Connection) Close() error {
 			c.conn.Close()
 		}
 	})
-	
+
 	return nil
 }
 
@@ -280,19 +280,19 @@ func NewExponentialBackoff() *ExponentialBackoff {
 // Next returns the next backoff duration
 func (b *ExponentialBackoff) Next() time.Duration {
 	b.attempt++
-	
+
 	// Calculate exponential backoff: 2^attempt * 100ms
 	wait := time.Duration(math.Pow(2, float64(b.attempt))) * 100 * time.Millisecond
-	
+
 	// Cap at max wait
 	if wait > b.maxWait {
 		wait = b.maxWait
 	}
-	
+
 	// Add jitter (±25%)
 	jitter := time.Duration(float64(wait) * 0.25 * (2*rand.Float64() - 1))
 	wait += jitter
-	
+
 	return wait
 }
 
@@ -324,25 +324,25 @@ func (c *Connection) GetMaxBW() int64 {
 func (c *Connection) SetMaxBW(bps int64) error {
 	c.backpressureMu.Lock()
 	defer c.backpressureMu.Unlock()
-	
+
 	// Store the setting
 	c.maxBandwidth = bps
-	
+
 	// Note: gosrt doesn't expose SetSockOpt directly
 	// In a real implementation, we would either:
 	// 1. Use a lower-level SRT library that exposes socket options
 	// 2. Implement flow control at the application layer
 	// 3. Close and re-establish the connection with new parameters
-	
+
 	// For now, we'll log the intention and rely on application-layer flow control
 	c.logger.WithFields(map[string]interface{}{
 		"stream_id": c.streamID,
 		"bandwidth": bps,
 	}).Info("SRT bandwidth limit requested (application-layer flow control)")
-	
+
 	// We can implement application-layer throttling in the ReadLoop
 	// by introducing delays when bandwidth exceeds the limit
-	
+
 	return nil
 }
 

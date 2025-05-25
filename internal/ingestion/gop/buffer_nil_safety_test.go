@@ -19,10 +19,10 @@ func TestBuffer_GetFrame_NilSafety(t *testing.T) {
 	buffer := NewBuffer("test-stream", config, logger)
 
 	tests := []struct {
-		name     string
-		setup    func()
-		frameID  uint64
-		wantNil  bool
+		name    string
+		setup   func()
+		frameID uint64
+		wantNil bool
 	}{
 		{
 			name: "non_existent_frame",
@@ -64,10 +64,10 @@ func TestBuffer_GetFrame_NilSafety(t *testing.T) {
 						},
 					},
 				}
-				
+
 				// Add GOP to buffer
 				buffer.AddGOP(gop)
-				
+
 				// Manually corrupt the frame index with wrong position
 				buffer.frameIndex[1] = &FrameLocation{
 					GOP:      gop,
@@ -102,7 +102,7 @@ func TestBuffer_GetFrame_NilSafety(t *testing.T) {
 						},
 					},
 				}
-				
+
 				// Add GOP to buffer properly
 				buffer.AddGOP(gop)
 			},
@@ -117,10 +117,10 @@ func TestBuffer_GetFrame_NilSafety(t *testing.T) {
 			buffer.gops.Init()
 			buffer.frameIndex = make(map[uint64]*FrameLocation)
 			buffer.currentBytes = 0
-			
+
 			// Run setup
 			tt.setup()
-			
+
 			// Test GetFrame - should not panic even with nil GOP
 			assert.NotPanics(t, func() {
 				frame := buffer.GetFrame(tt.frameID)
@@ -170,9 +170,9 @@ func TestBuffer_DropFrames_NilSafety(t *testing.T) {
 			},
 		},
 	}
-	
+
 	buffer.AddGOP(gop)
-	
+
 	// Should handle operations without panic even if internal state is corrupted
 	assert.NotPanics(t, func() {
 		// Even if we had nil GOPs, these operations should be safe

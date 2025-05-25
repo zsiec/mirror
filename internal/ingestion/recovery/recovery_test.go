@@ -17,15 +17,15 @@ func TestHandler_PacketLossRecovery(t *testing.T) {
 		MaxDuration: 30 * time.Second,
 	}
 	gopBuffer := gop.NewBuffer("test-stream", gopBufferConfig, logger)
-	
+
 	config := Config{
 		MaxRecoveryTime:  5 * time.Second,
 		KeyframeTimeout:  2 * time.Second,
 		CorruptionWindow: 10,
 	}
-	
+
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
-	
+
 	// Add a complete GOP to buffer
 	testGOP := &gop.GOP{
 		ID:     1,
@@ -42,7 +42,7 @@ func TestHandler_PacketLossRecovery(t *testing.T) {
 		},
 	}
 	gopBuffer.AddGOP(testGOP)
-	
+
 	// Test packet loss recovery
 	err := handler.HandleError(ErrorTypePacketLoss, 5)
 	assert.NoError(t, err)
@@ -57,15 +57,15 @@ func TestHandler_CorruptionRecovery(t *testing.T) {
 		MaxDuration: 30 * time.Second,
 	}
 	gopBuffer := gop.NewBuffer("test-stream", gopBufferConfig, logger)
-	
+
 	config := Config{
 		MaxRecoveryTime:  5 * time.Second,
 		KeyframeTimeout:  2 * time.Second,
 		CorruptionWindow: 10,
 	}
-	
+
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
-	
+
 	// Add GOP with corrupted frame
 	testGOP := &gop.GOP{
 		ID:     1,
@@ -84,7 +84,7 @@ func TestHandler_CorruptionRecovery(t *testing.T) {
 		FrameCount: 4,
 	}
 	gopBuffer.AddGOP(testGOP)
-	
+
 	// Add another GOP with good keyframe
 	goodGOP := &gop.GOP{
 		ID:     2,
@@ -100,7 +100,7 @@ func TestHandler_CorruptionRecovery(t *testing.T) {
 		FrameCount: 1,
 	}
 	gopBuffer.AddGOP(goodGOP)
-	
+
 	// Test corruption recovery
 	err := handler.HandleError(ErrorTypeCorruption, "frame corruption")
 	assert.NoError(t, err)
@@ -116,15 +116,15 @@ func TestHandler_TimeoutRecovery(t *testing.T) {
 		MaxDuration: 30 * time.Second,
 	}
 	gopBuffer := gop.NewBuffer("test-stream", gopBufferConfig, logger)
-	
+
 	config := Config{
 		MaxRecoveryTime:  5 * time.Second,
 		KeyframeTimeout:  100 * time.Millisecond, // Short timeout for test
 		CorruptionWindow: 10,
 	}
-	
+
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
-	
+
 	// Set old keyframe
 	oldKeyframe := &types.VideoFrame{
 		ID:          1,
@@ -132,7 +132,7 @@ func TestHandler_TimeoutRecovery(t *testing.T) {
 		CaptureTime: time.Now().Add(-2 * time.Second),
 	}
 	handler.UpdateKeyframe(oldKeyframe)
-	
+
 	// Set callbacks
 	keyframeRequested := false
 	handler.SetCallbacks(
@@ -147,13 +147,13 @@ func TestHandler_TimeoutRecovery(t *testing.T) {
 			keyframeRequested = true
 		},
 	)
-	
+
 	// Test timeout recovery
 	err := handler.HandleError(ErrorTypeTimeout, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, StateResyncing, handler.GetState())
 	assert.True(t, keyframeRequested)
-	
+
 	// Wait for timeout
 	time.Sleep(200 * time.Millisecond)
 	assert.Equal(t, StateFailed, handler.GetState())
@@ -166,20 +166,20 @@ func TestHandler_SequenceGapRecovery(t *testing.T) {
 		MaxDuration: 30 * time.Second,
 	}
 	gopBuffer := gop.NewBuffer("test-stream", gopBufferConfig, logger)
-	
+
 	config := Config{
 		MaxRecoveryTime:  5 * time.Second,
 		KeyframeTimeout:  2 * time.Second,
 		CorruptionWindow: 10,
 	}
-	
+
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
-	
+
 	// Test small gap (reordering)
 	err := handler.HandleError(ErrorTypeSequenceGap, 3)
 	assert.NoError(t, err)
 	assert.Equal(t, StateNormal, handler.GetState())
-	
+
 	// Test large gap (packet loss)
 	err = handler.HandleError(ErrorTypeSequenceGap, 10)
 	assert.NoError(t, err)
@@ -193,20 +193,20 @@ func TestHandler_TimestampJumpRecovery(t *testing.T) {
 		MaxDuration: 30 * time.Second,
 	}
 	gopBuffer := gop.NewBuffer("test-stream", gopBufferConfig, logger)
-	
+
 	config := Config{
 		MaxRecoveryTime:  5 * time.Second,
 		KeyframeTimeout:  2 * time.Second,
 		CorruptionWindow: 10,
 	}
-	
+
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
-	
+
 	keyframeRequested := false
 	handler.SetCallbacks(nil, nil, func() {
 		keyframeRequested = true
 	})
-	
+
 	// Test timestamp jump
 	err := handler.HandleError(ErrorTypeTimestampJump, 5*time.Second)
 	assert.NoError(t, err)
@@ -221,20 +221,20 @@ func TestHandler_CodecErrorRecovery(t *testing.T) {
 		MaxDuration: 30 * time.Second,
 	}
 	gopBuffer := gop.NewBuffer("test-stream", gopBufferConfig, logger)
-	
+
 	config := Config{
 		MaxRecoveryTime:  5 * time.Second,
 		KeyframeTimeout:  2 * time.Second,
 		CorruptionWindow: 10,
 	}
-	
+
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
-	
+
 	keyframeRequested := false
 	handler.SetCallbacks(nil, nil, func() {
 		keyframeRequested = true
 	})
-	
+
 	// Test codec error
 	err := handler.HandleError(ErrorTypeCodecError, "invalid NAL unit")
 	assert.NoError(t, err)
@@ -249,19 +249,19 @@ func TestHandler_RecoveryEscalation(t *testing.T) {
 		MaxDuration: 30 * time.Second,
 	}
 	gopBuffer := gop.NewBuffer("test-stream", gopBufferConfig, logger)
-	
+
 	config := Config{
 		MaxRecoveryTime:  100 * time.Millisecond, // Short timeout for test
 		KeyframeTimeout:  2 * time.Second,
 		CorruptionWindow: 10,
 	}
-	
+
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
-	
+
 	// Start recovery
 	handler.setState(StateRecovering)
 	handler.lastRecoveryTime.Store(time.Now().Add(-200 * time.Millisecond))
-	
+
 	// Try to handle another error (should escalate)
 	err := handler.HandleError(ErrorTypePacketLoss, 5)
 	assert.NoError(t, err)
@@ -275,15 +275,15 @@ func TestHandler_UpdateKeyframe(t *testing.T) {
 		MaxDuration: 30 * time.Second,
 	}
 	gopBuffer := gop.NewBuffer("test-stream", gopBufferConfig, logger)
-	
+
 	config := Config{
 		MaxRecoveryTime:  5 * time.Second,
 		KeyframeTimeout:  2 * time.Second,
 		CorruptionWindow: 10,
 	}
-	
+
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
-	
+
 	// Update with non-keyframe (should be ignored)
 	nonKeyframe := &types.VideoFrame{
 		ID:          1,
@@ -292,7 +292,7 @@ func TestHandler_UpdateKeyframe(t *testing.T) {
 	}
 	handler.UpdateKeyframe(nonKeyframe)
 	assert.Nil(t, handler.lastKeyframe)
-	
+
 	// Update with keyframe
 	keyframe := &types.VideoFrame{
 		ID:          2,
@@ -310,29 +310,29 @@ func TestHandler_Statistics(t *testing.T) {
 		MaxDuration: 30 * time.Second,
 	}
 	gopBuffer := gop.NewBuffer("test-stream", gopBufferConfig, logger)
-	
+
 	config := Config{
 		MaxRecoveryTime:  5 * time.Second,
 		KeyframeTimeout:  2 * time.Second,
 		CorruptionWindow: 10,
 	}
-	
+
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
-	
+
 	// Trigger some recoveries
 	// First handle packet loss
 	handler.HandleError(ErrorTypePacketLoss, 5)
 	// Reset state to normal so next errors aren't escalated
 	handler.setState(StateNormal)
-	
+
 	// Handle corruption
 	handler.HandleError(ErrorTypeCorruption, "test")
 	// Reset state again
 	handler.setState(StateNormal)
-	
+
 	// Handle timeout
 	handler.HandleError(ErrorTypeTimeout, nil)
-	
+
 	stats := handler.GetStatistics()
 	// Packet loss increments recovery count
 	assert.Equal(t, uint64(1), stats.RecoveryCount)
@@ -343,7 +343,7 @@ func TestHandler_Statistics(t *testing.T) {
 	// State should be resyncing from the timeout
 	assert.Equal(t, StateResyncing, stats.State)
 	assert.False(t, stats.IsHealthy)
-	
+
 	// Set to normal state
 	handler.setState(StateNormal)
 	stats = handler.GetStatistics()
@@ -357,23 +357,23 @@ func TestHandler_WaitForKeyframe(t *testing.T) {
 		MaxDuration: 30 * time.Second,
 	}
 	gopBuffer := gop.NewBuffer("test-stream", gopBufferConfig, logger)
-	
+
 	config := Config{
 		MaxRecoveryTime:  5 * time.Second,
 		KeyframeTimeout:  200 * time.Millisecond,
 		CorruptionWindow: 10,
 	}
-	
+
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
-	
+
 	recoveryComplete := make(chan bool)
 	handler.SetCallbacks(nil, func(duration time.Duration, success bool) {
 		recoveryComplete <- success
 	}, nil)
-	
+
 	// Start waiting for keyframe
 	go handler.waitForKeyframe()
-	
+
 	// Simulate keyframe arrival after 50ms (well before timeout)
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -384,7 +384,7 @@ func TestHandler_WaitForKeyframe(t *testing.T) {
 		}
 		handler.UpdateKeyframe(keyframe)
 	}()
-	
+
 	// Should succeed
 	success := <-recoveryComplete
 	assert.True(t, success)

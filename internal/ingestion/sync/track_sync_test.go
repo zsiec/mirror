@@ -36,7 +36,7 @@ func TestNewTrackSyncManager(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mgr := NewTrackSyncManager(tt.trackType, tt.streamID, tt.timeBase, tt.config)
-			
+
 			assert.NotNil(t, mgr)
 			assert.Equal(t, tt.trackType, mgr.sync.Type)
 			assert.Equal(t, tt.streamID, mgr.sync.StreamID)
@@ -83,7 +83,7 @@ func TestProcessTimestamp(t *testing.T) {
 	t.Run("PTS jump detection", func(t *testing.T) {
 		mgr.Reset()
 		mgr.ProcessTimestamp(1000, 1000, baseTime)
-		
+
 		// Jump more than 1 second
 		err := mgr.ProcessTimestamp(100000, 100000, baseTime.Add(time.Second))
 		require.NoError(t, err)
@@ -96,7 +96,7 @@ func TestProcessTimestamp(t *testing.T) {
 		mgr.Reset()
 		mgr.ProcessTimestamp(1000, 1000, baseTime)
 		mgr.ProcessTimestamp(2000, 2000, baseTime.Add(33*time.Millisecond))
-		
+
 		// DTS goes backwards
 		err := mgr.ProcessTimestamp(3000, 1500, baseTime.Add(66*time.Millisecond))
 		require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestGetPresentationTime(t *testing.T) {
 
 	t.Run("calculates correct presentation time", func(t *testing.T) {
 		mgr.ProcessTimestamp(0, 0, baseTime)
-		
+
 		// 90000 units = 1 second at 90kHz
 		pt := mgr.GetPresentationTime(90000)
 		expected := baseTime.Add(time.Second)
@@ -127,7 +127,7 @@ func TestGetPresentationTime(t *testing.T) {
 	t.Run("handles fractional seconds", func(t *testing.T) {
 		mgr.Reset()
 		mgr.ProcessTimestamp(0, 0, baseTime)
-		
+
 		// 45000 units = 0.5 seconds at 90kHz
 		pt := mgr.GetPresentationTime(45000)
 		expected := baseTime.Add(500 * time.Millisecond)
@@ -137,7 +137,7 @@ func TestGetPresentationTime(t *testing.T) {
 	t.Run("audio time base calculation", func(t *testing.T) {
 		audioMgr := NewTrackSyncManager(TrackTypeAudio, "audio", types.Rational{Num: 1, Den: 48000}, nil)
 		audioMgr.ProcessTimestamp(0, 0, baseTime)
-		
+
 		// 48000 units = 1 second at 48kHz
 		pt := audioMgr.GetPresentationTime(48000)
 		expected := baseTime.Add(time.Second)
@@ -148,31 +148,31 @@ func TestGetPresentationTime(t *testing.T) {
 func TestGetDriftFromWallClock(t *testing.T) {
 	mgr := NewTrackSyncManager(TrackTypeVideo, "test", types.Rational{Num: 1, Den: 90000}, nil)
 	baseTime := time.Now()
-	
+
 	mgr.ProcessTimestamp(0, 0, baseTime)
 
 	tests := []struct {
-		name         string
-		pts          int64
-		actualTime   time.Time
+		name          string
+		pts           int64
+		actualTime    time.Time
 		expectedDrift time.Duration
 	}{
 		{
-			name:         "no drift",
-			pts:          90000, // 1 second
-			actualTime:   baseTime.Add(time.Second),
+			name:          "no drift",
+			pts:           90000, // 1 second
+			actualTime:    baseTime.Add(time.Second),
 			expectedDrift: 0,
 		},
 		{
-			name:         "positive drift (actual ahead)",
-			pts:          90000,
-			actualTime:   baseTime.Add(time.Second + 50*time.Millisecond),
+			name:          "positive drift (actual ahead)",
+			pts:           90000,
+			actualTime:    baseTime.Add(time.Second + 50*time.Millisecond),
 			expectedDrift: 50 * time.Millisecond,
 		},
 		{
-			name:         "negative drift (actual behind)",
-			pts:          90000,
-			actualTime:   baseTime.Add(time.Second - 30*time.Millisecond),
+			name:          "negative drift (actual behind)",
+			pts:           90000,
+			actualTime:    baseTime.Add(time.Second - 30*time.Millisecond),
 			expectedDrift: -30 * time.Millisecond,
 		},
 	}
@@ -187,11 +187,11 @@ func TestGetDriftFromWallClock(t *testing.T) {
 
 func TestReportDropped(t *testing.T) {
 	mgr := NewTrackSyncManager(TrackTypeVideo, "test", types.Rational{Num: 1, Den: 90000}, nil)
-	
+
 	mgr.ReportDropped(5)
 	state := mgr.GetSyncState()
 	assert.Equal(t, uint64(5), state.DroppedCount)
-	
+
 	mgr.ReportDropped(3)
 	state = mgr.GetSyncState()
 	assert.Equal(t, uint64(8), state.DroppedCount)
@@ -200,15 +200,15 @@ func TestReportDropped(t *testing.T) {
 func TestReset(t *testing.T) {
 	mgr := NewTrackSyncManager(TrackTypeVideo, "test", types.Rational{Num: 1, Den: 90000}, nil)
 	baseTime := time.Now()
-	
+
 	// Set up some state
 	mgr.ProcessTimestamp(1000, 1000, baseTime)
 	mgr.ProcessTimestamp(2000, 2000, baseTime.Add(33*time.Millisecond))
 	mgr.ReportDropped(5)
-	
+
 	// Reset
 	mgr.Reset()
-	
+
 	state := mgr.GetSyncState()
 	assert.True(t, state.BaseTime.IsZero())
 	assert.Equal(t, int64(0), state.BasePTS)
@@ -220,13 +220,13 @@ func TestReset(t *testing.T) {
 func TestGetStatistics(t *testing.T) {
 	mgr := NewTrackSyncManager(TrackTypeVideo, "test-stream", types.Rational{Num: 1, Den: 90000}, nil)
 	baseTime := time.Now()
-	
+
 	mgr.ProcessTimestamp(1000, 1000, baseTime)
 	mgr.ProcessTimestamp(2000, 2000, baseTime.Add(33*time.Millisecond))
 	mgr.ReportDropped(2)
-	
+
 	stats := mgr.GetStatistics()
-	
+
 	assert.Equal(t, "video", stats["track_type"])
 	assert.Equal(t, "test-stream", stats["stream_id"])
 	assert.Equal(t, uint64(2), stats["frame_count"])
@@ -239,7 +239,7 @@ func TestGetStatistics(t *testing.T) {
 func BenchmarkProcessTimestamp(b *testing.B) {
 	mgr := NewTrackSyncManager(TrackTypeVideo, "bench", types.Rational{Num: 1, Den: 90000}, nil)
 	baseTime := time.Now()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		pts := int64(i * 3000) // ~33ms per frame at 90kHz
@@ -250,7 +250,7 @@ func BenchmarkProcessTimestamp(b *testing.B) {
 func BenchmarkGetPresentationTime(b *testing.B) {
 	mgr := NewTrackSyncManager(TrackTypeVideo, "bench", types.Rational{Num: 1, Den: 90000}, nil)
 	mgr.ProcessTimestamp(0, 0, time.Now())
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		mgr.GetPresentationTime(int64(i * 3000))

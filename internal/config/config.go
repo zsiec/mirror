@@ -45,9 +45,9 @@ type RedisConfig struct {
 
 type LoggingConfig struct {
 	Level      string `mapstructure:"level"`
-	Format     string `mapstructure:"format"`     // json or text
-	Output     string `mapstructure:"output"`     // stdout, stderr, or file path
-	MaxSize    int    `mapstructure:"max_size"`   // MB
+	Format     string `mapstructure:"format"`   // json or text
+	Output     string `mapstructure:"output"`   // stdout, stderr, or file path
+	MaxSize    int    `mapstructure:"max_size"` // MB
 	MaxBackups int    `mapstructure:"max_backups"`
 	MaxAge     int    `mapstructure:"max_age"` // days
 }
@@ -59,15 +59,15 @@ type MetricsConfig struct {
 }
 
 type IngestionConfig struct {
-	SRT             SRTConfig             `mapstructure:"srt"`
-	RTP             RTPConfig             `mapstructure:"rtp"`
-	Buffer          BufferConfig          `mapstructure:"buffer"`
-	Registry        RegistryConfig        `mapstructure:"registry"`
-	Codecs          CodecsConfig          `mapstructure:"codecs"`
-	Memory          MemoryConfig          `mapstructure:"memory"`
-	QueueDir        string                `mapstructure:"queue_dir"` // Directory for queue overflow
-	StreamHandling  StreamHandlingConfig  `mapstructure:"stream_handling"`
-	Backpressure    BackpressureConfig    `mapstructure:"backpressure"`
+	SRT            SRTConfig            `mapstructure:"srt"`
+	RTP            RTPConfig            `mapstructure:"rtp"`
+	Buffer         BufferConfig         `mapstructure:"buffer"`
+	Registry       RegistryConfig       `mapstructure:"registry"`
+	Codecs         CodecsConfig         `mapstructure:"codecs"`
+	Memory         MemoryConfig         `mapstructure:"memory"`
+	QueueDir       string               `mapstructure:"queue_dir"` // Directory for queue overflow
+	StreamHandling StreamHandlingConfig `mapstructure:"stream_handling"`
+	Backpressure   BackpressureConfig   `mapstructure:"backpressure"`
 }
 
 type SRTConfig struct {
@@ -102,8 +102,8 @@ type RTPConfig struct {
 }
 
 type BufferConfig struct {
-	RingSize       int           `mapstructure:"ring_size"`     // Per stream (4MB default)
-	PoolSize       int           `mapstructure:"pool_size"`     // Pre-allocated buffers
+	RingSize       int           `mapstructure:"ring_size"` // Per stream (4MB default)
+	PoolSize       int           `mapstructure:"pool_size"` // Pre-allocated buffers
 	WriteTimeout   time.Duration `mapstructure:"write_timeout"`
 	ReadTimeout    time.Duration `mapstructure:"read_timeout"`
 	MetricsEnabled bool          `mapstructure:"metrics_enabled"`
@@ -121,11 +121,11 @@ type RegistryConfig struct {
 }
 
 type CodecsConfig struct {
-	Supported []string        `mapstructure:"supported"`
-	Preferred string          `mapstructure:"preferred"`
-	H264      H264CodecConfig `mapstructure:"h264"`
-	HEVC      HEVCCodecConfig `mapstructure:"hevc"`
-	AV1       AV1CodecConfig  `mapstructure:"av1"`
+	Supported []string          `mapstructure:"supported"`
+	Preferred string            `mapstructure:"preferred"`
+	H264      H264CodecConfig   `mapstructure:"h264"`
+	HEVC      HEVCCodecConfig   `mapstructure:"hevc"`
+	AV1       AV1CodecConfig    `mapstructure:"av1"`
 	JPEGXS    JPEGXSCodecConfig `mapstructure:"jpegxs"`
 }
 
@@ -162,15 +162,14 @@ type StreamHandlingConfig struct {
 }
 
 type BackpressureConfig struct {
-	Enabled              bool    `mapstructure:"enabled"`                  // Enable backpressure control
-	LowWatermark         float64 `mapstructure:"low_watermark"`            // Low pressure threshold (0.0-1.0)
-	MediumWatermark      float64 `mapstructure:"medium_watermark"`         // Medium pressure threshold (0.0-1.0)
-	HighWatermark        float64 `mapstructure:"high_watermark"`           // High pressure threshold (0.0-1.0)
-	CriticalWatermark    float64 `mapstructure:"critical_watermark"`       // Critical pressure threshold (0.0-1.0)
-	ResponseWindow       time.Duration `mapstructure:"response_window"`     // Response time window
-	FrameDropRatio       float64 `mapstructure:"frame_drop_ratio"`         // Percentage of frames to drop under pressure
+	Enabled           bool          `mapstructure:"enabled"`            // Enable backpressure control
+	LowWatermark      float64       `mapstructure:"low_watermark"`      // Low pressure threshold (0.0-1.0)
+	MediumWatermark   float64       `mapstructure:"medium_watermark"`   // Medium pressure threshold (0.0-1.0)
+	HighWatermark     float64       `mapstructure:"high_watermark"`     // High pressure threshold (0.0-1.0)
+	CriticalWatermark float64       `mapstructure:"critical_watermark"` // Critical pressure threshold (0.0-1.0)
+	ResponseWindow    time.Duration `mapstructure:"response_window"`    // Response time window
+	FrameDropRatio    float64       `mapstructure:"frame_drop_ratio"`   // Percentage of frames to drop under pressure
 }
-
 
 func Load(configPath string) (*Config, error) {
 	viper.SetConfigType("yaml")
@@ -239,17 +238,17 @@ func setDefaults() {
 	viper.SetDefault("ingestion.srt.listen_addr", "0.0.0.0")
 	viper.SetDefault("ingestion.srt.port", 6000)
 	viper.SetDefault("ingestion.srt.latency", "120ms")
-	viper.SetDefault("ingestion.srt.max_bandwidth", 60000000)    // 60 Mbps
-	viper.SetDefault("ingestion.srt.input_bandwidth", 55000000)  // 55 Mbps
+	viper.SetDefault("ingestion.srt.max_bandwidth", 60000000)   // 60 Mbps
+	viper.SetDefault("ingestion.srt.input_bandwidth", 55000000) // 55 Mbps
 	viper.SetDefault("ingestion.srt.payload_size", 1316)
 	viper.SetDefault("ingestion.srt.fc_window", 25600)
 	viper.SetDefault("ingestion.srt.peer_idle_timeout", "30s")
 	viper.SetDefault("ingestion.srt.max_connections", 30)
-	
+
 	// SRT encryption defaults
 	viper.SetDefault("ingestion.srt.encryption.enabled", false)
 	viper.SetDefault("ingestion.srt.encryption.passphrase", "")
-	viper.SetDefault("ingestion.srt.encryption.key_length", 0) // Auto
+	viper.SetDefault("ingestion.srt.encryption.key_length", 0)       // Auto
 	viper.SetDefault("ingestion.srt.encryption.pbkdf_iterations", 0) // Auto
 
 	// RTP defaults
@@ -267,7 +266,7 @@ func setDefaults() {
 	viper.SetDefault("ingestion.buffer.write_timeout", "100ms")
 	viper.SetDefault("ingestion.buffer.read_timeout", "100ms")
 	viper.SetDefault("ingestion.buffer.metrics_enabled", true)
-	
+
 	// Queue defaults
 	viper.SetDefault("ingestion.queue_dir", "/var/lib/mirror/queues")
 
@@ -276,7 +275,7 @@ func setDefaults() {
 	viper.SetDefault("ingestion.registry.heartbeat_timeout", "30s")
 	viper.SetDefault("ingestion.registry.cleanup_interval", "60s")
 	viper.SetDefault("ingestion.registry.max_streams_per_source", 5)
-	
+
 	// Codec defaults
 	viper.SetDefault("ingestion.codecs.supported", []string{"HEVC", "H264", "AV1", "JPEGXS"})
 	viper.SetDefault("ingestion.codecs.preferred", "HEVC")
@@ -289,7 +288,7 @@ func setDefaults() {
 	viper.SetDefault("ingestion.codecs.jpegxs.profile", "main")
 	viper.SetDefault("ingestion.codecs.jpegxs.subsampling", "422")
 
-	// Stream handling defaults  
+	// Stream handling defaults
 	viper.SetDefault("ingestion.stream_handling.frame_assembly_timeout", "200ms")
 	viper.SetDefault("ingestion.stream_handling.gop_buffer_size", 3)
 	viper.SetDefault("ingestion.stream_handling.max_gop_age", "5s")

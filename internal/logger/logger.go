@@ -56,7 +56,7 @@ func New(cfg *config.LoggingConfig) (*logrus.Logger, error) {
 
 		logger.SetOutput(&lumberjack.Logger{
 			Filename:   cfg.Output,
-			MaxSize:    cfg.MaxSize,    // megabytes
+			MaxSize:    cfg.MaxSize, // megabytes
 			MaxBackups: cfg.MaxBackups,
 			MaxAge:     cfg.MaxAge, // days
 			Compress:   true,
@@ -76,7 +76,6 @@ func New(cfg *config.LoggingConfig) (*logrus.Logger, error) {
 func WithComponent(logger *logrus.Logger, component string) *logrus.Entry {
 	return logger.WithField("component", component)
 }
-
 
 // WithStream creates a logger entry with stream information.
 func WithStream(logger *logrus.Logger, streamID string) *logrus.Entry {

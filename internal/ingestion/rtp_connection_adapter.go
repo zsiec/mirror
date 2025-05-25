@@ -18,31 +18,31 @@ import (
 // Now also emits TimestampedPackets for video-aware processing
 type RTPConnectionAdapter struct {
 	*rtpPkg.Session
-	
+
 	// Timestamp conversion (separate for audio/video)
 	videoTimestampMapper *timestamp.TimestampMapper
 	audioTimestampMapper *timestamp.TimestampMapper
-	
+
 	// Frame detection
-	depacketizer    codec.Depacketizer
-	lastSeqNum      uint16
-	lastTimestamp   uint32
-	lastPacketTime  time.Time
-	
+	depacketizer   codec.Depacketizer
+	lastSeqNum     uint16
+	lastTimestamp  uint32
+	lastPacketTime time.Time
+
 	// Output channels for video-aware pipeline
-	videoOutput     chan types.TimestampedPacket
-	audioOutput     chan types.TimestampedPacket
-	
+	videoOutput chan types.TimestampedPacket
+	audioOutput chan types.TimestampedPacket
+
 	// Track information
-	isAudioTrack    bool
-	codecType       types.CodecType
-	
+	isAudioTrack bool
+	codecType    types.CodecType
+
 	// Context for lifecycle
-	ctx             context.Context
-	cancel          context.CancelFunc
-	
-	logger          logger.Logger
-	mu              sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	logger logger.Logger
+	mu     sync.RWMutex
 }
 
 // Ensure it implements both interfaces
@@ -54,9 +54,9 @@ func NewRTPConnectionAdapter(session *rtpPkg.Session, codecType types.CodecType)
 	if session == nil {
 		return nil
 	}
-	
+
 	ctx := context.Background()
-	
+
 	adapter := &RTPConnectionAdapter{
 		Session:      session,
 		videoOutput:  make(chan types.TimestampedPacket, 1000),
@@ -66,7 +66,7 @@ func NewRTPConnectionAdapter(session *rtpPkg.Session, codecType types.CodecType)
 		ctx:          ctx,
 		logger:       logger.FromContext(ctx).WithField("stream_id", session.GetStreamID()),
 	}
-	
+
 	// Initialize timestamp mappers based on codec
 	if adapter.isAudioTrack {
 		// Audio clock rates
@@ -84,10 +84,10 @@ func NewRTPConnectionAdapter(session *rtpPkg.Session, codecType types.CodecType)
 		// Video is typically 90kHz
 		adapter.videoTimestampMapper = timestamp.NewTimestampMapper(90000)
 	}
-	
+
 	// Start packet processor in background
 	go adapter.processPackets()
-	
+
 	return adapter
 }
 
@@ -148,12 +148,12 @@ func (a *RTPConnectionAdapter) processPackets() {
 // This should be called by the Session when it receives packets
 func (a *RTPConnectionAdapter) ProcessPacket(rtpPkt *rtp.Packet) error {
 	now := time.Now()
-	
+
 	// Get appropriate timestamp mapper
 	var timestampMapper *timestamp.TimestampMapper
 	var packetType types.PacketType
 	var outputChan chan types.TimestampedPacket
-	
+
 	if a.isAudioTrack {
 		timestampMapper = a.audioTimestampMapper
 		packetType = types.PacketTypeAudio
@@ -163,7 +163,7 @@ func (a *RTPConnectionAdapter) ProcessPacket(rtpPkt *rtp.Packet) error {
 		packetType = types.PacketTypeVideo
 		outputChan = a.videoOutput
 	}
-	
+
 	// Convert RTP timestamp to PTS
 	var pts int64
 	if timestampMapper != nil {
@@ -172,7 +172,7 @@ func (a *RTPConnectionAdapter) ProcessPacket(rtpPkt *rtp.Packet) error {
 		// For testing, use raw timestamp
 		pts = int64(rtpPkt.Timestamp)
 	}
-	
+
 	// Get stream ID - use session if available, otherwise use a default for testing
 	streamID := "test-stream"
 	if a.Session != nil {
@@ -181,24 +181,24 @@ func (a *RTPConnectionAdapter) ProcessPacket(rtpPkt *rtp.Packet) error {
 
 	// Create timestamped packet
 	tsPkt := types.TimestampedPacket{
-		Data:         rtpPkt.Payload,
-		CaptureTime:  now,
-		PTS:          pts,
-		DTS:          pts, // Will be adjusted for B-frames later
-		StreamID:     streamID,
-		SSRC:         rtpPkt.SSRC,
-		SeqNum:       rtpPkt.SequenceNumber,
-		Type:         packetType,
-		Codec:        a.codecType,
+		Data:        rtpPkt.Payload,
+		CaptureTime: now,
+		PTS:         pts,
+		DTS:         pts, // Will be adjusted for B-frames later
+		StreamID:    streamID,
+		SSRC:        rtpPkt.SSRC,
+		SeqNum:      rtpPkt.SequenceNumber,
+		Type:        packetType,
+		Codec:       a.codecType,
 	}
-	
+
 	// Calculate arrival delta
 	a.mu.Lock()
 	if !a.lastPacketTime.IsZero() {
 		tsPkt.ArrivalDelta = now.Sub(a.lastPacketTime).Microseconds()
 	}
 	a.lastPacketTime = now
-	
+
 	// Detect packet loss
 	if a.lastSeqNum != 0 {
 		expectedSeq := a.lastSeqNum + 1
@@ -212,10 +212,10 @@ func (a *RTPConnectionAdapter) ProcessPacket(rtpPkt *rtp.Packet) error {
 	a.lastSeqNum = rtpPkt.SequenceNumber
 	a.lastTimestamp = rtpPkt.Timestamp
 	a.mu.Unlock()
-	
+
 	// Analyze packet for keyframes and frame boundaries
 	a.analyzePacket(&tsPkt, rtpPkt)
-	
+
 	// Send to output channel
 	select {
 	case outputChan <- tsPkt:
@@ -242,14 +242,14 @@ func (a *RTPConnectionAdapter) analyzePacket(tsPkt *types.TimestampedPacket, rtp
 		}
 		return
 	}
-	
+
 	// This is simplified - real implementation would use the depacketizer
 	// to properly analyze NAL units
-	
+
 	if len(rtpPkt.Payload) == 0 {
 		return
 	}
-	
+
 	// Check for keyframe based on codec
 	switch a.codecType {
 	case types.CodecH264:
@@ -257,7 +257,7 @@ func (a *RTPConnectionAdapter) analyzePacket(tsPkt *types.TimestampedPacket, rtp
 		if nalType == 5 || nalType == 7 || nalType == 8 { // IDR, SPS, PPS
 			tsPkt.Flags |= types.PacketFlagKeyframe
 		}
-		
+
 	case types.CodecHEVC:
 		if len(rtpPkt.Payload) >= 2 {
 			nalType := (rtpPkt.Payload[0] >> 1) & 0x3F
@@ -266,13 +266,12 @@ func (a *RTPConnectionAdapter) analyzePacket(tsPkt *types.TimestampedPacket, rtp
 			}
 		}
 	}
-	
+
 	// Use RTP marker bit as potential frame end indicator
 	if rtpPkt.Marker {
 		tsPkt.Flags |= types.PacketFlagFrameEnd
 	}
 }
-
 
 // SetDepacketizer sets the depacketizer for frame analysis
 func (a *RTPConnectionAdapter) SetDepacketizer(depacketizer codec.Depacketizer) {

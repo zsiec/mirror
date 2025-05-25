@@ -14,10 +14,10 @@ import (
 func TestAssemblerTimeoutHandling(t *testing.T) {
 	assembler := NewAssembler("test-stream", types.CodecH264, 100)
 	require.NotNil(t, assembler)
-	
+
 	// Set a very short timeout
 	assembler.SetFrameTimeout(50 * time.Millisecond)
-	
+
 	err := assembler.Start()
 	require.NoError(t, err)
 	defer assembler.Stop()

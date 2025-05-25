@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	
+
 	"github.com/zsiec/mirror/internal/ingestion/registry"
 	"github.com/zsiec/mirror/internal/logger"
 )
@@ -30,31 +30,31 @@ func NewHandlers(manager *Manager, logger logger.Logger) *Handlers {
 func (h *Handlers) RegisterRoutes(router *mux.Router) {
 	// API v1 routes
 	api := router.PathPrefix("/api/v1").Subrouter()
-	
+
 	// Stream management endpoints
 	api.HandleFunc("/streams", h.manager.HandleListStreams).Methods("GET")
 	api.HandleFunc("/streams/{id}", h.manager.HandleGetStream).Methods("GET")
 	api.HandleFunc("/streams/{id}", h.manager.HandleDeleteStream).Methods("DELETE")
 	api.HandleFunc("/streams/{id}/stats", h.manager.HandleStreamStats).Methods("GET")
-	
+
 	// System stats endpoint
 	api.HandleFunc("/stats", h.manager.HandleStats).Methods("GET")
-	
+
 	// Stream control endpoints
 	api.HandleFunc("/streams/{id}/pause", h.manager.HandlePauseStream).Methods("POST")
 	api.HandleFunc("/streams/{id}/resume", h.manager.HandleResumeStream).Methods("POST")
-	
+
 	// Video stats endpoint (all streams are video-aware now)
 	api.HandleFunc("/streams/stats/video", h.manager.HandleVideoStats).Methods("GET")
-	
+
 	// Frame-based data endpoints
 	api.HandleFunc("/streams/{id}/data", h.manager.HandleStreamData).Methods("GET")
 	api.HandleFunc("/streams/{id}/buffer", h.manager.HandleStreamBuffer).Methods("GET")
 	api.HandleFunc("/streams/{id}/preview", h.manager.HandleStreamPreview).Methods("GET")
-	
+
 	// A/V sync endpoint
 	api.HandleFunc("/streams/{id}/sync", h.manager.HandleStreamSync).Methods("GET")
-	
+
 	h.logger.Info("Ingestion routes registered")
 }
 
@@ -80,10 +80,10 @@ type StreamDTO struct {
 }
 
 type StreamStatsDTO struct {
-	BytesReceived   int64              `json:"bytes_received"`
-	PacketsReceived int64              `json:"packets_received"`
-	PacketsLost     int64              `json:"packets_lost"`
-	Bitrate         int64              `json:"bitrate"`
+	BytesReceived    int64               `json:"bytes_received"`
+	PacketsReceived  int64               `json:"packets_received"`
+	PacketsLost      int64               `json:"packets_lost"`
+	Bitrate          int64               `json:"bitrate"`
 	FrameBufferStats FrameBufferStatsDTO `json:"frame_buffer_stats"`
 }
 
@@ -102,9 +102,9 @@ type FrameBufferStatsDTO struct {
 
 // FramePreviewResponse contains frame preview data
 type FramePreviewResponse struct {
-	StreamID   string        `json:"stream_id"`
-	FrameCount int64         `json:"frame_count"`
-	Frames     []FrameData   `json:"frames"`
+	StreamID   string      `json:"stream_id"`
+	FrameCount int64       `json:"frame_count"`
+	Frames     []FrameData `json:"frames"`
 }
 
 // FrameData contains individual frame information
@@ -112,8 +112,6 @@ type FrameData struct {
 	Data      []byte `json:"data"`
 	Timestamp int64  `json:"timestamp"`
 }
-
-
 
 // Error response
 type ErrorResponse struct {
@@ -143,17 +141,17 @@ func writeError(ctx context.Context, w http.ResponseWriter, status int, message 
 	if err != nil {
 		errMsg = err.Error()
 	}
-	
+
 	response := ErrorResponse{
 		Error:   http.StatusText(status),
 		Message: message,
 		Time:    time.Now(),
 	}
-	
+
 	if errMsg != "" {
 		response.Message = message + ": " + errMsg
 	}
-	
+
 	writeJSON(ctx, w, status, response)
 }
 
@@ -223,7 +221,7 @@ func (m *Manager) HandleGetStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dto := convertStreamToDTO(stream)
-	
+
 	writeJSON(r.Context(), w, http.StatusOK, dto)
 }
 
@@ -328,18 +326,17 @@ func (m *Manager) HandleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(r.Context(), w, http.StatusOK, stats)
 }
 
-
 // HandleVideoStats - GET /api/v1/streams/stats/video
 func (m *Manager) HandleVideoStats(w http.ResponseWriter, r *http.Request) {
 	// Get stats from all stream handlers (all are video-aware now)
 	m.handlersMu.RLock()
 	defer m.handlersMu.RUnlock()
-	
+
 	stats := make(map[string]interface{})
 	for streamID, handler := range m.streamHandlers {
 		stats[streamID] = handler.GetStats()
 	}
-	
+
 	// Convert to response format
 	response := struct {
 		Streams   map[string]interface{} `json:"streams"`
@@ -350,6 +347,6 @@ func (m *Manager) HandleVideoStats(w http.ResponseWriter, r *http.Request) {
 		Count:     len(stats),
 		Timestamp: time.Now(),
 	}
-	
+
 	writeJSON(r.Context(), w, http.StatusOK, response)
 }

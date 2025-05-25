@@ -11,7 +11,7 @@ import (
 var (
 	// ErrGlobalMemoryLimit indicates the global memory limit has been reached
 	ErrGlobalMemoryLimit = errors.New("global memory limit exceeded")
-	
+
 	// ErrStreamMemoryLimit indicates a stream's memory limit has been reached
 	ErrStreamMemoryLimit = errors.New("stream memory limit exceeded")
 )
@@ -22,20 +22,20 @@ type Controller struct {
 	perStreamLimit int64 // Per-stream limit
 	usage          atomic.Int64
 	streamUsage    sync.Map // streamID -> *atomic.Int64
-	
+
 	// Memory pressure relief
 	pressureThreshold float64
 	evictionCallback  func(streamID string, bytes int64)
 	evictionStrategy  EvictionStrategy
 	streamTracker     *StreamTracker
-	
+
 	// Metrics
-	allocationCount  atomic.Int64
-	releaseCount     atomic.Int64
-	evictionCount    atomic.Int64
-	lastGCTime       time.Time
-	mu               sync.Mutex
-	
+	allocationCount atomic.Int64
+	releaseCount    atomic.Int64
+	evictionCount   atomic.Int64
+	lastGCTime      time.Time
+	mu              sync.Mutex
+
 	// Stream initialization mutex
 	streamInitMu sync.Mutex
 }
@@ -48,7 +48,7 @@ func NewController(maxMemory, perStreamLimit int64) *Controller {
 		pressureThreshold: 0.8, // Start eviction at 80%
 		lastGCTime:        time.Now(),
 		streamTracker:     NewStreamTracker(),
-		evictionStrategy:  &HybridEvictionStrategy{
+		evictionStrategy: &HybridEvictionStrategy{
 			AgeWeight:      0.4,
 			SizeWeight:     0.4,
 			PriorityWeight: 0.2,
@@ -67,14 +67,14 @@ func (c *Controller) RequestMemory(streamID string, size int64) error {
 	newUsage := c.usage.Add(size)
 	if newUsage > c.maxMemory {
 		c.usage.Add(-size)
-		
+
 		// Try garbage collection first
 		c.mu.Lock()
 		if time.Since(c.lastGCTime) > 10*time.Second {
 			runtime.GC()
 			c.lastGCTime = time.Now()
 			c.mu.Unlock()
-			
+
 			// Retry after GC
 			newUsage = c.usage.Add(size)
 			if newUsage <= c.maxMemory {
@@ -84,7 +84,7 @@ func (c *Controller) RequestMemory(streamID string, size int64) error {
 		} else {
 			c.mu.Unlock()
 		}
-		
+
 		// Check pressure level and try eviction
 		pressure := float64(c.usage.Load()) / float64(c.maxMemory)
 		if pressure > c.pressureThreshold {
@@ -99,20 +99,20 @@ func (c *Controller) RequestMemory(streamID string, size int64) error {
 				c.usage.Add(-size)
 			}
 		}
-		
+
 		return ErrGlobalMemoryLimit
 	}
-	
+
 checkStreamLimit:
 	// Check per-stream limit
 	usage := c.getOrCreateStreamUsage(streamID)
-	
+
 	if usage.Add(size) > c.perStreamLimit {
 		usage.Add(-size)
 		c.usage.Add(-size)
 		return ErrStreamMemoryLimit
 	}
-	
+
 	c.allocationCount.Add(1)
 	return nil
 }
@@ -123,16 +123,16 @@ func (c *Controller) getOrCreateStreamUsage(streamID string) *atomic.Int64 {
 	if val, ok := c.streamUsage.Load(streamID); ok {
 		return val.(*atomic.Int64)
 	}
-	
+
 	// Slow path: create with mutex protection
 	c.streamInitMu.Lock()
 	defer c.streamInitMu.Unlock()
-	
+
 	// Double-check after acquiring lock
 	if val, ok := c.streamUsage.Load(streamID); ok {
 		return val.(*atomic.Int64)
 	}
-	
+
 	// Create new usage counter
 	usage := &atomic.Int64{}
 	c.streamUsage.Store(streamID, usage)
@@ -142,12 +142,12 @@ func (c *Controller) getOrCreateStreamUsage(streamID string) *atomic.Int64 {
 // ReleaseMemory releases memory for a stream
 func (c *Controller) ReleaseMemory(streamID string, size int64) {
 	c.usage.Add(-size)
-	
+
 	if streamUsage, ok := c.streamUsage.Load(streamID); ok {
 		usage := streamUsage.(*atomic.Int64)
 		usage.Add(-size)
 	}
-	
+
 	c.releaseCount.Add(1)
 }
 
@@ -169,11 +169,11 @@ func (c *Controller) GetStreamUsage(streamID string) int64 {
 func (c *Controller) Stats() MemoryStats {
 	globalUsage := c.usage.Load()
 	pressure := float64(globalUsage) / float64(c.maxMemory)
-	
+
 	// Count active streams
 	activeStreams := 0
 	var streamStats []StreamMemoryStats
-	
+
 	c.streamUsage.Range(func(key, value interface{}) bool {
 		streamID := key.(string)
 		usage := value.(*atomic.Int64).Load()
@@ -187,17 +187,17 @@ func (c *Controller) Stats() MemoryStats {
 		}
 		return true
 	})
-	
+
 	return MemoryStats{
-		GlobalUsage:      globalUsage,
-		GlobalLimit:      c.maxMemory,
-		GlobalPressure:   pressure,
-		PerStreamLimit:   c.perStreamLimit,
-		ActiveStreams:    activeStreams,
-		StreamStats:      streamStats,
-		AllocationCount:  c.allocationCount.Load(),
-		ReleaseCount:     c.releaseCount.Load(),
-		EvictionCount:    c.evictionCount.Load(),
+		GlobalUsage:       globalUsage,
+		GlobalLimit:       c.maxMemory,
+		GlobalPressure:    pressure,
+		PerStreamLimit:    c.perStreamLimit,
+		ActiveStreams:     activeStreams,
+		StreamStats:       streamStats,
+		AllocationCount:   c.allocationCount.Load(),
+		ReleaseCount:      c.releaseCount.Load(),
+		EvictionCount:     c.evictionCount.Load(),
 		PressureThreshold: c.pressureThreshold,
 	}
 }
@@ -216,14 +216,14 @@ func (c *Controller) evictMemory(targetSize int64) int64 {
 		}
 		return true
 	})
-	
+
 	if len(streams) == 0 {
 		return 0
 	}
-	
+
 	// Select streams for eviction
 	selected := c.evictionStrategy.SelectStreamsForEviction(streams, targetSize)
-	
+
 	var totalEvicted int64
 	for _, streamID := range selected {
 		if c.evictionCallback != nil {
@@ -236,7 +236,7 @@ func (c *Controller) evictMemory(targetSize int64) int64 {
 			}
 		}
 	}
-	
+
 	return totalEvicted
 }
 

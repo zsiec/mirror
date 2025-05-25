@@ -98,11 +98,11 @@ func (h *ErrorHandler) HandleMethodNotAllowed(w http.ResponseWriter, r *http.Req
 // HandlePanic handles panics in HTTP handlers.
 func (h *ErrorHandler) HandlePanic(w http.ResponseWriter, r *http.Request, recovered interface{}) {
 	h.logger.WithFields(logrus.Fields{
-		"panic":      recovered,
-		"method":     r.Method,
-		"path":       r.URL.Path,
-		"remote_ip":  r.RemoteAddr,
-		"trace_id":   r.Header.Get("X-Request-ID"),
+		"panic":     recovered,
+		"method":    r.Method,
+		"path":      r.URL.Path,
+		"remote_ip": r.RemoteAddr,
+		"trace_id":  r.Header.Get("X-Request-ID"),
 	}).Error("Panic recovered in HTTP handler")
 
 	err := NewInternalError("An unexpected error occurred")

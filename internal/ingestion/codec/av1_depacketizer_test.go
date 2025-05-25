@@ -59,12 +59,12 @@ func TestAV1Depacketizer_SingleOBU(t *testing.T) {
 				Payload: tt.payload,
 			}
 			obus, err := d.Depacketize(packet)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Depacketize() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr && len(obus) != tt.wantLen {
 				t.Errorf("Depacketize() returned %d OBUs, want %d", len(obus), tt.wantLen)
 			}
@@ -266,7 +266,7 @@ func TestAV1Depacketizer_Reset(t *testing.T) {
 
 	// Just test that Reset() doesn't panic
 	d.Reset()
-	
+
 	// Verify depacketizer works after reset
 	packet := &rtp.Packet{
 		Header: rtp.Header{
@@ -354,7 +354,7 @@ func TestAV1Depacketizer_ErrorCases(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup()
 			}
-			
+
 			packet := &rtp.Packet{
 				Header: rtp.Header{
 					SequenceNumber: tt.seq,
@@ -362,11 +362,11 @@ func TestAV1Depacketizer_ErrorCases(t *testing.T) {
 				Payload: tt.payload,
 			}
 			_, err := d.Depacketize(packet)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Depacketize() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			
+
 			if tt.wantErr && err != nil && tt.errMsg != "" {
 				if err.Error() != tt.errMsg {
 					t.Errorf("Error message = %q, want %q", err.Error(), tt.errMsg)

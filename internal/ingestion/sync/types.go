@@ -27,9 +27,9 @@ const (
 // TrackSync maintains synchronization state for a single track
 type TrackSync struct {
 	// Track identification
-	Type      TrackType
-	StreamID  string
-	TimeBase  types.Rational // Time base (e.g., 1/90000 for video, 1/48000 for audio)
+	Type     TrackType
+	StreamID string
+	TimeBase types.Rational // Time base (e.g., 1/90000 for video, 1/48000 for audio)
 
 	// Timing state
 	LastPTS      int64     // Last presentation timestamp
@@ -37,9 +37,9 @@ type TrackSync struct {
 	LastWallTime time.Time // Wall clock time of last sample
 
 	// Synchronization references
-	BaseTime    time.Time // Reference wall clock time
-	BasePTS     int64     // Reference PTS
-	PTSWrapCount int      // Number of PTS wraps detected
+	BaseTime     time.Time // Reference wall clock time
+	BasePTS      int64     // Reference PTS
+	PTSWrapCount int       // Number of PTS wraps detected
 
 	// Statistics
 	FrameCount   uint64 // Total frames/samples processed
@@ -50,11 +50,11 @@ type TrackSync struct {
 
 // DriftSample represents a single drift measurement
 type DriftSample struct {
-	Timestamp    time.Time     // When measurement was taken
-	VideoPTS     int64         // Video PTS at measurement
-	AudioPTS     int64         // Audio PTS at measurement
-	Drift        time.Duration // Calculated drift (positive = video ahead)
-	
+	Timestamp time.Time     // When measurement was taken
+	VideoPTS  int64         // Video PTS at measurement
+	AudioPTS  int64         // Audio PTS at measurement
+	Drift     time.Duration // Calculated drift (positive = video ahead)
+
 	// Detailed drift components
 	PTSDrift      time.Duration // Drift based on timestamps
 	ProcessingLag time.Duration // Processing/delivery delay
@@ -62,10 +62,10 @@ type DriftSample struct {
 
 // DriftCorrection represents a drift correction action
 type DriftCorrection struct {
-	Timestamp  time.Time     // When correction was applied
-	Method     string        // Correction method used
-	Amount     time.Duration // Correction amount
-	Reason     string        // Why correction was needed
+	Timestamp time.Time     // When correction was applied
+	Method    string        // Correction method used
+	Amount    time.Duration // Correction amount
+	Reason    string        // Why correction was needed
 }
 
 // SyncStatus represents the current synchronization state
@@ -80,9 +80,9 @@ type SyncStatus struct {
 	AudioSync *TrackSync // Audio track sync state
 
 	// Drift history
-	DriftWindow    []DriftSample    // Recent drift measurements
+	DriftWindow    []DriftSample     // Recent drift measurements
 	Corrections    []DriftCorrection // Applied corrections
-	LastCorrection time.Time        // Last correction time
+	LastCorrection time.Time         // Last correction time
 
 	// Statistics
 	AvgDrift       time.Duration // Average drift over window
@@ -92,12 +92,12 @@ type SyncStatus struct {
 
 // StreamSyncStatus represents sync status for a single stream
 type StreamSyncStatus struct {
-	StreamID     string        // Stream identifier
-	LastPTS      int64         // Last processed PTS
-	LastDTS      int64         // Last processed DTS
-	Offset       time.Duration // Offset from master
-	InSync       bool          // Whether in sync with master
-	DroppedFrames uint64       // Frames dropped for sync
+	StreamID      string        // Stream identifier
+	LastPTS       int64         // Last processed PTS
+	LastDTS       int64         // Last processed DTS
+	Offset        time.Duration // Offset from master
+	InSync        bool          // Whether in sync with master
+	DroppedFrames uint64        // Frames dropped for sync
 }
 
 // SyncGroupStatus represents multi-stream sync status
@@ -118,16 +118,16 @@ type SyncConfig struct {
 	CorrectionInterval time.Duration // How often to check drift
 
 	// Correction parameters
-	EnableAutoCorrect  bool    // Enable automatic drift correction
-	CorrectionFactor   float64 // How aggressively to correct (0-1)
-	MaxCorrectionStep  time.Duration // Maximum correction per step
+	EnableAutoCorrect bool          // Enable automatic drift correction
+	CorrectionFactor  float64       // How aggressively to correct (0-1)
+	MaxCorrectionStep time.Duration // Maximum correction per step
 
 	// Multi-stream sync
 	MultiStreamTolerance time.Duration // Tolerance for multi-stream sync
 	MasterClockSource    string        // NTP, system, or stream ID
 
 	// Debug options
-	EnableDriftLogging bool // Log drift measurements
+	EnableDriftLogging bool          // Log drift measurements
 	DriftLogInterval   time.Duration // How often to log drift
 }
 

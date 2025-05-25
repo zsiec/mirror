@@ -65,7 +65,7 @@ func TestManager_HandlerGoroutineTracking(t *testing.T) {
 
 	// Check that goroutines were cleaned up
 	finalGoroutines := runtime.NumGoroutine()
-	
+
 	// Should be back to near initial count (allow some variance for runtime goroutines)
 	goroutineDiff := finalGoroutines - initialGoroutines
 	assert.LessOrEqual(t, goroutineDiff, 2, "Goroutines should be cleaned up after Stop(), diff: %d", goroutineDiff)
@@ -85,7 +85,7 @@ func TestManager_MultipleHandlersGoroutineTracking(t *testing.T) {
 	// Create multiple stream handlers
 	for i := 0; i < numStreams; i++ {
 		streamID := fmt.Sprintf("test-stream-%d", i)
-		
+
 		// Register stream
 		stream := &registry.Stream{
 			ID:         streamID,

@@ -136,18 +136,18 @@ func (r *RedisRegistry) List(ctx context.Context) ([]*Stream, error) {
 		
 		return result
 	`)
-	
+
 	res, err := script.Run(ctx, r.client, []string{r.prefix + "active"}, r.prefix).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list streams: %w", err)
 	}
-	
+
 	// Parse results
 	values, ok := res.([]interface{})
 	if !ok {
 		return nil, fmt.Errorf("unexpected result type from script")
 	}
-	
+
 	streams := make([]*Stream, 0, len(values))
 	for _, val := range values {
 		data, ok := val.(string)
@@ -155,16 +155,16 @@ func (r *RedisRegistry) List(ctx context.Context) ([]*Stream, error) {
 			r.logger.Warn("Invalid data type in result")
 			continue
 		}
-		
+
 		var stream Stream
 		if err := json.Unmarshal([]byte(data), &stream); err != nil {
 			r.logger.WithError(err).Warn("Failed to unmarshal stream")
 			continue
 		}
-		
+
 		streams = append(streams, &stream)
 	}
-	
+
 	return streams, nil
 }
 
@@ -175,32 +175,32 @@ func (r *RedisRegistry) ListPaginated(ctx context.Context, cursor uint64, count 
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to scan streams: %w", err)
 	}
-	
+
 	if len(streamIDs) == 0 {
 		return []*Stream{}, nextCursor, nil
 	}
-	
+
 	// Build keys
 	keys := make([]string, len(streamIDs))
 	for i, id := range streamIDs {
 		keys[i] = r.prefix + id
 	}
-	
+
 	// Use pipeline for atomic batch get
 	pipe := r.client.Pipeline()
 	cmds := make([]*redis.StringCmd, len(keys))
 	for i, key := range keys {
 		cmds[i] = pipe.Get(ctx, key)
 	}
-	
+
 	_, err = pipe.Exec(ctx)
 	if err != nil && err != redis.Nil {
 		return nil, 0, fmt.Errorf("failed to get streams: %w", err)
 	}
-	
+
 	streams := make([]*Stream, 0, len(cmds))
 	toRemove := make([]string, 0)
-	
+
 	for i, cmd := range cmds {
 		data, err := cmd.Result()
 		if err == redis.Nil {
@@ -211,16 +211,16 @@ func (r *RedisRegistry) ListPaginated(ctx context.Context, cursor uint64, count 
 			r.logger.WithError(err).Warnf("Failed to get stream %s", streamIDs[i])
 			continue
 		}
-		
+
 		var stream Stream
 		if err := json.Unmarshal([]byte(data), &stream); err != nil {
 			r.logger.WithError(err).Warnf("Failed to unmarshal stream %s", streamIDs[i])
 			continue
 		}
-		
+
 		streams = append(streams, &stream)
 	}
-	
+
 	// Clean up expired streams
 	if len(toRemove) > 0 {
 		// Convert []string to []interface{} for SRem
@@ -232,7 +232,7 @@ func (r *RedisRegistry) ListPaginated(ctx context.Context, cursor uint64, count 
 			r.logger.WithError(err).Warn("Failed to remove expired streams from active set")
 		}
 	}
-	
+
 	return streams, nextCursor, nil
 }
 
@@ -358,22 +358,22 @@ func (r *RedisRegistry) Update(ctx context.Context, stream *Stream) error {
 	if stream == nil {
 		return fmt.Errorf("stream cannot be nil")
 	}
-	
+
 	key := r.prefix + stream.ID
-	
+
 	// Update heartbeat
 	stream.LastHeartbeat = time.Now()
-	
+
 	data, err := json.Marshal(stream)
 	if err != nil {
 		return fmt.Errorf("failed to marshal stream: %w", err)
 	}
-	
+
 	// Update with TTL
 	if err := r.client.Set(ctx, key, data, r.ttl).Err(); err != nil {
 		return fmt.Errorf("failed to update stream: %w", err)
 	}
-	
+
 	r.logger.WithField("stream_id", stream.ID).Debug("Stream updated")
 	return nil
 }

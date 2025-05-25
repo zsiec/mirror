@@ -40,10 +40,10 @@ func DefaultValidatorConfig() *ValidatorConfig {
 type Validator struct {
 	config              *ValidatorConfig
 	allowedPayloadTypes map[uint8]bool
-	
+
 	// Track per-SSRC state
-	mu           sync.RWMutex
-	ssrcState    map[uint32]*ssrcTracker
+	mu        sync.RWMutex
+	ssrcState map[uint32]*ssrcTracker
 }
 
 // ssrcTracker tracks state for a single SSRC
@@ -58,18 +58,18 @@ func NewValidator(config *ValidatorConfig) *Validator {
 	if config == nil {
 		config = DefaultValidatorConfig()
 	}
-	
+
 	v := &Validator{
 		config:              config,
 		allowedPayloadTypes: make(map[uint8]bool),
-		ssrcState:          make(map[uint32]*ssrcTracker),
+		ssrcState:           make(map[uint32]*ssrcTracker),
 	}
-	
+
 	// Build payload type lookup map
 	for _, pt := range config.AllowedPayloadTypes {
 		v.allowedPayloadTypes[pt] = true
 	}
-	
+
 	return v
 }
 
@@ -79,17 +79,17 @@ func (v *Validator) ValidatePacket(packet *rtp.Packet) error {
 	if packet == nil {
 		return ErrPacketTooSmall
 	}
-	
+
 	// Check RTP version (must be 2)
 	if packet.Version != 2 {
 		return ErrInvalidRTPVersion
 	}
-	
+
 	// Validate payload type
 	if !v.allowedPayloadTypes[packet.PayloadType] {
 		return ErrInvalidPayloadType
 	}
-	
+
 	// Validate padding if present
 	if packet.Padding && len(packet.Raw) > 0 {
 		paddingLen := packet.Raw[len(packet.Raw)-1]
@@ -97,7 +97,7 @@ func (v *Validator) ValidatePacket(packet *rtp.Packet) error {
 			return ErrInvalidPadding
 		}
 	}
-	
+
 	// Track and validate sequence/timestamp
 	v.mu.Lock()
 	tracker, exists := v.ssrcState[packet.SSRC]
@@ -111,7 +111,7 @@ func (v *Validator) ValidatePacket(packet *rtp.Packet) error {
 		v.mu.Unlock()
 		return nil
 	}
-	
+
 	// Validate sequence number
 	expectedSeq := (tracker.lastSequence + 1) & 0xFFFF
 	if packet.SequenceNumber != expectedSeq {
@@ -123,13 +123,13 @@ func (v *Validator) ValidatePacket(packet *rtp.Packet) error {
 			// Handle wraparound
 			gap = int(packet.SequenceNumber) + (0xFFFF - int(tracker.lastSequence)) + 1
 		}
-		
+
 		if gap > v.config.MaxSequenceGap {
 			v.mu.Unlock()
 			return ErrSequenceGap
 		}
 	}
-	
+
 	// Validate timestamp progression
 	if tracker.packetsCount > 0 {
 		var timestampDiff uint32
@@ -139,19 +139,19 @@ func (v *Validator) ValidatePacket(packet *rtp.Packet) error {
 			// Handle wraparound
 			timestampDiff = (0xFFFFFFFF - tracker.lastTimestamp) + packet.Timestamp + 1
 		}
-		
+
 		if timestampDiff > v.config.MaxTimestampJump {
 			v.mu.Unlock()
 			return ErrTimestampJump
 		}
 	}
-	
+
 	// Update tracker
 	tracker.lastSequence = packet.SequenceNumber
 	tracker.lastTimestamp = packet.Timestamp
 	tracker.packetsCount++
 	v.mu.Unlock()
-	
+
 	return nil
 }
 
@@ -159,7 +159,7 @@ func (v *Validator) ValidatePacket(packet *rtp.Packet) error {
 func (v *Validator) GetSSRCStats(ssrc uint32) (packetsCount uint64, exists bool) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	
+
 	if tracker, ok := v.ssrcState[ssrc]; ok {
 		return tracker.packetsCount, true
 	}

@@ -270,7 +270,7 @@ func TestValidator_ResetSSRC(t *testing.T) {
 	}
 
 	require.NoError(t, validator.ValidatePacket(packet))
-	
+
 	count, exists := validator.GetSSRCStats(ssrc)
 	assert.True(t, exists)
 	assert.Equal(t, uint64(1), count)

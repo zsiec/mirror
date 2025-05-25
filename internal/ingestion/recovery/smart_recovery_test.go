@@ -153,7 +153,7 @@ func TestSmartRecoveryHandler_FastRecovery(t *testing.T) {
 			Type:        types.FrameTypeI,
 			NALUnits: []types.NALUnit{
 				{Data: []byte{0x67, 0x42, 0x00, 0x1f}}, // SPS
-				{Data: []byte{0x68}},                    // PPS
+				{Data: []byte{0x68}},                   // PPS
 				{Data: []byte{0x61, 0x40}},             // I-slice
 			},
 		},
@@ -439,7 +439,7 @@ func TestSmartRecoveryHandler_Integration(t *testing.T) {
 		if i%30 == 0 {
 			frameType = types.FrameTypeIDR
 		}
-		
+
 		frame := &types.VideoFrame{
 			FrameNumber: i,
 			Type:        frameType,
@@ -447,11 +447,11 @@ func TestSmartRecoveryHandler_Integration(t *testing.T) {
 			PTS:         int64(i * 1000),
 			DTS:         int64(i * 1000),
 		}
-		
+
 		if frameType == types.FrameTypeIDR {
 			frame.NALUnits = []types.NALUnit{{Data: []byte{0x65}}}
 		}
-		
+
 		handler.ProcessFrame(frame)
 	}
 

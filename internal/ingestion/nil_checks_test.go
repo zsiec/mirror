@@ -27,7 +27,7 @@ func TestHTTPFlusherCheck(t *testing.T) {
 			shouldFlush:    false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// This mimics the code in api_handlers_video.go
@@ -36,7 +36,7 @@ func TestHTTPFlusherCheck(t *testing.T) {
 				flusher.Flush()
 				flushed = true
 			}
-			
+
 			if tt.shouldFlush {
 				assert.True(t, flushed, "Should have flushed")
 			} else {
@@ -75,7 +75,7 @@ func TestConnectionAdapterNilHandling(t *testing.T) {
 		adapter := NewSRTConnectionAdapter(nil)
 		assert.Nil(t, adapter, "Adapter should be nil for nil connection")
 	})
-	
+
 	t.Run("RTP_nil_session", func(t *testing.T) {
 		adapter := NewRTPConnectionAdapter(nil, types.CodecH264)
 		assert.Nil(t, adapter, "Adapter should be nil for nil session")
@@ -87,9 +87,9 @@ func TestManagerHandleNilAdapter(t *testing.T) {
 	// This test verifies that our nil checks in HandleSRTConnection and HandleRTPSession work
 	// Since we can't easily test the full manager without dependencies, we just verify
 	// that the pattern would catch nil adapters
-	
+
 	var adapter *SRTConnectionAdapter = nil
-	
+
 	// Simulate the check
 	if adapter == nil {
 		// This would return an error in the actual code

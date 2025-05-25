@@ -7,7 +7,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
-	
+
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/internal/ingestion/memory"
 	"github.com/zsiec/mirror/internal/ingestion/registry"
@@ -35,20 +35,20 @@ type Manager struct {
 	srtListener      *srt.Listener
 	rtpListener      *rtp.Listener
 	logger           logger.Logger
-	
+
 	// Stream handlers with video awareness and backpressure support
-	streamHandlers   map[string]*StreamHandler
-	handlersMu       sync.RWMutex
-	handlerWg        sync.WaitGroup // Track handler goroutines
-	
+	streamHandlers map[string]*StreamHandler
+	handlersMu     sync.RWMutex
+	handlerWg      sync.WaitGroup // Track handler goroutines
+
 	// Stream operation locks to prevent concurrent operations on same stream
-	streamOpLocks    map[string]*sync.Mutex
-	streamOpLocksMu  sync.Mutex
-	
+	streamOpLocks   map[string]*sync.Mutex
+	streamOpLocksMu sync.Mutex
+
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
-	
+
 	mu      sync.RWMutex
 	started bool
 }
@@ -61,21 +61,21 @@ func NewManager(cfg *config.IngestionConfig, logger logger.Logger) (*Manager, er
 		Password: cfg.Registry.RedisPassword,
 		DB:       cfg.Registry.RedisDB,
 	})
-	
+
 	// Test Redis connection
 	ctx := context.Background()
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis for registry: %w", err)
 	}
-	
+
 	// Create Redis registry with logrus logger
 	logrusLogger := logger.(*logrus.Logger)
 	reg := registry.NewRedisRegistry(redisClient, logrusLogger)
-	
+
 	// Create memory controller
 	maxTotal := cfg.Memory.MaxTotal
 	maxPerStream := cfg.Memory.MaxPerStream
-	
+
 	// Use defaults if not configured
 	if maxTotal == 0 {
 		maxTotal = DefaultMaxMemory
@@ -83,12 +83,12 @@ func NewManager(cfg *config.IngestionConfig, logger logger.Logger) (*Manager, er
 	if maxPerStream == 0 {
 		maxPerStream = DefaultMaxPerStream
 	}
-	
+
 	memController := memory.NewController(maxTotal, maxPerStream)
-	
+
 	// Create context for the manager
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	m := &Manager{
 		config:           cfg,
 		registry:         reg,
@@ -99,7 +99,7 @@ func NewManager(cfg *config.IngestionConfig, logger logger.Logger) (*Manager, er
 		ctx:              ctx,
 		cancel:           cancel,
 	}
-	
+
 	// Create SRT listener if enabled
 	if cfg.SRT.Enabled {
 		m.srtListener = srt.NewListener(&cfg.SRT, &cfg.Codecs, reg, logger)
@@ -108,7 +108,7 @@ func NewManager(cfg *config.IngestionConfig, logger logger.Logger) (*Manager, er
 			return m.HandleSRTConnection(conn)
 		})
 	}
-	
+
 	// Create RTP listener if enabled
 	if cfg.RTP.Enabled {
 		m.rtpListener = rtp.NewListener(&cfg.RTP, &cfg.Codecs, reg, logger)
@@ -117,7 +117,7 @@ func NewManager(cfg *config.IngestionConfig, logger logger.Logger) (*Manager, er
 			return m.HandleRTPSession(session)
 		})
 	}
-	
+
 	return m, nil
 }
 
@@ -125,13 +125,13 @@ func NewManager(cfg *config.IngestionConfig, logger logger.Logger) (*Manager, er
 func (m *Manager) Start() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.started {
 		return fmt.Errorf("ingestion manager already started")
 	}
-	
+
 	m.logger.Info("Starting ingestion manager")
-	
+
 	// Start SRT listener
 	if m.srtListener != nil {
 		if err := m.srtListener.Start(); err != nil {
@@ -139,7 +139,7 @@ func (m *Manager) Start() error {
 		}
 		m.logger.Info("SRT listener started")
 	}
-	
+
 	// Start RTP listener
 	if m.rtpListener != nil {
 		if err := m.rtpListener.Start(); err != nil {
@@ -151,10 +151,10 @@ func (m *Manager) Start() error {
 		}
 		m.logger.Info("RTP listener started")
 	}
-	
+
 	m.started = true
 	m.logger.Info("Ingestion manager started successfully")
-	
+
 	return nil
 }
 
@@ -162,34 +162,34 @@ func (m *Manager) Start() error {
 func (m *Manager) Stop() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if !m.started {
 		return nil
 	}
-	
+
 	m.logger.Info("Stopping ingestion manager")
-	
+
 	// Cancel context to signal all components to stop
 	if m.cancel != nil {
 		m.cancel()
 	}
-	
+
 	var errors []error
-	
+
 	// Stop SRT listener
 	if m.srtListener != nil {
 		if err := m.srtListener.Stop(); err != nil {
 			errors = append(errors, fmt.Errorf("failed to stop SRT listener: %w", err))
 		}
 	}
-	
+
 	// Stop RTP listener
 	if m.rtpListener != nil {
 		if err := m.rtpListener.Stop(); err != nil {
 			errors = append(errors, fmt.Errorf("failed to stop RTP listener: %w", err))
 		}
 	}
-	
+
 	// Stop all stream handlers
 	m.handlersMu.RLock()
 	handlers := make(map[string]*StreamHandler)
@@ -197,36 +197,36 @@ func (m *Manager) Stop() error {
 		handlers[k] = v
 	}
 	m.handlersMu.RUnlock()
-	
+
 	for streamID, handler := range handlers {
 		m.logger.WithField("stream_id", streamID).Info("Stopping stream handler")
 		if err := handler.Stop(); err != nil {
 			errors = append(errors, fmt.Errorf("failed to stop stream handler %s: %w", streamID, err))
 		}
 	}
-	
+
 	// Wait for all handler goroutines to complete
 	m.logger.Info("Waiting for all stream handlers to complete")
 	m.handlerWg.Wait()
-	
+
 	// Clear the handlers map after all have stopped
 	m.handlersMu.Lock()
 	m.streamHandlers = make(map[string]*StreamHandler)
 	m.handlersMu.Unlock()
-	
+
 	// Close the registry to clean up Redis connection
 	if m.registry != nil {
 		if err := m.registry.Close(); err != nil {
 			errors = append(errors, fmt.Errorf("failed to close registry: %w", err))
 		}
 	}
-	
+
 	m.started = false
-	
+
 	if len(errors) > 0 {
 		return fmt.Errorf("errors during shutdown: %v", errors)
 	}
-	
+
 	m.logger.Info("Ingestion manager stopped successfully")
 	return nil
 }
@@ -235,7 +235,6 @@ func (m *Manager) Stop() error {
 func (m *Manager) GetRegistry() registry.Registry {
 	return m.registry
 }
-
 
 // GetActiveStreams returns all active streams from the registry
 func (m *Manager) GetActiveStreams(ctx context.Context) ([]*registry.Stream, error) {
@@ -247,37 +246,36 @@ func (m *Manager) GetStream(ctx context.Context, streamID string) (*registry.Str
 	return m.registry.Get(ctx, streamID)
 }
 
-
 // GetStats returns ingestion statistics
 func (m *Manager) GetStats(ctx context.Context) IngestionStats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	stats := IngestionStats{
 		Started: m.started,
 	}
-	
+
 	if m.srtListener != nil {
 		stats.SRTEnabled = true
 		stats.SRTSessions = m.srtListener.GetActiveSessions()
 	}
-	
+
 	if m.rtpListener != nil {
 		stats.RTPEnabled = true
 		stats.RTPSessions = m.rtpListener.GetActiveSessions()
 	}
-	
+
 	// Get active streams count
 	streams, err := m.registry.List(ctx)
 	if err == nil {
 		stats.TotalStreams = len(streams)
 	}
-	
+
 	// Get active stream handlers count safely
 	m.handlersMu.RLock()
 	stats.ActiveHandlers = len(m.streamHandlers)
 	m.handlersMu.RUnlock()
-	
+
 	return stats
 }
 
@@ -285,17 +283,17 @@ func (m *Manager) GetStats(ctx context.Context) IngestionStats {
 func (m *Manager) TerminateStream(ctx context.Context, streamID string) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	if !m.started {
 		return fmt.Errorf("ingestion manager not started")
 	}
-	
+
 	// Get stream info to determine which listener to use
 	stream, err := m.registry.Get(ctx, streamID)
 	if err != nil {
 		return fmt.Errorf("stream not found: %w", err)
 	}
-	
+
 	// Terminate based on stream type
 	switch stream.Type {
 	case "srt":
@@ -315,20 +313,20 @@ func (m *Manager) TerminateStream(ctx context.Context, streamID string) error {
 	default:
 		return fmt.Errorf("unknown stream type: %s", stream.Type)
 	}
-	
+
 	// Remove from registry
 	if err := m.registry.Delete(ctx, streamID); err != nil {
 		m.logger.WithError(err).WithField("stream_id", streamID).Error("Failed to remove stream from registry")
 	}
-	
+
 	// Remove stream handler
 	m.RemoveStreamHandler(streamID)
-	
+
 	// Clean up stream operation lock
 	m.streamOpLocksMu.Lock()
 	delete(m.streamOpLocks, streamID)
 	m.streamOpLocksMu.Unlock()
-	
+
 	m.logger.WithField("stream_id", streamID).Info("Stream terminated")
 	return nil
 }
@@ -337,11 +335,11 @@ func (m *Manager) TerminateStream(ctx context.Context, streamID string) error {
 func (m *Manager) getStreamOpLock(streamID string) *sync.Mutex {
 	m.streamOpLocksMu.Lock()
 	defer m.streamOpLocksMu.Unlock()
-	
+
 	if lock, exists := m.streamOpLocks[streamID]; exists {
 		return lock
 	}
-	
+
 	lock := &sync.Mutex{}
 	m.streamOpLocks[streamID] = lock
 	return lock
@@ -353,7 +351,7 @@ func (m *Manager) PauseStream(ctx context.Context, streamID string) error {
 	streamLock := m.getStreamOpLock(streamID)
 	streamLock.Lock()
 	defer streamLock.Unlock()
-	
+
 	// Check if manager is started (read lock is sufficient)
 	m.mu.RLock()
 	if !m.started {
@@ -361,22 +359,22 @@ func (m *Manager) PauseStream(ctx context.Context, streamID string) error {
 		return fmt.Errorf("ingestion manager not started")
 	}
 	m.mu.RUnlock()
-	
+
 	// Get stream info
 	stream, err := m.registry.Get(ctx, streamID)
 	if err != nil {
 		return fmt.Errorf("stream not found: %w", err)
 	}
-	
+
 	// Check stream status
 	if stream.Status == "paused" {
 		return nil // Already paused
 	}
-	
+
 	if stream.Status != "active" {
 		return fmt.Errorf("stream is not active (status: %s)", stream.Status)
 	}
-	
+
 	// Pause based on stream type
 	// Need read lock to access listeners
 	m.mu.RLock()
@@ -404,18 +402,18 @@ func (m *Manager) PauseStream(ctx context.Context, streamID string) error {
 		return fmt.Errorf("unknown stream type: %s", stream.Type)
 	}
 	m.mu.RUnlock()
-	
+
 	// Save original status for rollback
 	originalStatus := stream.Status
-	
+
 	// Update registry status
 	stream.Status = "paused"
 	if err := m.registry.Update(ctx, stream); err != nil {
 		m.logger.WithError(err).WithField("stream_id", streamID).Error("Failed to update stream status in registry")
-		
+
 		// Rollback the pause operation
 		m.logger.WithField("stream_id", streamID).Info("Rolling back pause operation")
-		
+
 		// Attempt to resume the stream to restore original state
 		m.mu.RLock()
 		var rollbackErr error
@@ -430,17 +428,17 @@ func (m *Manager) PauseStream(ctx context.Context, streamID string) error {
 			}
 		}
 		m.mu.RUnlock()
-		
+
 		if rollbackErr != nil {
 			m.logger.WithError(rollbackErr).WithField("stream_id", streamID).Error("Failed to rollback pause operation")
 			return fmt.Errorf("failed to update registry and rollback failed: %w", err)
 		}
-		
+
 		// Restore original status in memory
 		stream.Status = originalStatus
 		return fmt.Errorf("failed to update stream status in registry: %w", err)
 	}
-	
+
 	m.logger.WithField("stream_id", streamID).Info("Stream paused")
 	return nil
 }
@@ -451,7 +449,7 @@ func (m *Manager) ResumeStream(ctx context.Context, streamID string) error {
 	streamLock := m.getStreamOpLock(streamID)
 	streamLock.Lock()
 	defer streamLock.Unlock()
-	
+
 	// Check if manager is started (read lock is sufficient)
 	m.mu.RLock()
 	if !m.started {
@@ -459,18 +457,18 @@ func (m *Manager) ResumeStream(ctx context.Context, streamID string) error {
 		return fmt.Errorf("ingestion manager not started")
 	}
 	m.mu.RUnlock()
-	
+
 	// Get stream info
 	stream, err := m.registry.Get(ctx, streamID)
 	if err != nil {
 		return fmt.Errorf("stream not found: %w", err)
 	}
-	
+
 	// Check if not paused
 	if stream.Status != "paused" {
 		return fmt.Errorf("stream is not paused (status: %s)", stream.Status)
 	}
-	
+
 	// Resume based on stream type
 	// Need read lock to access listeners
 	m.mu.RLock()
@@ -498,18 +496,18 @@ func (m *Manager) ResumeStream(ctx context.Context, streamID string) error {
 		return fmt.Errorf("unknown stream type: %s", stream.Type)
 	}
 	m.mu.RUnlock()
-	
+
 	// Save original status for rollback
 	originalStatus := stream.Status
-	
+
 	// Update registry status
 	stream.Status = "active"
 	if err := m.registry.Update(ctx, stream); err != nil {
 		m.logger.WithError(err).WithField("stream_id", streamID).Error("Failed to update stream status in registry")
-		
+
 		// Rollback the resume operation
 		m.logger.WithField("stream_id", streamID).Info("Rolling back resume operation")
-		
+
 		// Attempt to pause the stream again to restore original state
 		m.mu.RLock()
 		var rollbackErr error
@@ -524,17 +522,17 @@ func (m *Manager) ResumeStream(ctx context.Context, streamID string) error {
 			}
 		}
 		m.mu.RUnlock()
-		
+
 		if rollbackErr != nil {
 			m.logger.WithError(rollbackErr).WithField("stream_id", streamID).Error("Failed to rollback resume operation")
 			return fmt.Errorf("failed to update registry and rollback failed: %w", err)
 		}
-		
+
 		// Restore original status in memory
 		stream.Status = originalStatus
 		return fmt.Errorf("failed to update stream status in registry: %w", err)
 	}
-	
+
 	m.logger.WithField("stream_id", streamID).Info("Stream resumed")
 	return nil
 }
@@ -543,12 +541,12 @@ func (m *Manager) ResumeStream(ctx context.Context, streamID string) error {
 func (m *Manager) CreateStreamHandler(streamID string, conn StreamConnection) (*StreamHandler, error) {
 	m.handlersMu.Lock()
 	defer m.handlersMu.Unlock()
-	
+
 	// Check if handler already exists
 	if _, exists := m.streamHandlers[streamID]; exists {
 		return nil, fmt.Errorf("stream handler already exists for %s", streamID)
 	}
-	
+
 	// Create hybrid queue with disk overflow
 	diskDir := m.config.QueueDir
 	if diskDir == "" {
@@ -558,20 +556,20 @@ func (m *Manager) CreateStreamHandler(streamID string, conn StreamConnection) (*
 	if err != nil {
 		return nil, fmt.Errorf("failed to create hybrid queue: %w", err)
 	}
-	
+
 	// Create stream handler with manager's context
 	handler := NewStreamHandler(m.ctx, streamID, conn, hybridQueue, m.memoryController, m.logger)
-	
+
 	// Store handler
 	m.streamHandlers[streamID] = handler
-	
+
 	// Start handler with tracking
 	m.handlerWg.Add(1)
 	go func() {
 		defer m.handlerWg.Done()
 		handler.Start()
 	}()
-	
+
 	return handler, nil
 }
 
@@ -579,7 +577,7 @@ func (m *Manager) CreateStreamHandler(streamID string, conn StreamConnection) (*
 func (m *Manager) RemoveStreamHandler(streamID string) {
 	m.handlersMu.Lock()
 	defer m.handlersMu.Unlock()
-	
+
 	if handler, exists := m.streamHandlers[streamID]; exists {
 		handler.Stop()
 		delete(m.streamHandlers, streamID)
@@ -590,7 +588,7 @@ func (m *Manager) RemoveStreamHandler(streamID string) {
 func (m *Manager) GetStreamHandler(streamID string) (*StreamHandler, bool) {
 	m.handlersMu.RLock()
 	defer m.handlersMu.RUnlock()
-	
+
 	handler, exists := m.streamHandlers[streamID]
 	return handler, exists
 }
@@ -602,7 +600,7 @@ func (m *Manager) HandleSRTConnection(conn *srt.Connection) error {
 	if adapter == nil {
 		return fmt.Errorf("failed to create SRT connection adapter")
 	}
-	
+
 	// Create and start stream handler
 	handler, err := m.CreateStreamHandler(conn.GetStreamID(), adapter)
 	if err != nil {
@@ -612,10 +610,10 @@ func (m *Manager) HandleSRTConnection(conn *srt.Connection) error {
 		}
 		return fmt.Errorf("failed to create stream handler: %w", err)
 	}
-	
+
 	// Handler is already started, just wait for completion
 	<-handler.ctx.Done()
-	
+
 	// Cleanup
 	m.RemoveStreamHandler(conn.GetStreamID())
 	return nil
@@ -630,18 +628,18 @@ func (m *Manager) HandleRTPSession(session *rtp.Session) error {
 		m.logger.Warn("Could not detect codec, defaulting to H.264")
 		codecType = types.CodecH264
 	}
-	
+
 	m.logger.Info("Detected codec for RTP session",
 		"stream_id", session.GetStreamID(),
 		"codec", codecType.String(),
 		"payload_type", session.GetPayloadType())
-	
+
 	// Create adapter
 	adapter := NewRTPConnectionAdapter(session, codecType)
 	if adapter == nil {
 		return fmt.Errorf("failed to create RTP connection adapter")
 	}
-	
+
 	// Create and start stream handler
 	handler, err := m.CreateStreamHandler(session.GetStreamID(), adapter)
 	if err != nil {
@@ -651,10 +649,10 @@ func (m *Manager) HandleRTPSession(session *rtp.Session) error {
 		}
 		return fmt.Errorf("failed to create stream handler: %w", err)
 	}
-	
+
 	// Handler is already started, just wait for completion
 	<-handler.ctx.Done()
-	
+
 	// Cleanup
 	m.RemoveStreamHandler(session.GetStreamID())
 	return nil

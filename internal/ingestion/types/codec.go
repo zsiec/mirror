@@ -6,7 +6,7 @@ type CodecType uint8
 const (
 	CodecUnknown CodecType = iota
 	CodecH264
-	CodecHEVC     // H.265
+	CodecHEVC // H.265
 	CodecAV1
 	CodecVP8
 	CodecVP9
@@ -166,7 +166,7 @@ func GetClockRateForPayloadType(payloadType uint8) uint32 {
 		return 22050
 	case 18: // G729
 		return 8000
-		
+
 	// Video payload types
 	case 25: // CelB
 		return 90000
@@ -182,7 +182,7 @@ func GetClockRateForPayloadType(payloadType uint8) uint32 {
 		return 90000
 	case 34: // H263
 		return 90000
-		
+
 	default:
 		// Dynamic payload types (96-127) don't have fixed clock rates
 		return 0

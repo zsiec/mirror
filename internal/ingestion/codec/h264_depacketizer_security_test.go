@@ -91,7 +91,7 @@ func TestSTAPAVulnerability(t *testing.T) {
 				// Add 101 small NAL units (limit is 100)
 				for i := 0; i < 101; i++ {
 					data = append(data, 0x00, 0x01) // Size = 1
-					data = append(data, 0x41)        // Data
+					data = append(data, 0x41)       // Data
 				}
 				return data
 			}(),
@@ -167,10 +167,10 @@ func TestFUAFragmentLimits(t *testing.T) {
 	depacketizer := NewH264Depacketizer()
 
 	tests := []struct {
-		name        string
-		packets     [][]byte
-		expectNAL   bool
-		desc        string
+		name      string
+		packets   [][]byte
+		expectNAL bool
+		desc      string
 	}{
 		{
 			name: "valid_fua_sequence",
@@ -180,7 +180,7 @@ func TestFUAFragmentLimits(t *testing.T) {
 				// Middle fragment
 				{nalTypeFUA, 0x01, 0x44, 0x45, 0x46}, // Start=0, End=0
 				// End fragment
-				{nalTypeFUA, 0x41, 0x47, 0x48},       // Start=0, End=1
+				{nalTypeFUA, 0x41, 0x47, 0x48}, // Start=0, End=1
 			},
 			expectNAL: true,
 			desc:      "Valid FU-A sequence should produce NAL",
@@ -315,7 +315,7 @@ func TestDepacketizerEdgeCases(t *testing.T) {
 
 			nalUnits, err := depacketizer.Depacketize(pkt)
 			t.Logf("%s: err=%v, nalUnits=%d", tt.desc, err, len(nalUnits))
-			
+
 			// Just ensure it doesn't panic
 			_ = nalUnits
 		})

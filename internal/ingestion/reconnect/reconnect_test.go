@@ -57,7 +57,7 @@ func TestExponentialBackoff(t *testing.T) {
 			for i, expectedDelay := range tt.wantDelays {
 				delay, shouldRetry := backoff.NextDelay()
 				assert.True(t, shouldRetry, "Retry %d should continue", i+1)
-				
+
 				// Check within 40% range due to jitter
 				minDelay := time.Duration(float64(expectedDelay) * 0.6)
 				maxDelay := time.Duration(float64(expectedDelay) * 1.4)
@@ -136,10 +136,10 @@ func TestReconnectManager(t *testing.T) {
 		defer cancel()
 
 		manager.Start(ctx)
-		
+
 		// Wait for completion
 		time.Sleep(300 * time.Millisecond)
-		
+
 		assert.Equal(t, int32(3), atomic.LoadInt32(&connectAttempts))
 		assert.True(t, successCalled.Load())
 	})
@@ -168,10 +168,10 @@ func TestReconnectManager(t *testing.T) {
 		defer cancel()
 
 		manager.Start(ctx)
-		
+
 		// Wait for completion
 		time.Sleep(100 * time.Millisecond)
-		
+
 		// Should have 2 attempts (max retries) plus potentially 1 more in flight
 		attempts := atomic.LoadInt32(&connectAttempts)
 		assert.True(t, attempts == 2 || attempts == 3, "Expected 2-3 attempts, got %d", attempts)
@@ -194,16 +194,16 @@ func TestReconnectManager(t *testing.T) {
 		)
 
 		ctx, cancel := context.WithCancel(context.Background())
-		
+
 		manager.Start(ctx)
-		
+
 		// Cancel after a short time
 		time.Sleep(150 * time.Millisecond)
 		cancel()
-		
+
 		// Wait a bit more
 		time.Sleep(150 * time.Millisecond)
-		
+
 		// Should have stopped after context cancellation
 		attempts := atomic.LoadInt32(&connectAttempts)
 		assert.True(t, attempts >= 1 && attempts <= 3, "Should have 1-3 attempts, got %d", attempts)
@@ -226,14 +226,14 @@ func TestReconnectManager(t *testing.T) {
 
 		ctx := context.Background()
 		manager.Start(ctx)
-		
+
 		// Stop after a short time
 		time.Sleep(75 * time.Millisecond)
 		manager.Stop()
-		
+
 		// Wait a bit more
 		time.Sleep(100 * time.Millisecond)
-		
+
 		// Should have stopped
 		attempts := atomic.LoadInt32(&connectAttempts)
 		assert.True(t, attempts >= 1 && attempts <= 3, "Should have 1-3 attempts, got %d", attempts)

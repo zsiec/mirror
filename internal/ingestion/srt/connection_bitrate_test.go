@@ -41,7 +41,7 @@ func TestConnection_BitrateCalculation(t *testing.T) {
 		},
 		{
 			name:            "half_second_duration",
-			currentBytes:    500000,  // 500KB
+			currentBytes:    500000, // 500KB
 			lastBytes:       0,
 			duration:        500 * time.Millisecond,
 			expectedBitrate: 8000000, // 8 Mbps
@@ -59,10 +59,10 @@ func TestConnection_BitrateCalculation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Calculate bitrate
 			actualBitrate := testBitrateCalc(tt.currentBytes, tt.lastBytes, tt.duration)
-			
+
 			// Check bitrate calculation
 			assert.Equal(t, tt.expectedBitrate, actualBitrate,
-				"Expected bitrate %d, got %d", 
+				"Expected bitrate %d, got %d",
 				tt.expectedBitrate, actualBitrate)
 		})
 	}
@@ -72,8 +72,8 @@ func TestConnection_BitrateCalculation(t *testing.T) {
 func TestConnection_BitrateOverTime(t *testing.T) {
 	// Test the evolution of bitrate calculation over time
 	scenarios := []struct {
-		name        string
-		updates     []struct {
+		name    string
+		updates []struct {
 			bytes    int64
 			duration time.Duration
 		}
@@ -85,14 +85,14 @@ func TestConnection_BitrateOverTime(t *testing.T) {
 				bytes    int64
 				duration time.Duration
 			}{
-				{1000000, time.Second},   // 1MB after 1s
-				{2000000, time.Second},   // 2MB after 2s
-				{3000000, time.Second},   // 3MB after 3s
+				{1000000, time.Second}, // 1MB after 1s
+				{2000000, time.Second}, // 2MB after 2s
+				{3000000, time.Second}, // 3MB after 3s
 			},
 			expectedBitrates: []int64{
-				8000000,  // 8 Mbps (1MB/1s)
-				8000000,  // 8 Mbps (1MB delta/1s)
-				8000000,  // 8 Mbps (1MB delta/1s)
+				8000000, // 8 Mbps (1MB/1s)
+				8000000, // 8 Mbps (1MB delta/1s)
+				8000000, // 8 Mbps (1MB delta/1s)
 			},
 		},
 		{
@@ -101,14 +101,14 @@ func TestConnection_BitrateOverTime(t *testing.T) {
 				bytes    int64
 				duration time.Duration
 			}{
-				{500000, time.Second},         // 500KB after 1s
-				{1500000, time.Second},        // 1.5MB after 2s (1MB delta)
+				{500000, time.Second},             // 500KB after 1s
+				{1500000, time.Second},            // 1.5MB after 2s (1MB delta)
 				{2000000, 500 * time.Millisecond}, // 2MB after 2.5s (500KB delta)
 			},
 			expectedBitrates: []int64{
-				4000000,  // 4 Mbps (500KB/1s)
-				8000000,  // 8 Mbps (1MB/1s)
-				8000000,  // 8 Mbps (500KB/0.5s)
+				4000000, // 4 Mbps (500KB/1s)
+				8000000, // 8 Mbps (1MB/1s)
+				8000000, // 8 Mbps (500KB/0.5s)
 			},
 		},
 		{
@@ -117,8 +117,8 @@ func TestConnection_BitrateOverTime(t *testing.T) {
 				bytes    int64
 				duration time.Duration
 			}{
-				{5000000, 100 * time.Millisecond}, // 5MB in 100ms
-				{5000000, 2 * time.Second},        // No new data for 2s
+				{5000000, 100 * time.Millisecond},  // 5MB in 100ms
+				{5000000, 2 * time.Second},         // No new data for 2s
 				{10000000, 100 * time.Millisecond}, // 5MB more in 100ms
 			},
 			expectedBitrates: []int64{
@@ -128,20 +128,20 @@ func TestConnection_BitrateOverTime(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
 			var lastBytes int64 = 0
-			
+
 			for i, update := range scenario.updates {
 				// Calculate expected bitrate
 				deltaBytes := update.bytes - lastBytes
 				actualBitrate := testBitrateCalc(update.bytes, lastBytes, update.duration)
-				
+
 				assert.Equal(t, scenario.expectedBitrates[i], actualBitrate,
 					"Update %d: Expected %d bps, got %d bps (delta: %d bytes)",
 					i+1, scenario.expectedBitrates[i], actualBitrate, deltaBytes)
-				
+
 				lastBytes = update.bytes
 			}
 		})

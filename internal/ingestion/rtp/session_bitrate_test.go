@@ -71,10 +71,10 @@ func TestRTPSession_BitrateCalculation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Calculate bitrate
 			actualBitrate := testRTPBitrateCalc(tt.currentBytes, tt.lastBytes, tt.duration)
-			
+
 			// Check bitrate calculation
 			assert.Equal(t, tt.expectedBitrate, actualBitrate,
-				"Expected bitrate %f, got %f", 
+				"Expected bitrate %f, got %f",
 				tt.expectedBitrate, actualBitrate)
 		})
 	}
@@ -84,8 +84,8 @@ func TestRTPSession_BitrateCalculation(t *testing.T) {
 func TestRTPSession_BitrateOverTime(t *testing.T) {
 	// Test the evolution of bitrate calculation over time
 	scenarios := []struct {
-		name        string
-		updates     []struct {
+		name    string
+		updates []struct {
 			bytes    uint64
 			duration time.Duration
 		}
@@ -97,14 +97,14 @@ func TestRTPSession_BitrateOverTime(t *testing.T) {
 				bytes    uint64
 				duration time.Duration
 			}{
-				{1000000, time.Second},   // 1MB after 1s
-				{2000000, time.Second},   // 2MB after 2s
-				{3000000, time.Second},   // 3MB after 3s
+				{1000000, time.Second}, // 1MB after 1s
+				{2000000, time.Second}, // 2MB after 2s
+				{3000000, time.Second}, // 3MB after 3s
 			},
 			expectedBitrates: []float64{
-				8000000,  // 8 Mbps (1MB/1s)
-				8000000,  // 8 Mbps (1MB delta/1s)
-				8000000,  // 8 Mbps (1MB delta/1s)
+				8000000, // 8 Mbps (1MB/1s)
+				8000000, // 8 Mbps (1MB delta/1s)
+				8000000, // 8 Mbps (1MB delta/1s)
 			},
 		},
 		{
@@ -113,14 +113,14 @@ func TestRTPSession_BitrateOverTime(t *testing.T) {
 				bytes    uint64
 				duration time.Duration
 			}{
-				{500000, time.Second},         // 500KB after 1s
-				{1500000, time.Second},        // 1.5MB after 2s (1MB delta)
+				{500000, time.Second},             // 500KB after 1s
+				{1500000, time.Second},            // 1.5MB after 2s (1MB delta)
 				{2000000, 500 * time.Millisecond}, // 2MB after 2.5s (500KB delta)
 			},
 			expectedBitrates: []float64{
-				4000000,  // 4 Mbps (500KB/1s)
-				8000000,  // 8 Mbps (1MB/1s)
-				8000000,  // 8 Mbps (500KB/0.5s)
+				4000000, // 4 Mbps (500KB/1s)
+				8000000, // 8 Mbps (1MB/1s)
+				8000000, // 8 Mbps (500KB/0.5s)
 			},
 		},
 		{
@@ -129,8 +129,8 @@ func TestRTPSession_BitrateOverTime(t *testing.T) {
 				bytes    uint64
 				duration time.Duration
 			}{
-				{5000000, 100 * time.Millisecond}, // 5MB in 100ms
-				{5000000, 2 * time.Second},        // No new data for 2s
+				{5000000, 100 * time.Millisecond},  // 5MB in 100ms
+				{5000000, 2 * time.Second},         // No new data for 2s
 				{10000000, 100 * time.Millisecond}, // 5MB more in 100ms
 			},
 			expectedBitrates: []float64{
@@ -150,25 +150,25 @@ func TestRTPSession_BitrateOverTime(t *testing.T) {
 				{1000000, time.Second}, // Back to 1MB
 			},
 			expectedBitrates: []float64{
-				8000000,   // 8 Mbps (1MB/1s)
-				0,         // 0 Mbps (counter reset detected)
-				4000000,   // 4 Mbps (500KB/1s)
+				8000000, // 8 Mbps (1MB/1s)
+				0,       // 0 Mbps (counter reset detected)
+				4000000, // 4 Mbps (500KB/1s)
 			},
 		},
 	}
-	
+
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
 			var lastBytes uint64 = 0
-			
+
 			for i, update := range scenario.updates {
 				// Calculate expected bitrate
 				actualBitrate := testRTPBitrateCalc(update.bytes, lastBytes, update.duration)
-				
+
 				assert.Equal(t, scenario.expectedBitrates[i], actualBitrate,
 					"Update %d: Expected %f bps, got %f bps",
 					i+1, scenario.expectedBitrates[i], actualBitrate)
-				
+
 				lastBytes = update.bytes
 			}
 		})
@@ -182,13 +182,13 @@ func TestRTPSession_EdgeCases(t *testing.T) {
 		bitrate := testRTPBitrateCalc(1000000, 0, 0)
 		assert.Equal(t, float64(0), bitrate)
 	})
-	
+
 	t.Run("very_small_duration", func(t *testing.T) {
 		// 1 byte in 1 microsecond = 8 Mbps
 		bitrate := testRTPBitrateCalc(1, 0, time.Microsecond)
 		assert.Equal(t, float64(8000000), bitrate)
 	})
-	
+
 	t.Run("very_large_values", func(t *testing.T) {
 		// Test with large values that might cause overflow in naive implementations
 		// 1TB in 1 hour = ~2.2 Gbps
@@ -196,9 +196,9 @@ func TestRTPSession_EdgeCases(t *testing.T) {
 		hour := time.Hour
 		bitrate := testRTPBitrateCalc(terabyte, 0, hour)
 		expectedBitrate := float64(terabyte*8) / hour.Seconds()
-		
-		assert.InDelta(t, expectedBitrate, bitrate, 1000, 
-			"Expected ~%.2f Gbps, got %.2f Gbps", 
+
+		assert.InDelta(t, expectedBitrate, bitrate, 1000,
+			"Expected ~%.2f Gbps, got %.2f Gbps",
 			expectedBitrate/1e9, bitrate/1e9)
 	})
 }

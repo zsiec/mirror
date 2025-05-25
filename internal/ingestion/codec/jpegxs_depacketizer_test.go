@@ -14,7 +14,7 @@ func TestJPEGXSDepacketizer_SinglePacketFrame(t *testing.T) {
 	// Create a single packet frame
 	// Header: F=1, L=1 (first and last), E=0 (no extended header)
 	header := []byte{
-		0xC0,       // F=1, L=1, P=00, I=0, E=0, reserved=00
+		0xC0,             // F=1, L=1, P=00, I=0, E=0, reserved=00
 		0x00, 0x00, 0x01, // Frame ID = 1
 	}
 	// Mock JPEG XS data
@@ -37,7 +37,7 @@ func TestJPEGXSDepacketizer_MultiPacketFrame(t *testing.T) {
 
 	// First packet
 	header1 := []byte{
-		0x80,       // F=1, L=0, P=00, I=0, E=0, reserved=00
+		0x80,             // F=1, L=0, P=00, I=0, E=0, reserved=00
 		0x00, 0x00, 0x01, // Frame ID = 1
 	}
 	data1 := []byte{0xFF, 0x10, 0x00, 0x00}
@@ -54,7 +54,7 @@ func TestJPEGXSDepacketizer_MultiPacketFrame(t *testing.T) {
 
 	// Middle packet
 	header2 := []byte{
-		0x00,       // F=0, L=0, P=00, I=0, E=0, reserved=00
+		0x00,             // F=0, L=0, P=00, I=0, E=0, reserved=00
 		0x00, 0x00, 0x01, // Frame ID = 1
 	}
 	data2 := []byte{0x01, 0x02, 0x03, 0x04}
@@ -71,7 +71,7 @@ func TestJPEGXSDepacketizer_MultiPacketFrame(t *testing.T) {
 
 	// Last packet
 	header3 := []byte{
-		0x40,       // F=0, L=1, P=00, I=0, E=0, reserved=00
+		0x40,             // F=0, L=1, P=00, I=0, E=0, reserved=00
 		0x00, 0x00, 0x01, // Frame ID = 1
 	}
 	data3 := []byte{0x05, 0x06, 0x07, 0x08}
@@ -95,11 +95,11 @@ func TestJPEGXSDepacketizer_ExtendedHeader(t *testing.T) {
 
 	// Create packet with extended header
 	header := []byte{
-		0xC4,       // F=1, L=1, P=00, I=0, E=1 (extended), reserved=00
+		0xC4,             // F=1, L=1, P=00, I=0, E=1 (extended), reserved=00
 		0x00, 0x00, 0x01, // Frame ID = 1
 		0x00, 0x01, // Packet ID = 1
-		0x2A,       // Profile=Main (0x2A), Level=10
-		0x51,       // SubLevel=5, ChromaFormat=4:2:2, BitDepth=10-bit
+		0x2A, // Profile=Main (0x2A), Level=10
+		0x51, // SubLevel=5, ChromaFormat=4:2:2, BitDepth=10-bit
 	}
 	jpegData := []byte{0xFF, 0x10, 0x00, 0x00, 0x01, 0x02}
 	payload := append(header, jpegData...)
@@ -141,16 +141,16 @@ func TestJPEGXSDepacketizer_DifferentProfiles(t *testing.T) {
 			d := NewJPEGXSDepacketizer()
 
 			header := []byte{
-				0xC4,       // F=1, L=1, E=1
+				0xC4,             // F=1, L=1, E=1
 				0x00, 0x00, 0x01, // Frame ID
-				0x00, 0x01,       // Packet ID
-				tt.profileByte,   // Profile + Level
-				0x00,             // SubLevel + format
+				0x00, 0x01, // Packet ID
+				tt.profileByte, // Profile + Level
+				0x00,           // SubLevel + format
 			}
-			
+
 			jpegData := []byte{0xFF, 0x10}
 			payload := append(header, jpegData...)
-			
+
 			packet := &rtp.Packet{
 				Header: rtp.Header{
 					SequenceNumber: 100,
@@ -160,7 +160,7 @@ func TestJPEGXSDepacketizer_DifferentProfiles(t *testing.T) {
 			frames, err := d.Depacketize(packet)
 			require.NoError(t, err)
 			require.Len(t, frames, 1)
-			
+
 			// Type assert to access JPEG XS specific methods
 			jxsd, ok := d.(*JPEGXSDepacketizer)
 			require.True(t, ok, "Expected JPEGXSDepacketizer")
@@ -174,7 +174,7 @@ func TestJPEGXSDepacketizer_InterlacedMode(t *testing.T) {
 
 	// Top field
 	header1 := []byte{
-		0xD0,       // F=1, L=1, P=01 (interlaced), I=0 (top field), E=0
+		0xD0,             // F=1, L=1, P=01 (interlaced), I=0 (top field), E=0
 		0x00, 0x00, 0x01, // Frame ID = 1
 	}
 	data1 := []byte{0xFF, 0x10, 0x00, 0x00}
@@ -182,11 +182,9 @@ func TestJPEGXSDepacketizer_InterlacedMode(t *testing.T) {
 	packet := &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 100,
-
 		},
 
 		Payload: payload1,
-
 	}
 
 	frames, err := d.Depacketize(packet)
@@ -196,7 +194,7 @@ func TestJPEGXSDepacketizer_InterlacedMode(t *testing.T) {
 
 	// Bottom field
 	header2 := []byte{
-		0xD8,       // F=1, L=1, P=01 (interlaced), I=1 (bottom field), E=0
+		0xD8,             // F=1, L=1, P=01 (interlaced), I=1 (bottom field), E=0
 		0x00, 0x00, 0x02, // Frame ID = 2
 	}
 	data2 := []byte{0xFF, 0x11, 0x00, 0x00}
@@ -204,11 +202,9 @@ func TestJPEGXSDepacketizer_InterlacedMode(t *testing.T) {
 	packet2 := &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 101,
-
 		},
 
 		Payload: payload2,
-
 	}
 
 	frames, err = d.Depacketize(packet2)
@@ -222,7 +218,7 @@ func TestJPEGXSDepacketizer_PacketLoss(t *testing.T) {
 
 	// First packet
 	header1 := []byte{
-		0x80,       // F=1, L=0
+		0x80,             // F=1, L=0
 		0x00, 0x00, 0x01, // Frame ID = 1
 	}
 	data1 := []byte{0xFF, 0x10, 0x00, 0x00}
@@ -230,11 +226,9 @@ func TestJPEGXSDepacketizer_PacketLoss(t *testing.T) {
 	packet := &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 100,
-
 		},
 
 		Payload: payload1,
-
 	}
 
 	_, err := d.Depacketize(packet)
@@ -244,7 +238,7 @@ func TestJPEGXSDepacketizer_PacketLoss(t *testing.T) {
 
 	// Third packet arrives (sequence 102)
 	header3 := []byte{
-		0x40,       // F=0, L=1
+		0x40,             // F=0, L=1
 		0x00, 0x00, 0x01, // Frame ID = 1
 	}
 	data3 := []byte{0x05, 0x06, 0x07, 0x08}
@@ -252,11 +246,9 @@ func TestJPEGXSDepacketizer_PacketLoss(t *testing.T) {
 	packet3 := &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 102,
-
 		},
 
 		Payload: payload3,
-
 	}
 
 	frames, err := d.Depacketize(packet3)
@@ -265,7 +257,7 @@ func TestJPEGXSDepacketizer_PacketLoss(t *testing.T) {
 
 	// New frame starts
 	header4 := []byte{
-		0xC0,       // F=1, L=1
+		0xC0,             // F=1, L=1
 		0x00, 0x00, 0x02, // Frame ID = 2
 	}
 	data4 := []byte{0xFF, 0x20, 0x00, 0x00}
@@ -273,11 +265,9 @@ func TestJPEGXSDepacketizer_PacketLoss(t *testing.T) {
 	packet4 := &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 103,
-
 		},
 
 		Payload: payload4,
-
 	}
 
 	frames, err = d.Depacketize(packet4)
@@ -291,7 +281,7 @@ func TestJPEGXSDepacketizer_FrameIDChange(t *testing.T) {
 
 	// Start frame 1
 	header1 := []byte{
-		0x80,       // F=1, L=0
+		0x80,             // F=1, L=0
 		0x00, 0x00, 0x01, // Frame ID = 1
 	}
 	data1 := []byte{0xFF, 0x10}
@@ -299,11 +289,9 @@ func TestJPEGXSDepacketizer_FrameIDChange(t *testing.T) {
 	packet := &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 100,
-
 		},
 
 		Payload: payload1,
-
 	}
 
 	_, err := d.Depacketize(packet)
@@ -311,7 +299,7 @@ func TestJPEGXSDepacketizer_FrameIDChange(t *testing.T) {
 
 	// New frame starts without completing previous
 	header2 := []byte{
-		0xC0,       // F=1, L=1
+		0xC0,             // F=1, L=1
 		0x00, 0x00, 0x02, // Frame ID = 2 (different)
 	}
 	data2 := []byte{0xFF, 0x20}
@@ -319,11 +307,9 @@ func TestJPEGXSDepacketizer_FrameIDChange(t *testing.T) {
 	packet2 := &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 101,
-
 		},
 
 		Payload: payload2,
-
 	}
 
 	frames, err := d.Depacketize(packet2)
@@ -337,17 +323,15 @@ func TestJPEGXSDepacketizer_EmptyPayload(t *testing.T) {
 
 	// Valid header but no JPEG data
 	header := []byte{
-		0xC0,       // F=1, L=1
+		0xC0,             // F=1, L=1
 		0x00, 0x00, 0x01, // Frame ID = 1
 	}
 	packet := &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 100,
-
 		},
 
 		Payload: header,
-
 	}
 
 	_, err := d.Depacketize(packet)
@@ -371,18 +355,16 @@ func TestJPEGXSDepacketizer_ShortPayload(t *testing.T) {
 
 	// Too short for extended header
 	headerPartial := []byte{
-		0xC4,       // F=1, L=1, E=1 (extended)
+		0xC4,             // F=1, L=1, E=1 (extended)
 		0x00, 0x00, 0x01, // Frame ID
 		0x00, // Incomplete extended header
 	}
 	packet = &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 100,
-
 		},
 
 		Payload: headerPartial,
-
 	}
 
 	_, err = d.Depacketize(packet)
@@ -394,7 +376,7 @@ func TestJPEGXSDepacketizer_Reset(t *testing.T) {
 
 	// Start a frame
 	header := []byte{
-		0x80,       // F=1, L=0
+		0x80,             // F=1, L=0
 		0x00, 0x00, 0x01, // Frame ID = 1
 	}
 	data := []byte{0xFF, 0x10}
@@ -402,11 +384,9 @@ func TestJPEGXSDepacketizer_Reset(t *testing.T) {
 	packet := &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 100,
-
 		},
 
 		Payload: payload,
-
 	}
 
 	_, err := d.Depacketize(packet)
@@ -443,29 +423,27 @@ func TestJPEGXSDepacketizer_LargeFrame(t *testing.T) {
 			byte(frameID >> 8),
 			byte(frameID),
 		}
-		
+
 		// Create some data for this packet
 		data := make([]byte, 1000)
 		for j := range data {
 			data[j] = byte((i + j) % 256)
 		}
 		expectedData = append(expectedData, data...)
-		
-		payload := append(header, data...)
-		
-		packet := &rtp.Packet{
-		Header: rtp.Header{
-			SequenceNumber: uint16(100+i),
 
+		payload := append(header, data...)
+
+		packet := &rtp.Packet{
+			Header: rtp.Header{
+				SequenceNumber: uint16(100 + i),
 			},
 
 			Payload: payload,
-
 		}
 
 		frames, err := d.Depacketize(packet)
 		require.NoError(t, err)
-		
+
 		if i < numPackets-1 {
 			assert.Len(t, frames, 0) // Not complete yet
 		} else {
@@ -560,30 +538,28 @@ func TestJPEGXSDepacketizer_ChromaAndBitDepthParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			header := []byte{
-				0xC4, // F=1, L=1, E=1
+				0xC4,             // F=1, L=1, E=1
 				0x00, 0x00, 0x01, // Frame ID
-				0x00, 0x01,    // Packet ID
+				0x00, 0x01, // Packet ID
 				0x2A,          // Profile=Main
 				tt.formatByte, // SubLevel + ChromaFormat + BitDepth
 			}
-			
+
 			jpegData := []byte{0xFF, 0x10}
 			payload := append(header, jpegData...)
-			
-			packet := &rtp.Packet{
-		Header: rtp.Header{
-			SequenceNumber: 100,
 
+			packet := &rtp.Packet{
+				Header: rtp.Header{
+					SequenceNumber: 100,
 				},
 
 				Payload: payload,
-
 			}
 
 			frames, err := d.Depacketize(packet)
 			require.NoError(t, err)
 			require.Len(t, frames, 1)
-			
+
 			// Verify parsing was correct
 			chromaFormat := (tt.formatByte >> 2) & 0x03
 			bitDepth := tt.formatByte & 0x03
@@ -597,7 +573,7 @@ func TestJPEGXSDepacketizer_ChromaAndBitDepthParsing(t *testing.T) {
 func BenchmarkJPEGXSDepacketizer_SinglePacket(b *testing.B) {
 	d := NewJPEGXSDepacketizer()
 	header := []byte{
-		0xC0,       // F=1, L=1
+		0xC0,             // F=1, L=1
 		0x00, 0x00, 0x01, // Frame ID
 	}
 	data := make([]byte, 1400) // Typical MTU-sized payload
@@ -606,13 +582,11 @@ func BenchmarkJPEGXSDepacketizer_SinglePacket(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		packet := &rtp.Packet{
-		Header: rtp.Header{
-			SequenceNumber: uint16(i),
-
+			Header: rtp.Header{
+				SequenceNumber: uint16(i),
 			},
 
 			Payload: payload,
-
 		}
 
 		d.Depacketize(packet)
@@ -634,7 +608,7 @@ func BenchmarkJPEGXSDepacketizer_MultiPacket(b *testing.B) {
 		} else {
 			flags = 0x00 // Middle
 		}
-		
+
 		header := []byte{
 			flags,
 			0x00, 0x00, 0x01, // Frame ID
@@ -647,13 +621,11 @@ func BenchmarkJPEGXSDepacketizer_MultiPacket(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for j, pkt := range packets {
 			packet := &rtp.Packet{
-		Header: rtp.Header{
-			SequenceNumber: uint16(i*10+j),
-
+				Header: rtp.Header{
+					SequenceNumber: uint16(i*10 + j),
 				},
 
 				Payload: pkt,
-
 			}
 
 			d.Depacketize(packet)

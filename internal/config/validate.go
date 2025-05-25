@@ -176,7 +176,7 @@ func (i *IngestionConfig) Validate() error {
 	if i.RTP.Enabled {
 		maxConnections += i.RTP.MaxSessions
 	}
-	
+
 	if i.Buffer.PoolSize < maxConnections {
 		return fmt.Errorf("buffer pool size (%d) should be >= max total connections (%d) to avoid runtime allocations",
 			i.Buffer.PoolSize, maxConnections)
@@ -269,15 +269,15 @@ func (m *MemoryConfig) Validate() error {
 	if m.MaxTotal <= 0 {
 		return fmt.Errorf("max_total must be positive")
 	}
-	
+
 	if m.MaxPerStream <= 0 {
 		return fmt.Errorf("max_per_stream must be positive")
 	}
-	
+
 	if m.MaxPerStream > m.MaxTotal {
 		return fmt.Errorf("max_per_stream (%d) cannot exceed max_total (%d)", m.MaxPerStream, m.MaxTotal)
 	}
-	
+
 	return nil
 }
 

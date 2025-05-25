@@ -81,7 +81,7 @@ func TestController_Eviction(t *testing.T) {
 	err = ctrl.RequestMemory("stream2", 200*1024)
 	assert.NoError(t, err)
 	assert.True(t, evictionCalled)
-	assert.Equal(t, "stream1", evictionStreamID) // stream1 should be evicted
+	assert.Equal(t, "stream1", evictionStreamID)    // stream1 should be evicted
 	assert.Equal(t, int64(850*1024), evictionBytes) // Full amount of stream1
 }
 
@@ -106,9 +106,9 @@ func TestController_ConcurrentAccess(t *testing.T) {
 					errors.Add(1)
 					continue
 				}
-				
+
 				allocations.Add(1)
-				
+
 				// Hold memory briefly to create contention
 				time.Sleep(time.Millisecond)
 				ctrl.ReleaseMemory(streamID, size)
@@ -117,18 +117,18 @@ func TestController_ConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
-	
+
 	// Should have successful allocations
 	assert.Greater(t, allocations.Load(), int32(0))
-	
+
 	// Log stats for debugging
 	t.Logf("Allocations: %d, Errors: %d", allocations.Load(), errors.Load())
 	t.Logf("Controller stats: %+v", ctrl.Stats())
-	
+
 	// With 10 streams * 50 requests * 50KB = 25MB attempted on 1MB limit,
 	// we should have errors OR the test should work fine if memory is released fast enough
 	// Both outcomes are valid for concurrent access
-	
+
 	// But final state should be clean
 	assert.Equal(t, int64(0), ctrl.usage.Load())
 }

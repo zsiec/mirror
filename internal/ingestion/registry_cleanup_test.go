@@ -127,10 +127,10 @@ func TestRedisRegistry_Close(t *testing.T) {
 	client := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	
+
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Skip("Redis not available, skipping test")
 	}
@@ -156,7 +156,7 @@ func TestRedisRegistry_Close(t *testing.T) {
 // TestRedisRegistry_CloseNilClient tests closing with nil client
 func TestRedisRegistry_CloseNilClient(t *testing.T) {
 	reg := &registry.RedisRegistry{}
-	
+
 	// Should not panic with nil client
 	err := reg.Close()
 	assert.NoError(t, err)

@@ -11,16 +11,16 @@ import (
 
 func TestStreamHandler_DetectFrameCorruption(t *testing.T) {
 	logger := logrus.New()
-	
+
 	// Create a minimal handler to test corruption detection
 	handler := &StreamHandler{
 		codec:  types.CodecH264,
 		logger: logger,
 	}
-	
+
 	tests := []struct {
-		name     string
-		frame    *types.VideoFrame
+		name          string
+		frame         *types.VideoFrame
 		wantCorrupted bool
 	}{
 		{
@@ -100,7 +100,7 @@ func TestStreamHandler_DetectFrameCorruption(t *testing.T) {
 			wantCorrupted: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := handler.detectFrameCorruption(tt.frame)
@@ -121,7 +121,7 @@ func TestStreamHandler_NALUnitValidation(t *testing.T) {
 			name: "valid_h264_with_start_code",
 			nalUnits: []types.NALUnit{
 				{
-					Type: 1, // Non-IDR slice
+					Type: 1,                                                      // Non-IDR slice
 					Data: []byte{0x00, 0x00, 0x00, 0x01, 0x41, 0x01, 0x02, 0x03}, // Start code + valid NAL header
 				},
 			},
@@ -132,7 +132,7 @@ func TestStreamHandler_NALUnitValidation(t *testing.T) {
 			name: "valid_h264_without_start_code_rtp",
 			nalUnits: []types.NALUnit{
 				{
-					Type: 1, // Non-IDR slice
+					Type: 1,                              // Non-IDR slice
 					Data: []byte{0x41, 0x01, 0x02, 0x03}, // No start code (RTP style)
 				},
 			},
@@ -143,7 +143,7 @@ func TestStreamHandler_NALUnitValidation(t *testing.T) {
 			name: "invalid_h264_forbidden_bit_set",
 			nalUnits: []types.NALUnit{
 				{
-					Type: 1, // Non-IDR slice
+					Type: 1,                                                      // Non-IDR slice
 					Data: []byte{0x00, 0x00, 0x00, 0x01, 0xC1, 0x01, 0x02, 0x03}, // Forbidden bit set
 				},
 			},
@@ -154,7 +154,7 @@ func TestStreamHandler_NALUnitValidation(t *testing.T) {
 			name: "invalid_partial_start_code",
 			nalUnits: []types.NALUnit{
 				{
-					Type: 1, // Non-IDR slice
+					Type: 1,                              // Non-IDR slice
 					Data: []byte{0x00, 0x00, 0x02, 0x01}, // Looks like start code but isn't
 				},
 			},
@@ -165,7 +165,7 @@ func TestStreamHandler_NALUnitValidation(t *testing.T) {
 			name: "valid_h265_with_3_byte_start_code",
 			nalUnits: []types.NALUnit{
 				{
-					Type: 1, // Non-IDR slice
+					Type: 1,                                                // Non-IDR slice
 					Data: []byte{0x00, 0x00, 0x01, 0x01, 0x01, 0x02, 0x03}, // 3-byte start code
 				},
 			},
@@ -187,11 +187,11 @@ func TestStreamHandler_NALUnitValidation(t *testing.T) {
 			name: "mixed_valid_and_invalid",
 			nalUnits: []types.NALUnit{
 				{
-					Type: 1, // Non-IDR slice
+					Type: 1,                              // Non-IDR slice
 					Data: []byte{0x41, 0x01, 0x02, 0x03}, // Valid RTP-style
 				},
 				{
-					Type: 6, // SEI
+					Type: 6,        // SEI
 					Data: []byte{}, // Invalid empty
 				},
 			},
@@ -220,8 +220,8 @@ func TestStreamHandler_NALUnitValidation(t *testing.T) {
 
 			// Test corruption detection
 			isCorrupted := handler.detectFrameCorruption(frame)
-			assert.Equal(t, tt.shouldBeCorrupted, isCorrupted, 
-				"Expected corruption detection to be %v but got %v", 
+			assert.Equal(t, tt.shouldBeCorrupted, isCorrupted,
+				"Expected corruption detection to be %v but got %v",
 				tt.shouldBeCorrupted, isCorrupted)
 		})
 	}
@@ -231,11 +231,11 @@ func TestStreamHandler_NALUnitValidation(t *testing.T) {
 func TestStreamHandler_OnRateChange(t *testing.T) {
 	logger := logrus.New()
 	logger.SetLevel(logrus.DebugLevel)
-	
+
 	tests := []struct {
-		name       string
-		conn       StreamConnection
-		expectLog  string
+		name      string
+		conn      StreamConnection
+		expectLog string
 	}{
 		{
 			name:      "unknown connection type",
@@ -243,7 +243,7 @@ func TestStreamHandler_OnRateChange(t *testing.T) {
 			expectLog: "Rate control not supported for connection type",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create handler with the test connection
@@ -252,7 +252,7 @@ func TestStreamHandler_OnRateChange(t *testing.T) {
 				conn:     tt.conn,
 				logger:   logger,
 			}
-			
+
 			// Call onRateChange - should not panic
 			assert.NotPanics(t, func() {
 				handler.onRateChange(100000)

@@ -41,12 +41,12 @@ type RingBuffer struct {
 	consecutiveDrops int
 	maxLatency       time.Duration
 	lastDropTime     time.Time
-	
+
 	// Bitrate tracking
-	bitrateWindow    []bitrateEntry
-	bitrateIndex     int
-	avgBytesPerSec   float64
-	lastBitrateCalc  time.Time
+	bitrateWindow   []bitrateEntry
+	bitrateIndex    int
+	avgBytesPerSec  float64
+	lastBitrateCalc time.Time
 }
 
 // NewRingBuffer creates a new ring buffer with the specified size
@@ -55,7 +55,7 @@ func NewRingBuffer(streamID string, size int) *RingBuffer {
 		streamID:      streamID,
 		data:          make([]byte, size),
 		size:          int64(size),
-		maxPacketSize: 65536, // 64KB default max packet size
+		maxPacketSize: 65536,                     // 64KB default max packet size
 		bitrateWindow: make([]bitrateEntry, 100), // Track last 100 writes for bitrate
 	}
 	rb.writeCond = sync.NewCond(&rb.mu)
@@ -77,7 +77,7 @@ func (rb *RingBuffer) Write(data []byte) (int, error) {
 	}
 
 	dataLen := int64(len(data))
-	
+
 	// CRITICAL FIX: Don't drop data silently
 	if dataLen > rb.maxPacketSize {
 		// Record oversized packet metric
@@ -108,7 +108,7 @@ func (rb *RingBuffer) Write(data []byte) (int, error) {
 	available := rb.size - (currentWritten - currentRead)
 	if available < dataLen {
 		pressure := float64(currentWritten-currentRead) / float64(rb.size)
-		
+
 		// Track consecutive drops
 		now := time.Now()
 		if now.Sub(rb.lastDropTime) < time.Second {
@@ -117,11 +117,11 @@ func (rb *RingBuffer) Write(data []byte) (int, error) {
 			rb.consecutiveDrops = 1
 		}
 		rb.lastDropTime = now
-		
+
 		// Update metrics
 		atomic.AddInt64(&rb.drops, dataLen)
 		bufferDropsTotal.WithLabelValues(rb.streamID).Add(float64(dataLen))
-		
+
 		// Return detailed error instead of dropping silently
 		return 0, &ErrBufferFullDetailed{
 			StreamID:  rb.streamID,
@@ -266,14 +266,14 @@ type BufferStats struct {
 // trackBitrate updates the bitrate calculation
 func (rb *RingBuffer) trackBitrate(bytes int64) {
 	now := time.Now()
-	
+
 	// Add new entry
 	rb.bitrateWindow[rb.bitrateIndex] = bitrateEntry{
 		timestamp: now,
 		bytes:     bytes,
 	}
 	rb.bitrateIndex = (rb.bitrateIndex + 1) % len(rb.bitrateWindow)
-	
+
 	// Calculate average bitrate every second
 	if now.Sub(rb.lastBitrateCalc) >= time.Second {
 		rb.calculateAverageBitrate()
@@ -285,11 +285,11 @@ func (rb *RingBuffer) trackBitrate(bytes int64) {
 func (rb *RingBuffer) calculateAverageBitrate() {
 	now := time.Now()
 	cutoff := now.Add(-10 * time.Second) // Look at last 10 seconds
-	
+
 	totalBytes := int64(0)
 	oldestTime := now
 	newestTime := cutoff
-	
+
 	for _, entry := range rb.bitrateWindow {
 		if entry.timestamp.After(cutoff) && !entry.timestamp.IsZero() {
 			totalBytes += entry.bytes
@@ -301,7 +301,7 @@ func (rb *RingBuffer) calculateAverageBitrate() {
 			}
 		}
 	}
-	
+
 	duration := newestTime.Sub(oldestTime).Seconds()
 	if duration > 0 {
 		rb.avgBytesPerSec = float64(totalBytes) / duration
@@ -312,7 +312,7 @@ func (rb *RingBuffer) calculateAverageBitrate() {
 func (rb *RingBuffer) GetPreview(seconds float64) ([]byte, int) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
-	
+
 	// Use actual bitrate if available, otherwise use default
 	bytesPerSecond := rb.avgBytesPerSec
 	if bytesPerSecond <= 0 {
@@ -320,31 +320,31 @@ func (rb *RingBuffer) GetPreview(seconds float64) ([]byte, int) {
 		bytesPerSecond = 6250000
 	}
 	previewBytes := int64(seconds * bytesPerSecond)
-	
+
 	// Limit to available data
 	available := rb.written - rb.read
 	if previewBytes > available {
 		previewBytes = available
 	}
-	
+
 	// Limit to buffer size
 	if previewBytes > rb.size {
 		previewBytes = rb.size
 	}
-	
+
 	// Read the preview data
 	previewData := make([]byte, previewBytes)
-	
+
 	// Calculate read position for preview (from end of written data)
 	previewReadPos := rb.written - previewBytes
 	if previewReadPos < rb.read {
 		previewReadPos = rb.read
 		previewBytes = rb.written - rb.read
 	}
-	
+
 	// Calculate actual position in circular buffer
 	actualReadPos := (rb.readPos + (previewReadPos - rb.read)) % rb.size
-	
+
 	// Copy data (may wrap around)
 	copied := int64(0)
 	for copied < previewBytes {
@@ -353,7 +353,7 @@ func (rb *RingBuffer) GetPreview(seconds float64) ([]byte, int) {
 		actualReadPos = (actualReadPos + readSize) % rb.size
 		copied += readSize
 	}
-	
+
 	// Return data and number of samples (approximate based on typical frame size)
 	samples := int(previewBytes / 4096) // Rough estimate
 	return previewData[:copied], samples

@@ -64,8 +64,8 @@ func TestIDRDetector_H264IDR(t *testing.T) {
 				FrameNumber: 200,
 				NALUnits: []types.NALUnit{
 					{Data: []byte{0x67, 0x42, 0x00, 0x1f}}, // SPS
-					{Data: []byte{0x68}},                    // PPS
-					{Data: []byte{0x65}},                    // IDR
+					{Data: []byte{0x68}},                   // PPS
+					{Data: []byte{0x65}},                   // IDR
 				},
 			},
 			expected: true,
@@ -77,7 +77,7 @@ func TestIDRDetector_H264IDR(t *testing.T) {
 				Type:        types.FrameTypeI,
 				NALUnits: []types.NALUnit{
 					{Data: []byte{0x67, 0x42, 0x00, 0x1f}}, // SPS
-					{Data: []byte{0x68}},                    // PPS
+					{Data: []byte{0x68}},                   // PPS
 					{Data: []byte{0x61, 0xB0}},             // Non-IDR I-slice (first_mb=0, type=2)
 				},
 			},
@@ -101,7 +101,7 @@ func TestIDRDetector_H264IDR(t *testing.T) {
 				Type:        types.FrameTypeI,
 				NALUnits: []types.NALUnit{
 					{Data: []byte{0x67, 0x42, 0x00, 0x1f}}, // SPS
-					{Data: []byte{0x68}},                    // PPS
+					{Data: []byte{0x68}},                   // PPS
 					{Data: []byte{0x66, 0x06}},             // SEI with recovery point
 					{Data: []byte{0x61, 0xB0}},             // I-slice (first_mb=0, type=2)
 				},
@@ -205,7 +205,7 @@ func TestIDRDetector_KeyframeStats(t *testing.T) {
 
 	// Simulate keyframes at regular intervals
 	keyframeNumbers := []uint64{0, 30, 60, 90, 120, 150}
-	
+
 	for _, frameNum := range keyframeNumbers {
 		frame := &types.VideoFrame{
 			FrameNumber: frameNum,
@@ -214,7 +214,7 @@ func TestIDRDetector_KeyframeStats(t *testing.T) {
 				{Data: []byte{0x65}}, // IDR
 			},
 		}
-		
+
 		isIDR := detector.IsIDRFrame(frame)
 		assert.True(t, isIDR)
 	}
@@ -227,7 +227,7 @@ func TestIDRDetector_KeyframeStats(t *testing.T) {
 
 func TestIDRDetector_PredictNextKeyframe(t *testing.T) {
 	detector := NewIDRDetector(types.CodecH264, testIDRLogger())
-	
+
 	// Set up known GOP structure
 	detector.lastKeyframe = 100
 	detector.avgGOPSize = 30.0
@@ -236,10 +236,10 @@ func TestIDRDetector_PredictNextKeyframe(t *testing.T) {
 		currentFrame uint64
 		expected     uint64
 	}{
-		{105, 130},  // Not due yet
-		{125, 130},  // Almost due
-		{130, 131},  // Due now
-		{140, 141},  // Overdue
+		{105, 130}, // Not due yet
+		{125, 130}, // Almost due
+		{130, 131}, // Due now
+		{140, 141}, // Overdue
 	}
 
 	for _, tt := range tests {
@@ -273,7 +273,7 @@ func TestIDRDetector_NeedsKeyframe(t *testing.T) {
 				detector.suspectedCorruption = true
 				tt.expected = true
 			}
-			
+
 			needs := detector.NeedsKeyframe(tt.currentFrame, tt.hasErrors)
 			assert.Equal(t, tt.expected, needs)
 		})
@@ -306,7 +306,7 @@ func TestIDRDetector_FindRecoveryPoints(t *testing.T) {
 			Type:        types.FrameTypeI,
 			NALUnits: []types.NALUnit{
 				{Data: []byte{0x67, 0x42, 0x00, 0x1f}}, // SPS
-				{Data: []byte{0x68}},                    // PPS
+				{Data: []byte{0x68}},                   // PPS
 				{Data: []byte{0x61, 0x40}},             // I-slice
 			},
 		},
@@ -375,7 +375,7 @@ func TestIDRDetector_RecoveryStrategy(t *testing.T) {
 
 func TestIDRDetector_ReportCorruption(t *testing.T) {
 	detector := NewIDRDetector(types.CodecH264, testIDRLogger())
-	
+
 	assert.False(t, detector.suspectedCorruption)
 	assert.Equal(t, 0, detector.missingReferences)
 
@@ -394,12 +394,12 @@ func TestIDRDetector_Clone(t *testing.T) {
 	detector.keyframeHistory = []uint64{30, 30, 30}
 
 	clone := detector.Clone()
-	
+
 	assert.Equal(t, detector.codec, clone.codec)
 	assert.Equal(t, detector.lastKeyframe, clone.lastKeyframe)
 	assert.Equal(t, detector.avgGOPSize, clone.avgGOPSize)
 	assert.Equal(t, detector.keyframeHistory, clone.keyframeHistory)
-	
+
 	// Ensure it's a deep copy
 	clone.keyframeHistory[0] = 60
 	assert.NotEqual(t, detector.keyframeHistory[0], clone.keyframeHistory[0])
@@ -423,13 +423,13 @@ func TestIDRDetector_JPEGXSKeyframe(t *testing.T) {
 // Benchmark for performance testing
 func BenchmarkIDRDetector_IsIDRFrame(b *testing.B) {
 	detector := NewIDRDetector(types.CodecH264, testIDRLogger())
-	
+
 	frame := &types.VideoFrame{
 		FrameNumber: 100,
 		NALUnits: []types.NALUnit{
 			{Data: []byte{0x67, 0x42, 0x00, 0x1f}}, // SPS
-			{Data: []byte{0x68}},                    // PPS
-			{Data: []byte{0x65}},                    // IDR
+			{Data: []byte{0x68}},                   // PPS
+			{Data: []byte{0x65}},                   // IDR
 			{Data: make([]byte, 1000)},             // Payload
 		},
 	}

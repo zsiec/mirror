@@ -119,7 +119,7 @@ func TestStreamHandler_StopErrorCollection(t *testing.T) {
 	// Create a failing connection
 	mockConn := &mockFailingConnection{
 		VideoAwareConnection: createTestConnection("test-stream", nil),
-		closeError:          errors.New("connection close failed"),
+		closeError:           errors.New("connection close failed"),
 	}
 
 	// Create handler with proper backpressure controller
@@ -133,7 +133,7 @@ func TestStreamHandler_StopErrorCollection(t *testing.T) {
 		HistorySize:    10,
 	}
 	bpController := backpressure.NewController("test-stream", bpConfig, logger.Logger(logrus.New()))
-	
+
 	handler := &StreamHandler{
 		streamID:         "test-stream",
 		conn:             mockConn,
@@ -155,4 +155,3 @@ func TestStreamHandler_StopErrorCollection(t *testing.T) {
 func getStreamID(index int) string {
 	return "stream-" + string(rune('a'+index))
 }
-

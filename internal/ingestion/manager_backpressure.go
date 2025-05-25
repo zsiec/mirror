@@ -25,5 +25,3 @@ type RTPConnection interface {
 	GetSSRC() uint32
 	SendRTCP(rtcp.Packet) error
 }
-
-

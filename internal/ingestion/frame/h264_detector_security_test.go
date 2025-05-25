@@ -76,8 +76,8 @@ func TestH264DetectorBufferOverflowProtection(t *testing.T) {
 			desc:        "Incomplete start code at boundary should not crash",
 		},
 		{
-			name: "start_code_at_exact_boundary",
-			data: []byte{0x00, 0x00, 0x00}, // Could be mistaken for 4-byte start code
+			name:        "start_code_at_exact_boundary",
+			data:        []byte{0x00, 0x00, 0x00}, // Could be mistaken for 4-byte start code
 			expectError: false,
 			desc:        "Start code pattern at exact boundary should not crash",
 		},
@@ -86,20 +86,20 @@ func TestH264DetectorBufferOverflowProtection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			nalUnits, err := detector.findNALUnits(tt.data)
-			
+
 			if tt.expectError && err == nil {
 				t.Errorf("%s: expected error but got none", tt.desc)
 			}
 			if !tt.expectError && err != nil {
 				t.Errorf("%s: unexpected error: %v", tt.desc, err)
 			}
-			
+
 			// Verify no buffer overread occurred (test completes without panic)
 			if !tt.expectError && err == nil && nalUnits != nil {
 				// Verify all NAL units are within bounds
 				for i, nal := range nalUnits {
 					if len(nal) > security.MaxNALUnitSize {
-						t.Errorf("NAL unit %d exceeds max size: %d > %d", 
+						t.Errorf("NAL unit %d exceeds max size: %d > %d",
 							i, len(nal), security.MaxNALUnitSize)
 					}
 				}
@@ -127,16 +127,16 @@ func TestH264DetectorBoundaryConditions(t *testing.T) {
 			data: []byte{
 				0x00, 0x00, 0x01, // Start code 1
 				0x00, 0x00, 0x01, // Start code 2 immediately after
-				0x41, 0x42,       // NAL data
+				0x41, 0x42, // NAL data
 			},
 			desc: "Consecutive start codes should be handled",
 		},
 		{
 			name: "start_code_variants_mixed",
 			data: []byte{
-				0x00, 0x00, 0x01, 0x41,       // 3-byte start code
+				0x00, 0x00, 0x01, 0x41, // 3-byte start code
 				0x00, 0x00, 0x00, 0x01, 0x42, // 4-byte start code
-				0x00, 0x00, 0x01, 0x43,       // 3-byte start code
+				0x00, 0x00, 0x01, 0x43, // 3-byte start code
 			},
 			desc: "Mixed start code types should parse correctly",
 		},
@@ -157,7 +157,7 @@ func TestH264DetectorBoundaryConditions(t *testing.T) {
 			if err != nil {
 				t.Logf("%s: Got error (might be expected): %v", tt.desc, err)
 			}
-			
+
 			// Verify the function completed without panic
 			t.Logf("%s: Successfully parsed %d NAL units", tt.desc, len(nalUnits))
 		})
@@ -167,10 +167,10 @@ func TestH264DetectorBoundaryConditions(t *testing.T) {
 // TestH264DetectorStressTest performs stress testing with random data
 func TestH264DetectorStressTest(t *testing.T) {
 	detector := NewH264Detector()
-	
+
 	// Test with various sizes of random-ish data that might contain start codes
 	sizes := []int{0, 1, 2, 3, 4, 100, 1024, 10240}
-	
+
 	for _, size := range sizes {
 		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
 			data := make([]byte, size)
@@ -178,7 +178,7 @@ func TestH264DetectorStressTest(t *testing.T) {
 			for i := range data {
 				data[i] = byte(i % 4) // Creates 0x00, 0x01, 0x02, 0x03 pattern
 			}
-			
+
 			// Should not panic regardless of input
 			_, err := detector.findNALUnits(data)
 			if err != nil {
@@ -192,7 +192,7 @@ func TestH264DetectorStressTest(t *testing.T) {
 // BenchmarkH264DetectorSecurity benchmarks the performance impact of security checks
 func BenchmarkH264DetectorSecurity(b *testing.B) {
 	detector := NewH264Detector()
-	
+
 	// Create realistic H.264 data with multiple NAL units
 	data := make([]byte, 0, 10000)
 	for i := 0; i < 50; i++ {
@@ -203,10 +203,10 @@ func BenchmarkH264DetectorSecurity(b *testing.B) {
 		payload := make([]byte, 100)
 		data = append(data, payload...)
 	}
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		nalUnits, err := detector.findNALUnits(data)
 		if err != nil {

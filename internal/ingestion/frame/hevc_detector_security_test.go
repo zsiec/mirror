@@ -77,8 +77,8 @@ func TestHEVCDetectorBufferOverflowProtection(t *testing.T) {
 			desc:        "Incomplete start code at boundary should not crash",
 		},
 		{
-			name: "hevc_irap_nal",
-			data: []byte{0x00, 0x00, 0x01, 0x26, 0x01}, // IDR_W_RADL (type 19)
+			name:        "hevc_irap_nal",
+			data:        []byte{0x00, 0x00, 0x01, 0x26, 0x01}, // IDR_W_RADL (type 19)
 			expectError: false,
 			desc:        "HEVC IRAP NAL should parse correctly",
 		},
@@ -97,20 +97,20 @@ func TestHEVCDetectorBufferOverflowProtection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			nalUnits, err := detector.findNALUnits(tt.data)
-			
+
 			if tt.expectError && err == nil {
 				t.Errorf("%s: expected error but got none", tt.desc)
 			}
 			if !tt.expectError && err != nil {
 				t.Errorf("%s: unexpected error: %v", tt.desc, err)
 			}
-			
+
 			// Verify no buffer overread occurred (test completes without panic)
 			if !tt.expectError && err == nil && nalUnits != nil {
 				// Verify all NAL units are within bounds
 				for i, nal := range nalUnits {
 					if len(nal) > security.MaxNALUnitSize {
-						t.Errorf("NAL unit %d exceeds max size: %d > %d", 
+						t.Errorf("NAL unit %d exceeds max size: %d > %d",
 							i, len(nal), security.MaxNALUnitSize)
 					}
 				}
@@ -124,11 +124,11 @@ func TestHEVCDetectorNALTypes(t *testing.T) {
 	detector := NewHEVCDetector()
 
 	tests := []struct {
-		name     string
-		nalType  uint8
-		isVCL    bool
-		isIRAP   bool
-		desc     string
+		name    string
+		nalType uint8
+		isVCL   bool
+		isIRAP  bool
+		desc    string
 	}{
 		{
 			name:    "trail_n",
@@ -191,11 +191,11 @@ func TestHEVCDetectorNALTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if detector.isVCLNAL(tt.nalType) != tt.isVCL {
-				t.Errorf("%s: isVCLNAL(%d) = %v, want %v", 
+				t.Errorf("%s: isVCLNAL(%d) = %v, want %v",
 					tt.desc, tt.nalType, detector.isVCLNAL(tt.nalType), tt.isVCL)
 			}
 			if detector.isIRAPNAL(tt.nalType) != tt.isIRAP {
-				t.Errorf("%s: isIRAPNAL(%d) = %v, want %v", 
+				t.Errorf("%s: isIRAPNAL(%d) = %v, want %v",
 					tt.desc, tt.nalType, detector.isIRAPNAL(tt.nalType), tt.isIRAP)
 			}
 		})
@@ -248,7 +248,7 @@ func TestHEVCDetectorBoundaryConditions(t *testing.T) {
 			if err != nil {
 				t.Logf("%s: Got error (might be expected): %v", tt.desc, err)
 			}
-			
+
 			// Verify the function completed without panic
 			t.Logf("%s: Successfully parsed %d NAL units", tt.desc, len(nalUnits))
 		})
@@ -258,10 +258,10 @@ func TestHEVCDetectorBoundaryConditions(t *testing.T) {
 // TestHEVCDetectorStressTest performs stress testing with random data
 func TestHEVCDetectorStressTest(t *testing.T) {
 	detector := NewHEVCDetector()
-	
+
 	// Test with various sizes of random-ish data that might contain start codes
 	sizes := []int{0, 1, 2, 3, 4, 100, 1024, 10240}
-	
+
 	for _, size := range sizes {
 		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
 			data := make([]byte, size)
@@ -269,7 +269,7 @@ func TestHEVCDetectorStressTest(t *testing.T) {
 			for i := range data {
 				data[i] = byte(i % 4) // Creates 0x00, 0x01, 0x02, 0x03 pattern
 			}
-			
+
 			// Should not panic regardless of input
 			_, err := detector.findNALUnits(data)
 			if err != nil {
@@ -283,7 +283,7 @@ func TestHEVCDetectorStressTest(t *testing.T) {
 // BenchmarkHEVCDetectorSecurity benchmarks the performance impact of security checks
 func BenchmarkHEVCDetectorSecurity(b *testing.B) {
 	detector := NewHEVCDetector()
-	
+
 	// Create realistic HEVC data with multiple NAL units
 	data := make([]byte, 0, 10000)
 	for i := 0; i < 50; i++ {
@@ -295,10 +295,10 @@ func BenchmarkHEVCDetectorSecurity(b *testing.B) {
 		payload := make([]byte, 100)
 		data = append(data, payload...)
 	}
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		nalUnits, err := detector.findNALUnits(data)
 		if err != nil {

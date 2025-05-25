@@ -18,44 +18,44 @@ import (
 func TestHybridQueue_PersistenceAcrossRestarts(t *testing.T) {
 	tempDir := t.TempDir()
 	streamID := "test-stream"
-	
+
 	// Phase 1: Create queue and write data
 	q1, err := NewHybridQueue(streamID, 2, tempDir) // Small memory to force disk usage
 	require.NoError(t, err)
-	
+
 	// Enqueue messages - more than memory capacity to force disk write
 	messages := []string{"msg1", "msg2", "msg3", "msg4", "msg5"}
 	for _, msg := range messages {
 		err := q1.Enqueue([]byte(msg))
 		require.NoError(t, err)
 	}
-	
+
 	// Dequeue some messages (but not all)
 	for i := 0; i < 2; i++ {
 		_, err := q1.Dequeue()
 		require.NoError(t, err)
 	}
-	
+
 	// Get queue state before closing
 	depthBefore := q1.GetDepth()
 	assert.Equal(t, int64(3), depthBefore, "Should have 3 messages remaining")
-	
+
 	// Close queue
 	q1.Close()
-	
+
 	// Phase 2: Create new queue with same ID
 	q2, err := NewHybridQueue(streamID, 10, tempDir)
 	require.NoError(t, err)
 	defer q2.Close()
-	
+
 	// The new queue won't know about existing data in the file
 	// because diskBytes starts at 0. This is a limitation of the current implementation.
 	// However, if we write new data, it will append to the existing file.
-	
+
 	// Write a new message
 	err = q2.Enqueue([]byte("new_msg"))
 	require.NoError(t, err)
-	
+
 	// Should be able to read the new message
 	msg, err := q2.Dequeue()
 	require.NoError(t, err)
@@ -66,16 +66,16 @@ func TestHybridQueue_PersistenceAcrossRestarts(t *testing.T) {
 func TestHybridQueue_ConcurrentWriteDuringRestart(t *testing.T) {
 	tempDir := t.TempDir()
 	streamID := "concurrent-stream"
-	
+
 	// Create first queue
 	q1, err := NewHybridQueue(streamID, 5, tempDir)
 	require.NoError(t, err)
-	
+
 	// Start writing in background
 	stopWriter := make(chan bool)
 	writerDone := make(chan bool)
 	var written int32
-	
+
 	go func() {
 		defer close(writerDone)
 		for i := 0; ; i++ {
@@ -93,29 +93,29 @@ func TestHybridQueue_ConcurrentWriteDuringRestart(t *testing.T) {
 			}
 		}
 	}()
-	
+
 	// Let some writes happen
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Close the queue while writes are happening
 	q1.Close()
 	close(stopWriter)
 	<-writerDone
-	
+
 	writtenCount := atomic.LoadInt32(&written)
 	t.Logf("Written %d messages before close", writtenCount)
-	
+
 	// Create new queue
 	q2, err := NewHybridQueue(streamID, 10, tempDir)
 	require.NoError(t, err)
 	defer q2.Close()
-	
+
 	// Write more messages
 	for i := 0; i < 5; i++ {
 		err := q2.Enqueue([]byte(fmt.Sprintf("after_%d", i)))
 		require.NoError(t, err)
 	}
-	
+
 	// Should be able to read the new messages
 	read := 0
 	for i := 0; i < 5; i++ {
@@ -126,7 +126,7 @@ func TestHybridQueue_ConcurrentWriteDuringRestart(t *testing.T) {
 		assert.Contains(t, string(msg), "after_")
 		read++
 	}
-	
+
 	assert.Equal(t, 5, read, "Should read all messages written after restart")
 }
 
@@ -134,12 +134,12 @@ func TestHybridQueue_ConcurrentWriteDuringRestart(t *testing.T) {
 func TestHybridQueue_DiskFileCorruption(t *testing.T) {
 	tempDir := t.TempDir()
 	streamID := "corrupt-stream"
-	
+
 	// Create a corrupted file
 	filename := filepath.Join(tempDir, streamID+".overflow")
 	file, err := os.Create(filename)
 	require.NoError(t, err)
-	
+
 	// Write some valid data first
 	validData := []byte("valid_message")
 	length := uint32(len(validData))
@@ -147,25 +147,25 @@ func TestHybridQueue_DiskFileCorruption(t *testing.T) {
 	require.NoError(t, err)
 	_, err = file.Write(validData)
 	require.NoError(t, err)
-	
+
 	// Write corrupted data (length says 1000 but only write 10 bytes)
 	corruptLength := uint32(1000)
 	err = binary.Write(file, binary.BigEndian, corruptLength)
 	require.NoError(t, err)
 	_, err = file.Write([]byte("short data"))
 	require.NoError(t, err)
-	
+
 	file.Close()
-	
+
 	// Create queue - should handle corruption gracefully
 	q, err := NewHybridQueue(streamID, 10, tempDir)
 	require.NoError(t, err)
 	defer q.Close()
-	
+
 	// Queue should still be functional for new writes
 	err = q.Enqueue([]byte("new_message"))
 	assert.NoError(t, err)
-	
+
 	msg, err := q.Dequeue()
 	assert.NoError(t, err)
 	assert.Equal(t, "new_message", string(msg))
@@ -174,7 +174,7 @@ func TestHybridQueue_DiskFileCorruption(t *testing.T) {
 // TestHybridQueue_MultipleQueuessameDisk tests multiple queues sharing disk space
 func TestHybridQueue_MultipleQueuesSameDisk(t *testing.T) {
 	tempDir := t.TempDir()
-	
+
 	// Create multiple queues
 	queues := make([]*HybridQueue, 3)
 	for i := 0; i < 3; i++ {
@@ -182,11 +182,11 @@ func TestHybridQueue_MultipleQueuesSameDisk(t *testing.T) {
 		require.NoError(t, err)
 		queues[i] = q
 	}
-	
+
 	// Write to all queues concurrently
 	var wg sync.WaitGroup
 	messagesPerQueue := 20
-	
+
 	for i, q := range queues {
 		wg.Add(1)
 		go func(queueNum int, queue *HybridQueue) {
@@ -198,14 +198,14 @@ func TestHybridQueue_MultipleQueuesSameDisk(t *testing.T) {
 			}
 		}(i, q)
 	}
-	
+
 	wg.Wait()
-	
+
 	// Close all queues
 	for _, q := range queues {
 		q.Close()
 	}
-	
+
 	// Verify disk files exist (if memory wasn't sufficient)
 	for i := 0; i < 3; i++ {
 		filename := filepath.Join(tempDir, fmt.Sprintf("queue_%d.overflow", i))
@@ -213,21 +213,21 @@ func TestHybridQueue_MultipleQueuesSameDisk(t *testing.T) {
 			assert.True(t, info.Size() > 0, "Queue file should have data if it exists")
 		}
 	}
-	
+
 	// Recreate queues and verify they can write new data
 	for i := 0; i < 3; i++ {
 		q, err := NewHybridQueue(fmt.Sprintf("queue_%d", i), 5, tempDir)
 		require.NoError(t, err)
-		
+
 		// Write and read a message
 		testMsg := fmt.Sprintf("restart_test_%d", i)
 		err = q.Enqueue([]byte(testMsg))
 		require.NoError(t, err)
-		
+
 		msg, err := q.Dequeue()
 		require.NoError(t, err)
 		assert.Equal(t, testMsg, string(msg))
-		
+
 		q.Close()
 	}
 }
@@ -236,22 +236,22 @@ func TestHybridQueue_MultipleQueuesSameDisk(t *testing.T) {
 func TestHybridQueue_MemoryPressureRecovery(t *testing.T) {
 	tempDir := t.TempDir()
 	streamID := "pressure-stream"
-	
+
 	// Create queue with very small memory
 	q, err := NewHybridQueue(streamID, 1, tempDir) // Only 1 message in memory
 	require.NoError(t, err)
-	
+
 	// Write many messages to force disk usage
 	numMessages := 100
 	for i := 0; i < numMessages; i++ {
 		err := q.Enqueue([]byte(fmt.Sprintf("pressure_msg_%d", i)))
 		require.NoError(t, err)
 	}
-	
+
 	// Read some messages
 	readCount := 0
 	timeout := time.After(5 * time.Second)
-	
+
 	for readCount < numMessages {
 		select {
 		case <-timeout:
@@ -266,7 +266,7 @@ func TestHybridQueue_MemoryPressureRecovery(t *testing.T) {
 			}
 		}
 	}
-	
+
 	assert.Equal(t, numMessages, readCount, "Should read all messages")
 	q.Close()
 }
@@ -275,39 +275,39 @@ func TestHybridQueue_MemoryPressureRecovery(t *testing.T) {
 func TestHybridQueue_RateLimitRecovery(t *testing.T) {
 	tempDir := t.TempDir()
 	streamID := "ratelimit-stream"
-	
+
 	// Create first queue
 	q1, err := NewHybridQueue(streamID, 10, tempDir)
 	require.NoError(t, err)
-	
+
 	// Write some messages
 	for i := 0; i < 5; i++ {
 		err := q1.Enqueue([]byte(fmt.Sprintf("before_%d", i)))
 		require.NoError(t, err)
 	}
-	
+
 	q1.Close()
-	
+
 	// Create new queue
 	q2, err := NewHybridQueue(streamID, 10, tempDir)
 	require.NoError(t, err)
 	defer q2.Close()
-	
+
 	// The rate limiter should be fresh (not affected by previous instance)
 	// Try rapid operations - should be allowed initially due to burst
 	start := time.Now()
 	operations := 0
-	
+
 	for i := 0; i < 20; i++ {
 		err := q2.Enqueue([]byte(fmt.Sprintf("rapid_%d", i)))
 		if err == nil {
 			operations++
 		}
 	}
-	
+
 	elapsed := time.Since(start)
 	t.Logf("Completed %d operations in %v", operations, elapsed)
-	
+
 	// Should have completed some operations due to burst allowance
 	assert.Greater(t, operations, 0, "Should complete some operations")
 }
@@ -316,27 +316,27 @@ func TestHybridQueue_RateLimitRecovery(t *testing.T) {
 func TestHybridQueue_GracefulDegradation(t *testing.T) {
 	tempDir := t.TempDir()
 	streamID := "degraded-stream"
-	
+
 	// Create queue
 	q, err := NewHybridQueue(streamID, 5, tempDir)
 	require.NoError(t, err)
 	defer q.Close()
-	
+
 	// Fill memory
 	for i := 0; i < 5; i++ {
 		err := q.Enqueue([]byte(fmt.Sprintf("mem_%d", i)))
 		require.NoError(t, err)
 	}
-	
+
 	// Make disk path read-only to simulate disk issues
 	err = os.Chmod(tempDir, 0555)
 	if err == nil { // Only run this test if we can change permissions
 		defer os.Chmod(tempDir, 0755) // Restore permissions
-		
+
 		// Try to enqueue more - should fail gracefully
 		err = q.Enqueue([]byte("should_fail"))
 		// Error is expected but queue should still work for reads
-		
+
 		// Should still be able to read from memory
 		msg, err := q.Dequeue()
 		if err == nil {
@@ -351,15 +351,15 @@ func TestHybridQueue_GracefulDegradation(t *testing.T) {
 func TestHybridQueue_LargeMessageRecovery(t *testing.T) {
 	tempDir := t.TempDir()
 	streamID := "large-msg-stream"
-	
+
 	// Create queue
 	q1, err := NewHybridQueue(streamID, 2, tempDir)
 	require.NoError(t, err)
-	
+
 	// Create large messages
 	largeMsg1 := make([]byte, 1024*1024) // 1MB
 	largeMsg2 := make([]byte, 512*1024)  // 512KB
-	
+
 	// Fill with pattern to verify integrity
 	for i := range largeMsg1 {
 		largeMsg1[i] = byte(i % 256)
@@ -367,31 +367,31 @@ func TestHybridQueue_LargeMessageRecovery(t *testing.T) {
 	for i := range largeMsg2 {
 		largeMsg2[i] = byte((i * 2) % 256)
 	}
-	
+
 	// Enqueue large messages
 	err = q1.Enqueue(largeMsg1)
 	require.NoError(t, err)
 	err = q1.Enqueue(largeMsg2)
 	require.NoError(t, err)
-	
+
 	// Close queue
 	q1.Close()
-	
+
 	// Verify file exists and has data (if it was written to disk)
 	filename := filepath.Join(tempDir, streamID+".overflow")
 	if info, err := os.Stat(filename); err == nil {
 		assert.Greater(t, info.Size(), int64(0), "File should contain some data if it exists")
 	}
-	
+
 	// Create new queue and write more data
 	q2, err := NewHybridQueue(streamID, 10, tempDir)
 	require.NoError(t, err)
 	defer q2.Close()
-	
+
 	// New queue can still operate
 	err = q2.Enqueue([]byte("after_large"))
 	require.NoError(t, err)
-	
+
 	msg, err := q2.Dequeue()
 	require.NoError(t, err)
 	assert.Equal(t, "after_large", string(msg))

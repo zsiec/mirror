@@ -26,10 +26,10 @@ type JPEGXSProfile uint8
 
 const (
 	// JPEG XS Profile values from RFC 9134
-	ProfileLight       JPEGXSProfile = 0x1A // Light profile
-	ProfileMain        JPEGXSProfile = 0x2A // Main profile
-	ProfileHigh        JPEGXSProfile = 0x3A // High profile
-	ProfileHigh444_12  JPEGXSProfile = 0x4A // High 4:4:4 12-bit profile
+	ProfileLight        JPEGXSProfile = 0x1A // Light profile
+	ProfileMain         JPEGXSProfile = 0x2A // Main profile
+	ProfileHigh         JPEGXSProfile = 0x3A // High profile
+	ProfileHigh444_12   JPEGXSProfile = 0x4A // High 4:4:4 12-bit profile
 	ProfileLightSubline JPEGXSProfile = 0x1B // Light Subline profile
 	ProfileMainSubline  JPEGXSProfile = 0x2B // Main Subline profile
 )
@@ -38,19 +38,18 @@ const (
 const (
 	// Minimum header size (4 bytes)
 	jpegxsMinHeaderSize = 4
-	
+
 	// Extended header size (additional 4 bytes)
 	jpegxsExtendedHeaderSize = 8
-	
+
 	// Packetization modes
 	packetModeProgressive = 0
 	packetModeInterlaced  = 1
-	
+
 	// Field identification for interlaced
 	fieldTop    = 0
 	fieldBottom = 1
 )
-
 
 // Depacketize processes an RTP packet and returns complete JPEG XS frames
 func (d *JPEGXSDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
@@ -132,21 +131,21 @@ func (d *JPEGXSDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 
 // jpegxsHeader represents the parsed JPEG XS RTP header
 type jpegxsHeader struct {
-	FirstPacket    bool
-	LastPacket     bool
-	PacketMode     uint8
-	FieldID        uint8
-	FrameID        uint32
-	PacketID       uint16
-	HasExtended    bool
-	Profile        JPEGXSProfile
-	Level          uint8
-	SubLevel       uint8
-	ChromaFormat   uint8
-	BitDepth       uint8
-	Width          uint16
-	Height         uint16
-	Interlaced     bool
+	FirstPacket  bool
+	LastPacket   bool
+	PacketMode   uint8
+	FieldID      uint8
+	FrameID      uint32
+	PacketID     uint16
+	HasExtended  bool
+	Profile      JPEGXSProfile
+	Level        uint8
+	SubLevel     uint8
+	ChromaFormat uint8
+	BitDepth     uint8
+	Width        uint16
+	Height       uint16
+	Interlaced   bool
 }
 
 // parseHeader parses the JPEG XS RTP header according to RFC 9134
@@ -156,15 +155,15 @@ func (d *JPEGXSDepacketizer) parseHeader(payload []byte) (*jpegxsHeader, int, er
 	}
 
 	header := &jpegxsHeader{}
-	
+
 	// Parse first 4 bytes (mandatory header)
 	// Byte 0: Flags
 	flags := payload[0]
-	header.FirstPacket = (flags & 0x80) != 0  // F bit
-	header.LastPacket = (flags & 0x40) != 0   // L bit
-	header.PacketMode = (flags >> 4) & 0x03   // P field (2 bits)
-	header.FieldID = (flags >> 3) & 0x01      // I bit
-	header.HasExtended = (flags & 0x04) != 0  // E bit
+	header.FirstPacket = (flags & 0x80) != 0 // F bit
+	header.LastPacket = (flags & 0x40) != 0  // L bit
+	header.PacketMode = (flags >> 4) & 0x03  // P field (2 bits)
+	header.FieldID = (flags >> 3) & 0x01     // I bit
+	header.HasExtended = (flags & 0x04) != 0 // E bit
 	// Reserved bits: 0x03
 
 	// Bytes 1-3: Frame ID (24 bits)
@@ -331,22 +330,22 @@ func NewJPEGXSDepacketizerWithMemory(streamID string, memController *memory.Cont
 func (d *JPEGXSDepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 	// Estimate memory needed for this packet
 	estimatedSize := int64(len(packet.Payload) * 2) // Conservative estimate
-	
+
 	// Check if we would exceed memory limit
 	if d.currentUsage+estimatedSize > d.memoryLimit {
 		return nil, fmt.Errorf("frame size would exceed memory limit: current=%d, needed=%d, limit=%d",
 			d.currentUsage, estimatedSize, d.memoryLimit)
 	}
-	
+
 	// Request memory from controller
 	if err := d.memController.RequestMemory(d.streamID, estimatedSize); err != nil {
 		return nil, fmt.Errorf("memory allocation failed: %w", err)
 	}
 	d.currentUsage += estimatedSize
-	
+
 	// Process packet
 	frames, err := d.JPEGXSDepacketizer.Depacketize(packet)
-	
+
 	// If we got complete frames, release fragment memory
 	if len(frames) > 0 {
 		// Calculate actual memory used
@@ -354,18 +353,18 @@ func (d *JPEGXSDepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte
 		for _, frame := range frames {
 			actualSize += int64(len(frame))
 		}
-		
+
 		// Release excess memory
 		if estimatedSize > actualSize {
 			excessMemory := estimatedSize - actualSize
 			d.memController.ReleaseMemory(d.streamID, excessMemory)
 			d.currentUsage -= excessMemory
 		}
-		
+
 		// Reset fragment memory tracking
 		d.currentUsage = 0
 	}
-	
+
 	return frames, err
 }
 
@@ -376,6 +375,6 @@ func (d *JPEGXSDepacketizerWithMemory) Reset() {
 		d.memController.ReleaseMemory(d.streamID, d.currentUsage)
 		d.currentUsage = 0
 	}
-	
+
 	d.JPEGXSDepacketizer.Reset()
 }

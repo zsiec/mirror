@@ -12,7 +12,7 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
-	
+
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/internal/errors"
 	"github.com/zsiec/mirror/internal/health"
@@ -28,7 +28,7 @@ type Server struct {
 	redis        *redis.Client
 	healthMgr    *health.Manager
 	errorHandler *errors.ErrorHandler
-	
+
 	// Additional handlers can be registered
 	additionalRoutes []func(*mux.Router)
 }
@@ -153,7 +153,7 @@ func (s *Server) setupRoutes() {
 	for _, registerFunc := range s.additionalRoutes {
 		registerFunc(s.router)
 	}
-	
+
 	// 404 handler
 	s.router.NotFoundHandler = http.HandlerFunc(s.errorHandler.HandleNotFound)
 	s.router.MethodNotAllowedHandler = http.HandlerFunc(s.errorHandler.HandleMethodNotAllowed)

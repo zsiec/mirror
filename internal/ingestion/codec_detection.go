@@ -48,14 +48,14 @@ func (d *CodecDetector) DetectFromSDP(sdp string) (types.CodecType, map[string]s
 	lines := strings.Split(sdp, "\n")
 	codecType := types.CodecUnknown
 	params := make(map[string]string)
-	
+
 	var currentPayloadType uint8
 	var inVideoSection bool
 	var inAudioSection bool
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		
+
 		// Check for media sections
 		if strings.HasPrefix(line, "m=video") {
 			inVideoSection = true
@@ -90,7 +90,7 @@ func (d *CodecDetector) DetectFromSDP(sdp string) (types.CodecType, map[string]s
 			inAudioSection = false
 			continue
 		}
-		
+
 		// Parse rtpmap for codec info (only in relevant media sections)
 		if strings.HasPrefix(line, "a=rtpmap:") && (inVideoSection || inAudioSection) {
 			parts := strings.SplitN(line[9:], " ", 2)
@@ -105,7 +105,7 @@ func (d *CodecDetector) DetectFromSDP(sdp string) (types.CodecType, map[string]s
 							codecType = detectedCodec
 							d.payloadTypeMap[currentPayloadType] = detectedCodec
 						}
-						
+
 						// Store clock rate if available
 						if len(codecParts) > 1 {
 							params["clock_rate"] = codecParts[1]
@@ -114,7 +114,7 @@ func (d *CodecDetector) DetectFromSDP(sdp string) (types.CodecType, map[string]s
 				}
 			}
 		}
-		
+
 		// Parse fmtp for codec parameters
 		if strings.HasPrefix(line, "a=fmtp:") {
 			parts := strings.SplitN(line[7:], " ", 2)
@@ -132,7 +132,7 @@ func (d *CodecDetector) DetectFromSDP(sdp string) (types.CodecType, map[string]s
 			}
 		}
 	}
-	
+
 	return codecType, params
 }
 
@@ -142,7 +142,7 @@ func (d *CodecDetector) detectFromPayloadType(pt uint8) types.CodecType {
 	if codec, ok := d.payloadTypeMap[pt]; ok {
 		return codec
 	}
-	
+
 	// Static payload types (RFC 3551)
 	switch pt {
 	// Audio
@@ -156,7 +156,7 @@ func (d *CodecDetector) detectFromPayloadType(pt uint8) types.CodecType {
 		return types.CodecL16
 	case 14:
 		return types.CodecMP3 // MPA
-		
+
 	// Video
 	case 26:
 		return types.CodecJPEG
@@ -168,7 +168,7 @@ func (d *CodecDetector) detectFromPayloadType(pt uint8) types.CodecType {
 		return types.CodecMP2T
 	case 34:
 		return types.CodecH263
-		
+
 	default:
 		return types.CodecUnknown
 	}
@@ -179,7 +179,7 @@ func (d *CodecDetector) detectFromPayload(payload []byte, payloadType uint8) typ
 	if len(payload) < 1 {
 		return types.CodecUnknown
 	}
-	
+
 	// For dynamic payload types, try to detect from NAL unit patterns
 	if payloadType >= 96 && payloadType <= 127 {
 		// H.264 detection
@@ -187,7 +187,7 @@ func (d *CodecDetector) detectFromPayload(payload []byte, payloadType uint8) typ
 		if nalType >= 1 && nalType <= 23 {
 			return types.CodecH264
 		}
-		
+
 		// HEVC detection (simple check)
 		if len(payload) >= 2 {
 			nalType := (payload[0] >> 1) & 0x3F
@@ -196,7 +196,7 @@ func (d *CodecDetector) detectFromPayload(payload []byte, payloadType uint8) typ
 			}
 		}
 	}
-	
+
 	return types.CodecUnknown
 }
 
@@ -208,7 +208,7 @@ func (d *CodecDetector) AddPayloadTypeMapping(payloadType uint8, codec types.Cod
 // detectCodecFromEncodingName maps SDP encoding names to codec types
 func detectCodecFromEncodingName(name string) types.CodecType {
 	name = strings.ToUpper(strings.TrimSpace(name))
-	
+
 	switch name {
 	// Video codecs
 	case "H264", "AVC":
@@ -231,7 +231,7 @@ func detectCodecFromEncodingName(name string) types.CodecType {
 		return types.CodecJPEG
 	case "MPV":
 		return types.CodecMPV
-		
+
 	// Audio codecs
 	case "AAC", "MP4A-LATM", "MPEG4-GENERIC":
 		return types.CodecAAC
@@ -249,33 +249,32 @@ func detectCodecFromEncodingName(name string) types.CodecType {
 		return types.CodecVorbis
 	case "SPEEX":
 		return types.CodecSpeex
-		
+
 	// Container formats
 	case "MP2T":
 		return types.CodecMP2T
-		
+
 	default:
 		return types.CodecUnknown
 	}
 }
 
-
 // DetectCodecFromRTPSession is a helper that uses session metadata
-func DetectCodecFromRTPSession(session interface{ 
+func DetectCodecFromRTPSession(session interface {
 	GetPayloadType() uint8
-	GetMediaFormat() string  
+	GetMediaFormat() string
 	GetEncodingName() string
 	GetClockRate() uint32
 }) types.CodecType {
 	detector := NewCodecDetector()
-	
+
 	// Try static payload type first
 	payloadType := session.GetPayloadType()
 	codec := detector.detectFromPayloadType(payloadType)
 	if codec != types.CodecUnknown {
 		return codec
 	}
-	
+
 	// For dynamic payload types, check media format
 	if payloadType >= 96 && payloadType <= 127 {
 		// Check media format
@@ -285,13 +284,13 @@ func DetectCodecFromRTPSession(session interface{
 				return detectCodecFromEncodingName(parts[0])
 			}
 		}
-		
+
 		// Check encoding name
 		if encodingName := session.GetEncodingName(); encodingName != "" {
 			return detectCodecFromEncodingName(encodingName)
 		}
 	}
-	
+
 	// Make educated guess from clock rate
 	clockRate := session.GetClockRate()
 	switch clockRate {
@@ -302,6 +301,6 @@ func DetectCodecFromRTPSession(session interface{
 	case 8000:
 		return types.CodecG711
 	}
-	
+
 	return types.CodecUnknown
 }

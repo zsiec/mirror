@@ -9,9 +9,9 @@ import (
 
 func TestCalculateWrapThreshold(t *testing.T) {
 	tests := []struct {
-		name      string
-		timeBase  types.Rational
-		expected  int64
+		name     string
+		timeBase types.Rational
+		expected int64
 	}{
 		{
 			name:     "Standard video 90kHz",
@@ -54,12 +54,12 @@ func TestCalculateWrapThreshold(t *testing.T) {
 func TestPTSWrapDetector_DetectWrap(t *testing.T) {
 	// Create detector for standard 90kHz video
 	detector := NewPTSWrapDetector(types.Rational{Num: 1, Den: 90000})
-	
+
 	tests := []struct {
-		name        string
-		currentPTS  int64
-		lastPTS     int64
-		expectWrap  bool
+		name       string
+		currentPTS int64
+		lastPTS    int64
+		expectWrap bool
 	}{
 		{
 			name:       "Normal increment",
@@ -110,7 +110,7 @@ func TestPTSWrapDetector_DetectWrap(t *testing.T) {
 func TestPTSWrapDetector_UnwrapPTS(t *testing.T) {
 	detector := NewPTSWrapDetector(types.Rational{Num: 1, Den: 90000})
 	wrapThreshold := detector.GetWrapThreshold()
-	
+
 	tests := []struct {
 		name      string
 		pts       int64
@@ -147,9 +147,9 @@ func TestPTSWrapDetector_UnwrapPTS(t *testing.T) {
 
 func TestPTSWrapDetector_IsLikelyDiscontinuity(t *testing.T) {
 	detector := NewPTSWrapDetector(types.Rational{Num: 1, Den: 90000})
-	
+
 	tests := []struct {
-		name                 string
+		name                string
 		currentPTS          int64
 		lastPTS             int64
 		expectDiscontinuity bool
@@ -164,7 +164,7 @@ func TestPTSWrapDetector_IsLikelyDiscontinuity(t *testing.T) {
 			name:                "Exactly 1 second jump",
 			currentPTS:          180000, // 2 seconds
 			lastPTS:             90000,  // 1 second
-			expectDiscontinuity: false, // Exactly 1 second, not > 1 second
+			expectDiscontinuity: false,  // Exactly 1 second, not > 1 second
 		},
 		{
 			name:                "1.5 second jump",
@@ -202,7 +202,7 @@ func TestPTSWrapDetector_IsLikelyDiscontinuity(t *testing.T) {
 
 func TestPTSWrapDetector_CalculatePTSDelta(t *testing.T) {
 	detector := NewPTSWrapDetector(types.Rational{Num: 1, Den: 90000})
-	
+
 	tests := []struct {
 		name       string
 		currentPTS int64
@@ -251,10 +251,10 @@ func TestPTSWrapDetector_CalculatePTSDelta(t *testing.T) {
 func TestPTSWrapDetector_AudioTimeBase(t *testing.T) {
 	// Test with 48kHz audio time base
 	detector := NewPTSWrapDetector(types.Rational{Num: 1, Den: 48000})
-	
+
 	// Verify it uses 33-bit threshold
 	assert.Equal(t, int64(1<<33), detector.GetWrapThreshold())
-	
+
 	// Test wrap detection with 33-bit values
 	tests := []struct {
 		name       string
@@ -293,21 +293,21 @@ func TestPTSWrapDetector_AudioTimeBase(t *testing.T) {
 // BenchmarkPTSWrapDetection benchmarks wrap detection performance
 func BenchmarkPTSWrapDetection(b *testing.B) {
 	detector := NewPTSWrapDetector(types.Rational{Num: 1, Den: 90000})
-	
+
 	// Simulate timestamps that occasionally wrap
 	timestamps := make([]int64, 1000)
 	for i := range timestamps {
 		if i%100 == 99 {
 			// Simulate wrap
-			timestamps[i] = int64(i * 3000) % (1 << 32)
+			timestamps[i] = int64(i*3000) % (1 << 32)
 		} else {
 			timestamps[i] = int64(i * 3000)
 		}
 	}
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		for j := 1; j < len(timestamps); j++ {
 			detector.DetectWrap(timestamps[j], timestamps[j-1])

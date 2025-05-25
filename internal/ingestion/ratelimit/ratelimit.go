@@ -20,10 +20,10 @@ type RateLimiter interface {
 
 // TokenBucket implements a token bucket rate limiter
 type TokenBucket struct {
-	rate       int64         // bytes per second
-	capacity   int64         // bucket capacity
-	tokens     int64         // current tokens
-	lastRefill time.Time     // last refill time
+	rate       int64     // bytes per second
+	capacity   int64     // bucket capacity
+	tokens     int64     // current tokens
+	lastRefill time.Time // last refill time
 	mu         sync.Mutex
 }
 
@@ -33,7 +33,7 @@ func NewTokenBucket(bytesPerSecond int64) *TokenBucket {
 	if capacity < 1024 {
 		capacity = 1024 // minimum 1KB capacity
 	}
-	
+
 	return &TokenBucket{
 		rate:       bytesPerSecond,
 		capacity:   capacity,
@@ -46,14 +46,14 @@ func NewTokenBucket(bytesPerSecond int64) *TokenBucket {
 func (tb *TokenBucket) Allow(n int) bool {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
-	
+
 	tb.refill()
-	
+
 	if int64(n) <= tb.tokens {
 		tb.tokens -= int64(n)
 		return true
 	}
-	
+
 	return false
 }
 
@@ -63,11 +63,11 @@ func (tb *TokenBucket) AllowN(ctx context.Context, n int) error {
 	if tb.Allow(n) {
 		return nil
 	}
-	
+
 	// Slow path - wait for tokens
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -84,13 +84,13 @@ func (tb *TokenBucket) AllowN(ctx context.Context, n int) error {
 func (tb *TokenBucket) SetRate(bytesPerSecond int64) {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
-	
+
 	tb.rate = bytesPerSecond
 	tb.capacity = bytesPerSecond
 	if tb.capacity < 1024 {
 		tb.capacity = 1024
 	}
-	
+
 	// Don't reduce current tokens, but cap at new capacity
 	if tb.tokens > tb.capacity {
 		tb.tokens = tb.capacity
@@ -108,12 +108,12 @@ func (tb *TokenBucket) Rate() int64 {
 func (tb *TokenBucket) refill() {
 	now := time.Now()
 	elapsed := now.Sub(tb.lastRefill)
-	
+
 	// Only refill if enough time has passed
 	if elapsed < time.Millisecond {
 		return
 	}
-	
+
 	// Calculate new tokens
 	newTokens := int64(elapsed.Seconds() * float64(tb.rate))
 	if newTokens > 0 {
@@ -147,18 +147,18 @@ func NewConnectionLimiter(maxPerStream, maxTotal int) *ConnectionLimiter {
 func (cl *ConnectionLimiter) TryAcquire(streamID string) bool {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
-	
+
 	// Check total limit
 	if cl.maxTotal > 0 && cl.total >= cl.maxTotal {
 		return false
 	}
-	
+
 	// Check per-stream limit
 	current := cl.connections[streamID]
 	if cl.maxPerStream > 0 && current >= cl.maxPerStream {
 		return false
 	}
-	
+
 	// Acquire slot
 	cl.connections[streamID] = current + 1
 	cl.total++
@@ -169,7 +169,7 @@ func (cl *ConnectionLimiter) TryAcquire(streamID string) bool {
 func (cl *ConnectionLimiter) Release(streamID string) {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
-	
+
 	if count, exists := cl.connections[streamID]; exists && count > 0 {
 		if count == 1 {
 			delete(cl.connections, streamID)
@@ -196,7 +196,7 @@ func (cl *ConnectionLimiter) GetTotal() int {
 
 // BandwidthManager manages bandwidth allocation across streams
 type BandwidthManager struct {
-	totalBandwidth int64 // total bandwidth in bytes per second
+	totalBandwidth int64            // total bandwidth in bytes per second
 	allocations    map[string]int64 // streamID -> allocated bandwidth
 	limiters       map[string]RateLimiter
 	mu             sync.RWMutex
@@ -215,24 +215,24 @@ func NewBandwidthManager(totalBandwidth int64) *BandwidthManager {
 func (bm *BandwidthManager) AllocateBandwidth(streamID string, requested int64) (RateLimiter, bool) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	
+
 	// Calculate available bandwidth
 	var used int64
 	for _, allocated := range bm.allocations {
 		used += allocated
 	}
 	available := bm.totalBandwidth - used
-	
+
 	// Check if we can allocate the requested amount
 	if requested > available {
 		return nil, false
 	}
-	
+
 	// Create rate limiter
 	limiter := NewTokenBucket(requested)
 	bm.allocations[streamID] = requested
 	bm.limiters[streamID] = limiter
-	
+
 	return limiter, true
 }
 
@@ -240,7 +240,7 @@ func (bm *BandwidthManager) AllocateBandwidth(streamID string, requested int64) 
 func (bm *BandwidthManager) ReleaseBandwidth(streamID string) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	
+
 	delete(bm.allocations, streamID)
 	delete(bm.limiters, streamID)
 }
@@ -256,11 +256,11 @@ func (bm *BandwidthManager) GetLimiter(streamID string) RateLimiter {
 func (bm *BandwidthManager) GetAvailableBandwidth() int64 {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
-	
+
 	var used int64
 	for _, allocated := range bm.allocations {
 		used += allocated
 	}
-	
+
 	return bm.totalBandwidth - used
 }

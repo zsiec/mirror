@@ -26,10 +26,10 @@ func TestNewHandler(t *testing.T) {
 func TestHandleHealth(t *testing.T) {
 	logger := logrus.New()
 	manager := NewManager(logger)
-	
+
 	// Register a test checker
 	manager.Register(&mockChecker{name: "test", err: nil})
-	
+
 	handler := NewHandler(manager)
 
 	req := httptest.NewRequest("GET", "/health", nil)
@@ -55,10 +55,10 @@ func TestHandleHealth(t *testing.T) {
 func TestHandleHealthWithFailingChecker(t *testing.T) {
 	logger := logrus.New()
 	manager := NewManager(logger)
-	
+
 	// Register failing checker
 	manager.Register(&mockChecker{name: "failing", err: assert.AnError})
-	
+
 	handler := NewHandler(manager)
 
 	req := httptest.NewRequest("GET", "/health", nil)
@@ -78,11 +78,11 @@ func TestHandleHealthWithFailingChecker(t *testing.T) {
 func TestHandleReady(t *testing.T) {
 	logger := logrus.New()
 	manager := NewManager(logger)
-	
+
 	// Register a healthy checker
 	manager.Register(&mockChecker{name: "test", err: nil})
 	manager.RunChecks(context.Background())
-	
+
 	handler := NewHandler(manager)
 
 	req := httptest.NewRequest("GET", "/ready", nil)
@@ -129,7 +129,7 @@ func TestHandleLive(t *testing.T) {
 func TestGetUptime(t *testing.T) {
 	logger := logrus.New()
 	manager := NewManager(logger)
-	
+
 	tests := []struct {
 		name     string
 		duration time.Duration
@@ -163,7 +163,7 @@ func TestGetUptime(t *testing.T) {
 				manager:   manager,
 				startTime: time.Now().Add(-tt.duration),
 			}
-			
+
 			uptime := handler.getUptime()
 			assert.Equal(t, tt.expected, uptime)
 		})

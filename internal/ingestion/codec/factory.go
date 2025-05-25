@@ -3,7 +3,7 @@ package codec
 import (
 	"fmt"
 	"sync"
-	
+
 	"github.com/zsiec/mirror/internal/ingestion/memory"
 )
 
@@ -21,16 +21,16 @@ func NewDepacketizerFactory(memController *memory.Controller) *DepacketizerFacto
 		registry:      make(map[Type]func(streamID string) Depacketizer),
 		memController: memController,
 		codecLimits: map[Type]int64{
-			TypeH264:   10 * 1024 * 1024,  // 10MB
-			TypeHEVC:   15 * 1024 * 1024,  // 15MB
-			TypeAV1:    12 * 1024 * 1024,  // 12MB
-			TypeJPEGXS: 5 * 1024 * 1024,   // 5MB
+			TypeH264:   10 * 1024 * 1024, // 10MB
+			TypeHEVC:   15 * 1024 * 1024, // 15MB
+			TypeAV1:    12 * 1024 * 1024, // 12MB
+			TypeJPEGXS: 5 * 1024 * 1024,  // 5MB
 		},
 	}
-	
+
 	// Register default depacketizers
 	f.RegisterDefaults()
-	
+
 	return f
 }
 
@@ -41,34 +41,34 @@ func (f *DepacketizerFactory) RegisterDefaults() {
 		f.Register(TypeHEVC, func(streamID string) Depacketizer {
 			return NewHEVCDepacketizer()
 		})
-		
+
 		f.Register(TypeH264, func(streamID string) Depacketizer {
 			return NewH264Depacketizer()
 		})
-		
+
 		f.Register(TypeAV1, func(streamID string) Depacketizer {
 			return NewAV1Depacketizer()
 		})
-		
+
 		f.Register(TypeJPEGXS, func(streamID string) Depacketizer {
 			return NewJPEGXSDepacketizer()
 		})
 		return
 	}
-	
+
 	// Register memory-aware depacketizers
 	f.Register(TypeHEVC, func(streamID string) Depacketizer {
 		return NewHEVCDepacketizerWithMemory(streamID, f.memController, f.codecLimits[TypeHEVC])
 	})
-	
+
 	f.Register(TypeH264, func(streamID string) Depacketizer {
 		return NewH264DepacketizerWithMemory(streamID, f.memController, f.codecLimits[TypeH264])
 	})
-	
+
 	f.Register(TypeAV1, func(streamID string) Depacketizer {
 		return NewAV1DepacketizerWithMemory(streamID, f.memController, f.codecLimits[TypeAV1])
 	})
-	
+
 	f.Register(TypeJPEGXS, func(streamID string) Depacketizer {
 		return NewJPEGXSDepacketizerWithMemory(streamID, f.memController, f.codecLimits[TypeJPEGXS])
 	})
@@ -78,7 +78,7 @@ func (f *DepacketizerFactory) RegisterDefaults() {
 func (f *DepacketizerFactory) Register(codecType Type, creator func(streamID string) Depacketizer) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	
+
 	f.registry[codecType] = creator
 }
 
@@ -86,12 +86,12 @@ func (f *DepacketizerFactory) Register(codecType Type, creator func(streamID str
 func (f *DepacketizerFactory) Create(codecType Type, streamID string) (Depacketizer, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	
+
 	creator, ok := f.registry[codecType]
 	if !ok {
 		return nil, fmt.Errorf("unsupported codec type: %s", codecType)
 	}
-	
+
 	return creator(streamID), nil
 }
 
@@ -99,7 +99,7 @@ func (f *DepacketizerFactory) Create(codecType Type, streamID string) (Depacketi
 func (f *DepacketizerFactory) IsSupported(codecType Type) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	
+
 	_, ok := f.registry[codecType]
 	return ok
 }
@@ -108,12 +108,12 @@ func (f *DepacketizerFactory) IsSupported(codecType Type) bool {
 func (f *DepacketizerFactory) SupportedCodecs() []Type {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	
+
 	codecs := make([]Type, 0, len(f.registry))
 	for codecType := range f.registry {
 		codecs = append(codecs, codecType)
 	}
-	
+
 	return codecs
 }
 
@@ -121,7 +121,7 @@ func (f *DepacketizerFactory) SupportedCodecs() []Type {
 func (f *DepacketizerFactory) Unregister(codecType Type) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	
+
 	delete(f.registry, codecType)
 }
 
@@ -152,7 +152,7 @@ func (p *DepacketizerPool) Put(codecType Type, depacketizer Depacketizer) {
 	p.mu.RLock()
 	pool, ok := p.pools[codecType]
 	p.mu.RUnlock()
-	
+
 	if ok {
 		// Reset before returning to pool
 		if d, ok := depacketizer.(interface{ Reset() }); ok {

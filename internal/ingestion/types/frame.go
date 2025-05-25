@@ -61,62 +61,62 @@ func (f FrameType) IsDiscardable() bool {
 type FrameFlags uint16
 
 const (
-	FrameFlagKeyframe      FrameFlags = 1 << 0
-	FrameFlagReference     FrameFlags = 1 << 1  // Used as reference
-	FrameFlagCorrupted     FrameFlags = 1 << 2
-	FrameFlagDroppable     FrameFlags = 1 << 3
-	FrameFlagLastInGOP     FrameFlags = 1 << 4
-	FrameFlagSceneChange   FrameFlags = 1 << 5
-	FrameFlagInterlaced    FrameFlags = 1 << 6
+	FrameFlagKeyframe    FrameFlags = 1 << 0
+	FrameFlagReference   FrameFlags = 1 << 1 // Used as reference
+	FrameFlagCorrupted   FrameFlags = 1 << 2
+	FrameFlagDroppable   FrameFlags = 1 << 3
+	FrameFlagLastInGOP   FrameFlags = 1 << 4
+	FrameFlagSceneChange FrameFlags = 1 << 5
+	FrameFlagInterlaced  FrameFlags = 1 << 6
 )
 
 // VideoFrame represents a complete video frame
 type VideoFrame struct {
 	// Frame identification
-	ID           uint64       // Unique frame ID
-	StreamID     string       // Stream this frame belongs to
-	FrameNumber  uint64       // Frame number in stream
-	
+	ID          uint64 // Unique frame ID
+	StreamID    string // Stream this frame belongs to
+	FrameNumber uint64 // Frame number in stream
+
 	// Frame data
-	NALUnits     []NALUnit    // NAL units that compose this frame
-	TotalSize    int          // Total size in bytes
-	
+	NALUnits  []NALUnit // NAL units that compose this frame
+	TotalSize int       // Total size in bytes
+
 	// Timing
-	PTS          int64        // Presentation timestamp
-	DTS          int64        // Decode timestamp
-	Duration     int64        // Frame duration
-	CaptureTime  time.Time    // When first packet was received
-	CompleteTime time.Time    // When frame was completed
-	
+	PTS          int64     // Presentation timestamp
+	DTS          int64     // Decode timestamp
+	Duration     int64     // Frame duration
+	CaptureTime  time.Time // When first packet was received
+	CompleteTime time.Time // When frame was completed
+
 	// Frame type and characteristics
-	Type         FrameType    // I, P, B, etc.
-	Flags        FrameFlags   // Frame flags
-	
+	Type  FrameType  // I, P, B, etc.
+	Flags FrameFlags // Frame flags
+
 	// GOP information
-	GOPId        uint64       // GOP this frame belongs to
-	GOPPosition  int          // Position within GOP
-	
+	GOPId       uint64 // GOP this frame belongs to
+	GOPPosition int    // Position within GOP
+
 	// Dependencies
-	References   []uint64     // Frames this depends on
-	ReferencedBy []uint64     // Frames that depend on this
-	
+	References   []uint64 // Frames this depends on
+	ReferencedBy []uint64 // Frames that depend on this
+
 	// Quality information
-	QP           int          // Quantization parameter
-	PSNR         float64      // Peak signal-to-noise ratio (if available)
-	
+	QP   int     // Quantization parameter
+	PSNR float64 // Peak signal-to-noise ratio (if available)
+
 	// Codec specific
-	CodecData    interface{}  // Codec-specific metadata
-	
+	CodecData interface{} // Codec-specific metadata
+
 	// For presentation timing
 	PresentationTime time.Time // Calculated presentation time
 }
 
 // NALUnit represents a Network Abstraction Layer unit
 type NALUnit struct {
-	Type         uint8        // NAL unit type
-	Data         []byte       // NAL unit data (including header)
-	Importance   uint8        // Importance level (0-5)
-	RefIdc       uint8        // nal_ref_idc (for H.264)
+	Type       uint8  // NAL unit type
+	Data       []byte // NAL unit data (including header)
+	Importance uint8  // Importance level (0-5)
+	RefIdc     uint8  // nal_ref_idc (for H.264)
 }
 
 // HasFlag checks if a flag is set

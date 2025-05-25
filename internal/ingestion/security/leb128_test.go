@@ -7,12 +7,12 @@ import (
 
 func TestReadLEB128(t *testing.T) {
 	tests := []struct {
-		name        string
-		data        []byte
-		want        uint64
-		wantBytes   int
-		wantErr     bool
-		errType     error
+		name      string
+		data      []byte
+		want      uint64
+		wantBytes int
+		wantErr   bool
+		errType   error
 	}{
 		{
 			name:      "zero",
@@ -96,20 +96,20 @@ func TestReadLEB128(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, gotBytes, err := ReadLEB128(tt.data)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadLEB128() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if tt.wantErr && tt.errType != nil && err != tt.errType {
 				t.Errorf("ReadLEB128() error = %v, want %v", err, tt.errType)
 			}
-			
+
 			if gotBytes != tt.wantBytes {
 				t.Errorf("ReadLEB128() gotBytes = %v, want %v", gotBytes, tt.wantBytes)
 			}
-			
+
 			if !tt.wantErr && got != tt.want {
 				t.Errorf("ReadLEB128() = %v, want %v", got, tt.want)
 			}
@@ -149,16 +149,16 @@ func TestReadLEB128FromReader(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := bytes.NewReader(tt.data)
 			got, gotBytes, err := ReadLEB128FromReader(r)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadLEB128FromReader() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if gotBytes != tt.wantBytes {
 				t.Errorf("ReadLEB128FromReader() gotBytes = %v, want %v", gotBytes, tt.wantBytes)
 			}
-			
+
 			if !tt.wantErr && got != tt.want {
 				t.Errorf("ReadLEB128FromReader() = %v, want %v", got, tt.want)
 			}
@@ -212,7 +212,7 @@ func TestWriteLEB128(t *testing.T) {
 func TestLEB128RoundTrip(t *testing.T) {
 	// Test that encoding and decoding produces the same value
 	values := []uint64{
-		0, 1, 127, 128, 255, 256, 1000, 
+		0, 1, 127, 128, 255, 256, 1000,
 		0xFFFF, 0xFFFFFF, 0xFFFFFFFF,
 		0xFFFFFFFFFFFF, 0xFFFFFFFFFFFFFF,
 	}
@@ -254,7 +254,7 @@ func TestLEB128Size(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("LEB128Size(%d) = %d, want %d", tt.value, got, tt.want)
 		}
-		
+
 		// Verify by encoding
 		encoded := WriteLEB128(tt.value)
 		if len(encoded) != tt.want {
@@ -304,7 +304,7 @@ func TestLEB128EdgeCases(t *testing.T) {
 func BenchmarkReadLEB128(b *testing.B) {
 	// Benchmark with various sized values
 	data := []byte{0xE5, 0x8E, 0x26} // 3-byte encoding
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _, err := ReadLEB128(data)
@@ -316,7 +316,7 @@ func BenchmarkReadLEB128(b *testing.B) {
 
 func BenchmarkWriteLEB128(b *testing.B) {
 	value := uint64(624485)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = WriteLEB128(value)

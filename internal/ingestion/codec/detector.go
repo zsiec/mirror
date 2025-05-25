@@ -30,37 +30,37 @@ func (d *Detector) DetectFromSDP(sdp string) (Type, *Info, error) {
 	info := &Info{
 		Parameters: make(map[string]string),
 	}
-	
+
 	// Track current media section
 	var currentPayloadType uint8
 	inVideoSection := false
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		
+
 		// Check for video media description
 		if strings.HasPrefix(line, "m=video") {
 			inVideoSection = true
 			continue
 		}
-		
+
 		// Skip non-video sections
 		if strings.HasPrefix(line, "m=") && !strings.HasPrefix(line, "m=video") {
 			inVideoSection = false
 			continue
 		}
-		
+
 		if !inVideoSection {
 			continue
 		}
-		
+
 		// Parse rtpmap for codec info
 		if strings.HasPrefix(line, "a=rtpmap:") {
 			parts := strings.Split(line[9:], " ")
 			if len(parts) >= 2 {
 				pt, _ := strconv.Atoi(parts[0])
 				currentPayloadType = uint8(pt)
-				
+
 				codecParts := strings.Split(parts[1], "/")
 				if len(codecParts) > 0 {
 					codecName := strings.ToUpper(codecParts[0])
@@ -86,7 +86,7 @@ func (d *Detector) DetectFromSDP(sdp string) (Type, *Info, error) {
 						d.payloadTypeMap[currentPayloadType] = TypeJPEGXS
 						d.mu.Unlock()
 					}
-					
+
 					// Extract clock rate if available
 					if len(codecParts) > 1 {
 						info.Parameters["clock_rate"] = codecParts[1]
@@ -94,7 +94,7 @@ func (d *Detector) DetectFromSDP(sdp string) (Type, *Info, error) {
 				}
 			}
 		}
-		
+
 		// Parse fmtp for codec-specific parameters
 		if strings.HasPrefix(line, "a=fmtp:") && codecType != TypeUnknown {
 			fmtpParts := strings.SplitN(line[7:], " ", 2)
@@ -105,7 +105,7 @@ func (d *Detector) DetectFromSDP(sdp string) (Type, *Info, error) {
 				}
 			}
 		}
-		
+
 		// Parse video attributes
 		if strings.HasPrefix(line, "a=framesize:") {
 			// Format: a=framesize:PT width-height
@@ -118,7 +118,7 @@ func (d *Detector) DetectFromSDP(sdp string) (Type, *Info, error) {
 				}
 			}
 		}
-		
+
 		if strings.HasPrefix(line, "a=framerate:") {
 			// Format: a=framerate:PT fps
 			parts := strings.Split(line[12:], " ")
@@ -127,11 +127,11 @@ func (d *Detector) DetectFromSDP(sdp string) (Type, *Info, error) {
 			}
 		}
 	}
-	
+
 	if codecType == TypeUnknown {
 		return TypeUnknown, nil, fmt.Errorf("no supported video codec found in SDP")
 	}
-	
+
 	info.Type = codecType
 	return codecType, info, nil
 }
@@ -145,15 +145,15 @@ func (d *Detector) parseFmtpParams(codecType Type, params string, info *Info) {
 		if pair == "" {
 			continue
 		}
-		
+
 		kv := strings.SplitN(pair, "=", 2)
 		if len(kv) != 2 {
 			continue
 		}
-		
+
 		key := strings.TrimSpace(kv[0])
 		value := strings.TrimSpace(kv[1])
-		
+
 		switch codecType {
 		case TypeH264:
 			d.parseH264Params(key, value, info)
@@ -164,7 +164,7 @@ func (d *Detector) parseFmtpParams(codecType Type, params string, info *Info) {
 		case TypeJPEGXS:
 			d.parseJPEGXSParams(key, value, info)
 		}
-		
+
 		// Store all parameters
 		info.Parameters[key] = value
 	}
@@ -256,16 +256,16 @@ func (d *Detector) DetectFromRTPPacket(packet *rtp.Packet) (Type, error) {
 	d.mu.RLock()
 	codecType, ok := d.payloadTypeMap[packet.PayloadType]
 	d.mu.RUnlock()
-	
+
 	if ok {
 		return codecType, nil
 	}
-	
+
 	// Try to detect from payload patterns (less reliable)
 	if len(packet.Payload) < 4 {
 		return TypeUnknown, fmt.Errorf("payload too short for detection")
 	}
-	
+
 	// Check for H.264 NAL unit patterns
 	nalType := packet.Payload[0] & 0x1F
 	if nalType >= 1 && nalType <= 23 {
@@ -275,7 +275,7 @@ func (d *Detector) DetectFromRTPPacket(packet *rtp.Packet) (Type, error) {
 		// H.264 aggregation or fragmentation units
 		return TypeH264, nil
 	}
-	
+
 	// Check for HEVC patterns
 	if len(packet.Payload) >= 2 {
 		hevcNalType := (packet.Payload[0] >> 1) & 0x3F
@@ -284,7 +284,7 @@ func (d *Detector) DetectFromRTPPacket(packet *rtp.Packet) (Type, error) {
 			return TypeHEVC, nil
 		}
 	}
-	
+
 	// Check for AV1 OBU patterns
 	if packet.Payload[0]&0x80 == 0 { // Forbidden bit must be 0
 		obuType := (packet.Payload[0] >> 3) & 0x0F
@@ -293,7 +293,7 @@ func (d *Detector) DetectFromRTPPacket(packet *rtp.Packet) (Type, error) {
 			return TypeAV1, nil
 		}
 	}
-	
+
 	return TypeUnknown, fmt.Errorf("unable to detect codec from packet")
 }
 
@@ -302,7 +302,7 @@ func (d *Detector) DetectFromSRTMetadata(metadata map[string]string) (Type, *Inf
 	info := &Info{
 		Parameters: make(map[string]string),
 	}
-	
+
 	// Check for codec in metadata
 	codecStr, ok := metadata["codec"]
 	if !ok {
@@ -312,7 +312,7 @@ func (d *Detector) DetectFromSRTMetadata(metadata map[string]string) (Type, *Inf
 			codecStr, ok = metadata["v_codec"]
 		}
 	}
-	
+
 	if ok {
 		info.Type = ParseType(codecStr)
 		if info.Type == TypeUnknown {
@@ -321,7 +321,7 @@ func (d *Detector) DetectFromSRTMetadata(metadata map[string]string) (Type, *Inf
 	} else {
 		return TypeUnknown, nil, fmt.Errorf("no codec information in metadata")
 	}
-	
+
 	// Extract additional parameters
 	if profile, ok := metadata["profile"]; ok {
 		info.Profile = profile
@@ -344,12 +344,12 @@ func (d *Detector) DetectFromSRTMetadata(metadata map[string]string) (Type, *Inf
 	if chromaStr, ok := metadata["chroma"]; ok {
 		info.ChromaFmt = chromaStr
 	}
-	
+
 	// Copy all metadata to parameters
 	for k, v := range metadata {
 		info.Parameters[k] = v
 	}
-	
+
 	return info.Type, info, nil
 }
 
@@ -363,7 +363,7 @@ func (d *Detector) av1LevelFromIndex(idx int) string {
 		"6.0", "6.1", "6.2", "6.3",
 		"7.0", "7.1", "7.2", "7.3",
 	}
-	
+
 	if idx >= 0 && idx < len(levels) {
 		return levels[idx]
 	}

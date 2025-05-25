@@ -35,18 +35,18 @@ type Stream struct {
 	LastHeartbeat time.Time    `json:"last_heartbeat"`
 
 	// Stream metadata
-	VideoCodec   string  `json:"video_codec"`    // HEVC
-	Resolution   string  `json:"resolution"`     // 1920x1080
-	Bitrate      int64   `json:"bitrate"`        // bits per second
-	FrameRate    float64 `json:"frame_rate"`
-	
+	VideoCodec string  `json:"video_codec"` // HEVC
+	Resolution string  `json:"resolution"`  // 1920x1080
+	Bitrate    int64   `json:"bitrate"`     // bits per second
+	FrameRate  float64 `json:"frame_rate"`
+
 	// Statistics
 	BytesReceived   int64 `json:"bytes_received"`
 	PacketsReceived int64 `json:"packets_received"`
 	PacketsLost     int64 `json:"packets_lost"`
 
 	// Internal fields (not serialized)
-	buffer interface{} `json:"-"` // Will be *RingBuffer
+	buffer interface{}  `json:"-"` // Will be *RingBuffer
 	mu     sync.RWMutex `json:"-"`
 }
 

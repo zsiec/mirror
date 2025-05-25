@@ -12,10 +12,10 @@ type BufferPool struct {
 	bufferSize int
 	poolSize   int
 	logger     *logrus.Logger
-	
+
 	// Pre-allocated buffers
-	freeList   chan *RingBuffer
-	mu         sync.Mutex
+	freeList chan *RingBuffer
+	mu       sync.Mutex
 }
 
 // NewBufferPool creates a new buffer pool
@@ -56,7 +56,7 @@ func (bp *BufferPool) Get(streamID string) *RingBuffer {
 	// Store and return
 	actual, _ := bp.buffers.LoadOrStore(streamID, buffer)
 	actualBuffer := actual.(*RingBuffer)
-	
+
 	// If we lost the race, return the buffer to the pool
 	if actualBuffer != buffer {
 		select {
@@ -73,11 +73,11 @@ func (bp *BufferPool) Get(streamID string) *RingBuffer {
 // Put returns a buffer to the pool (called when stream ends)
 func (bp *BufferPool) Put(streamID string, buffer *RingBuffer) {
 	bp.buffers.Delete(streamID)
-	
+
 	if buffer != nil {
 		buffer.Close()
 		buffer.Reset()
-		
+
 		// Try to return to free list
 		select {
 		case bp.freeList <- buffer:

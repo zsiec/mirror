@@ -13,12 +13,12 @@ type EvictionStrategy interface {
 
 // StreamInfo contains information about a stream for eviction decisions
 type StreamInfo struct {
-	StreamID     string
-	MemoryUsage  int64
-	LastAccess   time.Time
-	Priority     int // Lower number = higher priority (less likely to evict)
-	IsActive     bool
-	CreatedAt    time.Time
+	StreamID    string
+	MemoryUsage int64
+	LastAccess  time.Time
+	Priority    int // Lower number = higher priority (less likely to evict)
+	IsActive    bool
+	CreatedAt   time.Time
 }
 
 // LRUEvictionStrategy evicts least recently used streams
@@ -34,10 +34,10 @@ func (s *LRUEvictionStrategy) SelectStreamsForEviction(streams []StreamInfo, tar
 		// Among inactive streams, evict least recently used
 		return streams[i].LastAccess.Before(streams[j].LastAccess)
 	})
-	
+
 	var selected []string
 	var totalBytes int64
-	
+
 	for _, stream := range streams {
 		if totalBytes >= targetBytes {
 			break
@@ -45,7 +45,7 @@ func (s *LRUEvictionStrategy) SelectStreamsForEviction(streams []StreamInfo, tar
 		selected = append(selected, stream.StreamID)
 		totalBytes += stream.MemoryUsage
 	}
-	
+
 	return selected
 }
 
@@ -61,10 +61,10 @@ func (s *PriorityEvictionStrategy) SelectStreamsForEviction(streams []StreamInfo
 		// If same priority, use LRU
 		return streams[i].LastAccess.Before(streams[j].LastAccess)
 	})
-	
+
 	var selected []string
 	var totalBytes int64
-	
+
 	for _, stream := range streams {
 		if totalBytes >= targetBytes {
 			break
@@ -72,7 +72,7 @@ func (s *PriorityEvictionStrategy) SelectStreamsForEviction(streams []StreamInfo
 		selected = append(selected, stream.StreamID)
 		totalBytes += stream.MemoryUsage
 	}
-	
+
 	return selected
 }
 
@@ -84,10 +84,10 @@ func (s *SizeBasedEvictionStrategy) SelectStreamsForEviction(streams []StreamInf
 	sort.Slice(streams, func(i, j int) bool {
 		return streams[i].MemoryUsage > streams[j].MemoryUsage
 	})
-	
+
 	var selected []string
 	var totalBytes int64
-	
+
 	for _, stream := range streams {
 		if totalBytes >= targetBytes {
 			break
@@ -95,7 +95,7 @@ func (s *SizeBasedEvictionStrategy) SelectStreamsForEviction(streams []StreamInf
 		selected = append(selected, stream.StreamID)
 		totalBytes += stream.MemoryUsage
 	}
-	
+
 	return selected
 }
 
@@ -113,15 +113,15 @@ func (s *HybridEvictionStrategy) SelectStreamsForEviction(streams []StreamInfo, 
 		StreamInfo
 		score float64
 	}
-	
+
 	scored := make([]scoredStream, len(streams))
 	now := time.Now()
-	
+
 	// Find max values for normalization
 	var maxAge time.Duration
 	var maxSize int64
 	maxPriority := 10 // Assume priority is 0-10
-	
+
 	for _, stream := range streams {
 		age := now.Sub(stream.LastAccess)
 		if age > maxAge {
@@ -131,40 +131,40 @@ func (s *HybridEvictionStrategy) SelectStreamsForEviction(streams []StreamInfo, 
 			maxSize = stream.MemoryUsage
 		}
 	}
-	
+
 	// Calculate scores
 	for i, stream := range streams {
 		scored[i].StreamInfo = stream
-		
+
 		// Skip active streams unless necessary
 		if stream.IsActive {
 			scored[i].score = -1 // Negative score to sort last
 			continue
 		}
-		
+
 		// Age score (0-1, older = higher)
 		ageScore := float64(now.Sub(stream.LastAccess)) / float64(maxAge)
-		
+
 		// Size score (0-1, larger = higher)
 		sizeScore := float64(stream.MemoryUsage) / float64(maxSize)
-		
+
 		// Priority score (0-1, lower priority = higher score)
 		priorityScore := float64(stream.Priority) / float64(maxPriority)
-		
+
 		// Combined score
-		scored[i].score = s.AgeWeight*ageScore + 
-		                 s.SizeWeight*sizeScore + 
-		                 s.PriorityWeight*priorityScore
+		scored[i].score = s.AgeWeight*ageScore +
+			s.SizeWeight*sizeScore +
+			s.PriorityWeight*priorityScore
 	}
-	
+
 	// Sort by score (highest first)
 	sort.Slice(scored, func(i, j int) bool {
 		return scored[i].score > scored[j].score
 	})
-	
+
 	var selected []string
 	var totalBytes int64
-	
+
 	for _, stream := range scored {
 		if totalBytes >= targetBytes {
 			break
@@ -175,7 +175,7 @@ func (s *HybridEvictionStrategy) SelectStreamsForEviction(streams []StreamInfo, 
 		selected = append(selected, stream.StreamID)
 		totalBytes += stream.MemoryUsage
 	}
-	
+
 	// If we haven't freed enough, include active streams
 	if totalBytes < targetBytes {
 		for _, stream := range scored {
@@ -188,7 +188,7 @@ func (s *HybridEvictionStrategy) SelectStreamsForEviction(streams []StreamInfo, 
 			}
 		}
 	}
-	
+
 	return selected
 }
 
@@ -215,7 +215,7 @@ func NewStreamTracker() *StreamTracker {
 func (t *StreamTracker) TrackStream(streamID string, priority int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	now := time.Now()
 	t.streams[streamID] = &trackedStream{
 		streamID:   streamID,
@@ -229,7 +229,7 @@ func (t *StreamTracker) TrackStream(streamID string, priority int) {
 func (t *StreamTracker) UpdateAccess(streamID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	if stream, ok := t.streams[streamID]; ok {
 		stream.lastAccess = time.Now()
 	}
@@ -238,7 +238,7 @@ func (t *StreamTracker) UpdateAccess(streamID string) {
 func (t *StreamTracker) SetActive(streamID string, active bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	if stream, ok := t.streams[streamID]; ok {
 		stream.isActive = active
 	}
@@ -247,14 +247,14 @@ func (t *StreamTracker) SetActive(streamID string, active bool) {
 func (t *StreamTracker) RemoveStream(streamID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	delete(t.streams, streamID)
 }
 
 func (t *StreamTracker) GetStreamInfo(streamID string, memoryUsage int64) *StreamInfo {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	
+
 	if stream, ok := t.streams[streamID]; ok {
 		return &StreamInfo{
 			StreamID:    stream.streamID,
@@ -265,7 +265,7 @@ func (t *StreamTracker) GetStreamInfo(streamID string, memoryUsage int64) *Strea
 			CreatedAt:   stream.createdAt,
 		}
 	}
-	
+
 	// Unknown stream, return default
 	return &StreamInfo{
 		StreamID:    streamID,

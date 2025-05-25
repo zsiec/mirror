@@ -91,18 +91,18 @@ func TestTimeBaseConverter_Convert(t *testing.T) {
 			expected: 1000,  // 1000 milliseconds
 		},
 		{
-			name:     "NTSC frame to 90kHz", 
+			name:     "NTSC frame to 90kHz",
 			from:     types.Rational{Num: 1001, Den: 30000}, // NTSC timebase
 			to:       types.Rational{Num: 1, Den: 90000},
-			input:    1,     // 1 unit in NTSC timebase
-			expected: 3003,  // 1 * 90000 * 1001 / (1 * 30000) = 3003
+			input:    1,    // 1 unit in NTSC timebase
+			expected: 3003, // 1 * 90000 * 1001 / (1 * 30000) = 3003
 		},
 		{
 			name:     "Film frame to milliseconds",
 			from:     types.Rational{Num: 1001, Den: 24000}, // Film timebase
 			to:       types.Rational{Num: 1, Den: 1000},
-			input:    24,    // 24 units 
-			expected: 1001,  // 24 * 1000 * 1001 / (1 * 24000) = 1001
+			input:    24,   // 24 units
+			expected: 1001, // 24 * 1000 * 1001 / (1 * 24000) = 1001
 		},
 		{
 			name:     "Identity conversion",
@@ -124,7 +124,7 @@ func TestTimeBaseConverter_Convert(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			converter, err := NewTimeBaseConverter(tt.from, tt.to)
 			require.NoError(t, err)
-			
+
 			result := converter.Convert(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
@@ -141,7 +141,7 @@ func TestTimeBaseConverter_ConvertPrecise(t *testing.T) {
 
 	// 90001 at 90kHz doesn't convert evenly to 48kHz
 	rounded, remainder := converter.ConvertPrecise(90001)
-	
+
 	// Expected: 90001 * 48000 / 90000 = 48000.533...
 	assert.Equal(t, int64(48001), rounded)
 	assert.InDelta(t, -0.466667, remainder, 0.0001)
@@ -187,9 +187,9 @@ func TestTimeBaseConverterChain(t *testing.T) {
 		{
 			name: "Three stage conversion",
 			timeBases: []types.Rational{
-				{Num: 1, Den: 90000},     // 90kHz
-				{Num: 1, Den: 48000},     // 48kHz
-				{Num: 1, Den: 1000},      // milliseconds
+				{Num: 1, Den: 90000}, // 90kHz
+				{Num: 1, Den: 48000}, // 48kHz
+				{Num: 1, Den: 1000},  // milliseconds
 			},
 			input:    90000, // 1 second at 90kHz
 			expected: 1000,  // 1000 milliseconds
@@ -258,7 +258,7 @@ func TestConvertToMilliseconds(t *testing.T) {
 			expected: 1000,
 		},
 		{
-			name:     "NTSC frame to ms", 
+			name:     "NTSC frame to ms",
 			pts:      1,
 			timeBase: types.Rational{Num: 1001, Den: 30000},
 			expected: 33, // 1 frame at 29.97fps ≈ 33.37ms
@@ -267,7 +267,7 @@ func TestConvertToMilliseconds(t *testing.T) {
 			name:     "Invalid time base fallback",
 			pts:      1000,
 			timeBase: types.Rational{Num: 0, Den: 1000}, // Invalid, but fallback should work
-			expected: 0, // Division by zero in fallback
+			expected: 0,                                 // Division by zero in fallback
 		},
 	}
 
@@ -318,7 +318,7 @@ func TestTimeBaseConverterAccuracy(t *testing.T) {
 	// Test accuracy over long durations
 	converter, err := NewTimeBaseConverter(
 		types.Rational{Num: 1001, Den: 30000}, // NTSC 29.97fps
-		types.Rational{Num: 1, Den: 90000},     // 90kHz
+		types.Rational{Num: 1, Den: 90000},    // 90kHz
 	)
 	require.NoError(t, err)
 
@@ -327,10 +327,10 @@ func TestTimeBaseConverterAccuracy(t *testing.T) {
 	oneHourPTS := int64(3600 * 30000 / 1001) // ~107892 units
 
 	converted := converter.Convert(oneHourPTS)
-	
+
 	// Should be exactly 1 hour in 90kHz units
 	expectedPTS := int64(3600 * 90000) // 324,000,000
-	
+
 	// Allow small rounding error (less than 1 frame worth at 90kHz)
 	diff := abs(converted - expectedPTS)
 	assert.Less(t, diff, int64(3003), "Conversion error over 1 hour should be less than 1 frame")

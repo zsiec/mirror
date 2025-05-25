@@ -10,11 +10,11 @@ import (
 
 	srt "github.com/datarhei/gosrt"
 	"github.com/zsiec/mirror/internal/config"
-	"github.com/zsiec/mirror/internal/metrics"
 	"github.com/zsiec/mirror/internal/ingestion/codec"
 	"github.com/zsiec/mirror/internal/ingestion/ratelimit"
 	"github.com/zsiec/mirror/internal/ingestion/registry"
 	"github.com/zsiec/mirror/internal/logger"
+	"github.com/zsiec/mirror/internal/metrics"
 )
 
 // ConnectionHandler is a function that handles new SRT connections
@@ -45,10 +45,10 @@ func NewListener(cfg *config.SRTConfig, codecsCfg *config.CodecsConfig, reg regi
 
 	// Create connection limiter (max 5 connections per stream, 100 total)
 	connLimiter := ratelimit.NewConnectionLimiter(5, 100)
-	
+
 	// Create bandwidth manager (total 1 Gbps)
 	bandwidthManager := ratelimit.NewBandwidthManager(1_000_000_000) // 1 Gbps
-	
+
 	// Create codec detector
 	codecDetector := codec.NewDetector()
 
@@ -84,7 +84,7 @@ func (l *Listener) Start() error {
 	srtConfig.Latency = l.config.Latency
 	srtConfig.PayloadSize = uint32(l.config.PayloadSize)
 	srtConfig.PeerIdleTimeout = l.config.PeerIdleTimeout
-	
+
 	// Configure encryption if enabled
 	if l.config.Encryption.Enabled {
 		if err := l.configureEncryption(&srtConfig); err != nil {
@@ -141,10 +141,10 @@ func (l *Listener) configureEncryption(cfg *srt.Config) error {
 	if len(l.config.Encryption.Passphrase) < 10 {
 		return fmt.Errorf("SRT encryption passphrase must be at least 10 characters long")
 	}
-	
+
 	// Set passphrase
 	cfg.Passphrase = l.config.Encryption.Passphrase
-	
+
 	// Set key length if specified
 	if l.config.Encryption.KeyLength > 0 {
 		switch l.config.Encryption.KeyLength {
@@ -155,12 +155,12 @@ func (l *Listener) configureEncryption(cfg *srt.Config) error {
 		}
 	}
 	// If KeyLength is 0, let SRT auto-select based on passphrase length
-	
+
 	l.logger.WithFields(map[string]interface{}{
 		"key_length": l.config.Encryption.KeyLength,
 		"enabled":    true,
 	}).Info("SRT encryption configured")
-	
+
 	return nil
 }
 
@@ -232,7 +232,7 @@ func (l *Listener) handleConnectionRequest(req srt.ConnRequest) {
 		"stream_id": streamID,
 		"remote":    conn.RemoteAddr().String(),
 	}).Info("New SRT connection")
-	
+
 	// Detect codec from stream ID or use default
 	videoCodec := l.detectCodecFromStreamID(streamID)
 
@@ -260,14 +260,14 @@ func (l *Listener) handleConnectionRequest(req srt.ConnRequest) {
 	// Create connection wrapper
 	now := time.Now()
 	connection := &Connection{
-		streamID:   streamID,
-		conn:       conn,
-		registry:   l.registry,
-		logger:     l.logger,
-		config:     l.config,
-		startTime:  now,
-		lastActive: now,
-		done:       make(chan struct{}),
+		streamID:     streamID,
+		conn:         conn,
+		registry:     l.registry,
+		logger:       l.logger,
+		config:       l.config,
+		startTime:    now,
+		lastActive:   now,
+		done:         make(chan struct{}),
 		maxBandwidth: l.config.MaxBandwidth, // Initialize with configured max
 	}
 
@@ -303,28 +303,27 @@ func (l *Listener) handleConnectionRequest(req srt.ConnRequest) {
 	}
 }
 
-
 func (l *Listener) validateStreamID(streamID string) error {
 	// Stream ID validation rules:
 	// - Must be 1-64 characters long
 	// - Can contain alphanumeric characters, hyphens, and underscores
 	// - Must start with a letter or number
 	// - Cannot contain spaces or special characters
-	
+
 	if len(streamID) == 0 {
 		return fmt.Errorf("stream ID cannot be empty")
 	}
-	
+
 	if len(streamID) > 64 {
 		return fmt.Errorf("stream ID too long (max 64 characters)")
 	}
-	
+
 	// Check format with regex
 	validPattern := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 	if !validPattern.MatchString(streamID) {
 		return fmt.Errorf("stream ID must start with alphanumeric and contain only alphanumeric, hyphen, or underscore characters")
 	}
-	
+
 	return nil
 }
 
@@ -341,21 +340,21 @@ func (l *Listener) monitorConnections() {
 		case <-ticker.C:
 			activeCount := 0
 			var toRemove []string
-			
+
 			l.connections.Range(func(key, value interface{}) bool {
 				streamID := key.(string)
 				conn := value.(*Connection)
-				
+
 				// Check if connection is dead (2x idle timeout for safety)
 				if time.Since(conn.lastActive) > 2*l.config.PeerIdleTimeout {
 					toRemove = append(toRemove, streamID)
-					
+
 					// Force close the connection
 					conn.closeOnce.Do(func() {
 						close(conn.done)
 						conn.conn.Close()
 					})
-					
+
 					l.logger.Warnf("Force closing dead connection: %s", streamID)
 				} else if time.Since(conn.lastActive) > l.config.PeerIdleTimeout {
 					// Normal idle timeout
@@ -365,10 +364,10 @@ func (l *Listener) monitorConnections() {
 				} else {
 					activeCount++
 				}
-				
+
 				return true
 			})
-			
+
 			// Remove dead connections
 			for _, id := range toRemove {
 				l.connections.Delete(id)
@@ -405,17 +404,17 @@ func (l *Listener) TerminateStream(streamID string) error {
 	if !ok {
 		return fmt.Errorf("stream %s not found", streamID)
 	}
-	
+
 	conn := value.(*Connection)
 	conn.Close()
-	
+
 	// Remove from connections map
 	l.connections.Delete(streamID)
-	
+
 	// Release resources
 	l.connLimiter.Release(streamID)
 	l.bandwidthManager.ReleaseBandwidth(streamID)
-	
+
 	l.logger.WithField("stream_id", streamID).Info("Stream terminated")
 	return nil
 }
@@ -426,10 +425,10 @@ func (l *Listener) PauseStream(streamID string) error {
 	if !ok {
 		return fmt.Errorf("stream %s not found", streamID)
 	}
-	
+
 	conn := value.(*Connection)
 	conn.Pause()
-	
+
 	l.logger.WithField("stream_id", streamID).Info("Stream paused")
 	return nil
 }
@@ -440,10 +439,10 @@ func (l *Listener) ResumeStream(streamID string) error {
 	if !ok {
 		return fmt.Errorf("stream %s not found", streamID)
 	}
-	
+
 	conn := value.(*Connection)
 	conn.Resume()
-	
+
 	l.logger.WithField("stream_id", streamID).Info("Stream resumed")
 	return nil
 }
@@ -459,7 +458,7 @@ func (l *Listener) detectCodecFromStreamID(streamID string) string {
 			return codecType.String()
 		}
 	}
-	
+
 	// Try codec suffix
 	streamLower := strings.ToLower(streamID)
 	for _, supported := range l.codecsConfig.Supported {
@@ -469,7 +468,7 @@ func (l *Listener) detectCodecFromStreamID(streamID string) string {
 			return codecType.String()
 		}
 	}
-	
+
 	// Default to preferred codec
 	return l.codecsConfig.Preferred
 }

@@ -8,13 +8,13 @@ import (
 type Detector interface {
 	// DetectBoundaries analyzes a packet and detects frame boundaries
 	DetectBoundaries(pkt *types.TimestampedPacket) (isStart, isEnd bool)
-	
+
 	// GetFrameType determines the frame type from NAL units
 	GetFrameType(nalUnits []types.NALUnit) types.FrameType
-	
+
 	// IsKeyframe checks if the packet contains keyframe data
 	IsKeyframe(data []byte) bool
-	
+
 	// GetCodec returns the codec type this detector handles
 	GetCodec() types.CodecType
 }

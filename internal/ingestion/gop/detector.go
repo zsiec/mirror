@@ -9,22 +9,22 @@ import (
 
 // GOP represents a Group of Pictures
 type GOP struct {
-	ID          uint64
-	StartPTS    int64
-	EndPTS      int64
-	StartTime   time.Time
-	Frames      []*types.VideoFrame
-	Keyframe    *types.VideoFrame // The I/IDR frame that starts this GOP
-	Closed      bool              // Whether this GOP is closed (ended with next keyframe)
-	
+	ID        uint64
+	StartPTS  int64
+	EndPTS    int64
+	StartTime time.Time
+	Frames    []*types.VideoFrame
+	Keyframe  *types.VideoFrame // The I/IDR frame that starts this GOP
+	Closed    bool              // Whether this GOP is closed (ended with next keyframe)
+
 	// Statistics
-	FrameCount  int
-	IFrames     int
-	PFrames     int
-	BFrames     int
-	TotalSize   int64
-	Duration    time.Duration
-	BitRate     int64 // bits per second
+	FrameCount int
+	IFrames    int
+	PFrames    int
+	BFrames    int
+	TotalSize  int64
+	Duration   time.Duration
+	BitRate    int64 // bits per second
 }
 
 // UpdateDuration recalculates the GOP duration based on remaining frames
@@ -35,15 +35,15 @@ func (g *GOP) UpdateDuration() {
 		g.EndPTS = 0
 		return
 	}
-	
+
 	// Find the actual start and end PTS from remaining frames
 	g.StartPTS = g.Frames[0].PTS
 	g.EndPTS = g.Frames[len(g.Frames)-1].PTS
-	
+
 	// Recalculate duration (assuming 90kHz clock)
 	ptsDiff := g.EndPTS - g.StartPTS
 	g.Duration = time.Duration(ptsDiff * 1000000 / 90) // Convert to nanoseconds
-	
+
 	// Update bitrate if we have duration
 	if g.Duration > 0 {
 		g.BitRate = int64(float64(g.TotalSize*8) / g.Duration.Seconds())
@@ -54,30 +54,30 @@ func (g *GOP) UpdateDuration() {
 
 // Detector tracks GOP boundaries and structure
 type Detector struct {
-	streamID    string
-	
+	streamID string
+
 	// Current GOP being built
-	currentGOP  *GOP
-	gopCounter  uint64
-	
+	currentGOP *GOP
+	gopCounter uint64
+
 	// GOP history
-	recentGOPs  []*GOP
-	maxGOPs     int
-	
+	recentGOPs []*GOP
+	maxGOPs    int
+
 	// Statistics
 	avgGOPSize  float64
 	avgDuration time.Duration
-	
-	mu          sync.RWMutex
+
+	mu sync.RWMutex
 }
 
 // NewDetector creates a new GOP detector
 func NewDetector(streamID string) *Detector {
 	return &Detector{
-		streamID:    streamID,
-		maxGOPs:     10, // Keep last 10 GOPs
-		recentGOPs:  make([]*GOP, 0, 10),
-		gopCounter:  0,
+		streamID:   streamID,
+		maxGOPs:    10, // Keep last 10 GOPs
+		recentGOPs: make([]*GOP, 0, 10),
+		gopCounter: 0,
 	}
 }
 
@@ -85,7 +85,7 @@ func NewDetector(streamID string) *Detector {
 func (d *Detector) ProcessFrame(frame *types.VideoFrame) *GOP {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	// Check if this is a keyframe that starts a new GOP
 	if frame.IsKeyframe() {
 		// Close current GOP if exists
@@ -94,7 +94,7 @@ func (d *Detector) ProcessFrame(frame *types.VideoFrame) *GOP {
 			d.closeCurrentGOP(frame.PTS)
 			closedGOP = d.currentGOP
 		}
-		
+
 		// Start new GOP
 		d.gopCounter++
 		d.currentGOP = &GOP{
@@ -106,22 +106,22 @@ func (d *Detector) ProcessFrame(frame *types.VideoFrame) *GOP {
 			FrameCount: 1,
 			IFrames:    1,
 		}
-		
+
 		// Update frame's GOP info
 		frame.GOPId = d.currentGOP.ID
 		frame.GOPPosition = 0
-		
+
 		return closedGOP
 	}
-	
+
 	// Add frame to current GOP
 	if d.currentGOP != nil {
 		d.currentGOP.Frames = append(d.currentGOP.Frames, frame)
-		
+
 		// Update frame's GOP info
 		frame.GOPId = d.currentGOP.ID
 		frame.GOPPosition = len(d.currentGOP.Frames) - 1
-		
+
 		// Update GOP statistics
 		switch frame.Type {
 		case types.FrameTypeI, types.FrameTypeIDR:
@@ -131,11 +131,11 @@ func (d *Detector) ProcessFrame(frame *types.VideoFrame) *GOP {
 		case types.FrameTypeB:
 			d.currentGOP.BFrames++
 		}
-		
+
 		d.currentGOP.FrameCount = len(d.currentGOP.Frames)
 		d.currentGOP.TotalSize += int64(frame.TotalSize)
 	}
-	
+
 	return nil
 }
 
@@ -144,7 +144,7 @@ func (d *Detector) closeCurrentGOP(nextKeyframePTS int64) {
 	if d.currentGOP == nil {
 		return
 	}
-	
+
 	// Calculate GOP duration
 	d.currentGOP.EndPTS = nextKeyframePTS
 	if len(d.currentGOP.Frames) > 0 {
@@ -152,13 +152,13 @@ func (d *Detector) closeCurrentGOP(nextKeyframePTS int64) {
 		d.currentGOP.Duration = lastFrame.CaptureTime.Sub(d.currentGOP.StartTime)
 	}
 	d.currentGOP.Closed = true
-	
+
 	// Add to history
 	d.recentGOPs = append(d.recentGOPs, d.currentGOP)
 	if len(d.recentGOPs) > d.maxGOPs {
 		d.recentGOPs = d.recentGOPs[1:]
 	}
-	
+
 	// Update statistics
 	d.updateStatistics()
 }
@@ -168,15 +168,15 @@ func (d *Detector) updateStatistics() {
 	if len(d.recentGOPs) == 0 {
 		return
 	}
-	
+
 	var totalSize int64
 	var totalDuration time.Duration
-	
+
 	for _, gop := range d.recentGOPs {
 		totalSize += int64(gop.FrameCount)
 		totalDuration += gop.Duration
 	}
-	
+
 	d.avgGOPSize = float64(totalSize) / float64(len(d.recentGOPs))
 	d.avgDuration = totalDuration / time.Duration(len(d.recentGOPs))
 }
@@ -192,7 +192,7 @@ func (d *Detector) GetCurrentGOP() *GOP {
 func (d *Detector) GetRecentGOPs() []*GOP {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	
+
 	result := make([]*GOP, len(d.recentGOPs))
 	copy(result, d.recentGOPs)
 	return result
@@ -202,20 +202,20 @@ func (d *Detector) GetRecentGOPs() []*GOP {
 func (d *Detector) GetStatistics() GOPStatistics {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	
+
 	stats := GOPStatistics{
-		StreamID:         d.streamID,
-		TotalGOPs:        d.gopCounter,
-		AverageGOPSize:   d.avgGOPSize,
-		AverageDuration:  d.avgDuration,
+		StreamID:        d.streamID,
+		TotalGOPs:       d.gopCounter,
+		AverageGOPSize:  d.avgGOPSize,
+		AverageDuration: d.avgDuration,
 	}
-	
+
 	// Calculate current GOP info
 	if d.currentGOP != nil {
 		stats.CurrentGOPFrames = d.currentGOP.FrameCount
 		stats.CurrentGOPSize = d.currentGOP.TotalSize
 	}
-	
+
 	// Calculate pattern from recent GOPs
 	if len(d.recentGOPs) > 0 {
 		var totalI, totalP, totalB int
@@ -231,7 +231,7 @@ func (d *Detector) GetStatistics() GOPStatistics {
 			stats.BFrameRatio = float64(totalB) / float64(total)
 		}
 	}
-	
+
 	return stats
 }
 
@@ -260,19 +260,19 @@ func (g *GOP) CanDropFrame(position int) bool {
 	if position < 0 || position >= len(g.Frames) {
 		return false
 	}
-	
+
 	frame := g.Frames[position]
-	
+
 	// Never drop keyframes
 	if frame.IsKeyframe() {
 		return false
 	}
-	
+
 	// B frames can always be dropped
 	if frame.Type == types.FrameTypeB {
 		return true
 	}
-	
+
 	// P frames can be dropped if no B frames depend on them
 	if frame.Type == types.FrameTypeP {
 		// Check if any B frames after this P frame might depend on it
@@ -288,6 +288,6 @@ func (g *GOP) CanDropFrame(position int) bool {
 		}
 		return true
 	}
-	
+
 	return false
 }

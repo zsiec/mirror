@@ -16,35 +16,35 @@ import (
 // Now also parses MPEG-TS and emits TimestampedPackets
 type SRTConnectionAdapter struct {
 	*srt.Connection
-	
+
 	// MPEG-TS parsing
 	mpegtsParser    *mpegts.Parser
 	timestampMapper *timestamp.TimestampMapper
-	
+
 	// Output channels for video-aware pipeline
-	videoOutput     chan types.TimestampedPacket
-	audioOutput     chan types.TimestampedPacket
-	
+	videoOutput chan types.TimestampedPacket
+	audioOutput chan types.TimestampedPacket
+
 	// Context for lifecycle
-	ctx             context.Context
-	cancel          context.CancelFunc
-	
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// State tracking
-	lastPCR         int64
-	pcrWallTime     time.Time
-	videoPID        uint16
-	audioPID        uint16
-	
+	lastPCR     int64
+	pcrWallTime time.Time
+	videoPID    uint16
+	audioPID    uint16
+
 	// B-frame detection and handling
 	hasBFrames           bool
 	frameReorderingDelay int64 // in 90kHz units
 	lastFramePTS         int64 // For B-frame detection
 	frameCount           int   // Count frames for detection window
 	bFrameDetected       bool  // Detection complete flag
-	
-	logger          logger.Logger
-	mu              sync.RWMutex
-	wg              sync.WaitGroup
+
+	logger logger.Logger
+	mu     sync.RWMutex
+	wg     sync.WaitGroup
 }
 
 // Ensure it implements both interfaces
@@ -56,9 +56,9 @@ func NewSRTConnectionAdapter(conn *srt.Connection) *SRTConnectionAdapter {
 	if conn == nil {
 		return nil
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	adapter := &SRTConnectionAdapter{
 		Connection:      conn,
 		mpegtsParser:    mpegts.NewParser(),
@@ -69,11 +69,11 @@ func NewSRTConnectionAdapter(conn *srt.Connection) *SRTConnectionAdapter {
 		cancel:          cancel,
 		logger:          logger.FromContext(ctx).WithField("stream_id", conn.GetStreamID()),
 	}
-	
+
 	// Start processing in background
 	adapter.wg.Add(1)
 	go adapter.processData()
-	
+
 	return adapter
 }
 
@@ -119,9 +119,9 @@ func (a *SRTConnectionAdapter) GetAudioOutput() <-chan types.TimestampedPacket {
 // processData reads from SRT connection and parses MPEG-TS
 func (a *SRTConnectionAdapter) processData() {
 	defer a.wg.Done()
-	
+
 	buffer := make([]byte, mpegts.PacketSize*7) // Read 7 TS packets at a time
-	
+
 	for {
 		select {
 		case <-a.ctx.Done():
@@ -135,14 +135,14 @@ func (a *SRTConnectionAdapter) processData() {
 				}
 				return
 			}
-			
+
 			// Parse MPEG-TS packets
 			packets, err := a.mpegtsParser.Parse(buffer[:n])
 			if err != nil {
 				a.logger.WithError(err).Debug("Failed to parse MPEG-TS")
 				continue
 			}
-			
+
 			// Process each packet
 			for _, tsPkt := range packets {
 				a.processTSPacket(tsPkt)
@@ -160,12 +160,12 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 		a.pcrWallTime = time.Now()
 		a.mu.Unlock()
 	}
-	
+
 	// Only process packets with payload
 	if !tsPkt.PayloadExists || len(tsPkt.Payload) == 0 {
 		return
 	}
-	
+
 	// Determine packet type
 	packetType := types.PacketTypeData
 	if a.mpegtsParser.IsVideoPID(tsPkt.PID) {
@@ -173,12 +173,12 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 	} else if a.mpegtsParser.IsAudioPID(tsPkt.PID) {
 		packetType = types.PacketTypeAudio
 	}
-	
+
 	// Skip non-media packets
 	if packetType == types.PacketTypeData {
 		return
 	}
-	
+
 	// Create timestamped packet
 	now := time.Now()
 	tspkt := types.TimestampedPacket{
@@ -187,7 +187,7 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 		StreamID:    a.GetStreamID(),
 		Type:        packetType,
 	}
-	
+
 	// Use PTS if available, otherwise calculate from PCR
 	if tsPkt.HasPTS {
 		tspkt.PTS = tsPkt.PTS
@@ -198,7 +198,7 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 			if packetType == types.PacketTypeVideo {
 				// Detect B-frames during initial frames
 				a.detectBFrames(tspkt.PTS)
-				
+
 				if a.hasBFrames {
 					// Apply reordering delay for B-frames
 					tspkt.DTS = tspkt.PTS - a.frameReorderingDelay
@@ -220,12 +220,12 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 			// Convert to 90kHz units
 			elapsedPTS := int64(elapsed.Seconds() * 90000)
 			tspkt.PTS = a.lastPCR + elapsedPTS
-			
+
 			// DTS calculation with dynamic B-frame detection
 			if packetType == types.PacketTypeVideo {
 				// Detect B-frames during initial frames
 				a.detectBFrames(tspkt.PTS)
-				
+
 				if a.hasBFrames {
 					// Apply reordering delay for B-frames
 					tspkt.DTS = tspkt.PTS - a.frameReorderingDelay
@@ -240,7 +240,7 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 		}
 		a.mu.RUnlock()
 	}
-	
+
 	// Detect keyframes in video packets
 	if packetType == types.PacketTypeVideo && tsPkt.PayloadStart {
 		// Simple keyframe detection - look for start codes
@@ -249,7 +249,7 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 		}
 		tspkt.Flags |= types.PacketFlagFrameStart
 	}
-	
+
 	// Send to appropriate output channel
 	var outputChan chan types.TimestampedPacket
 	if packetType == types.PacketTypeVideo {
@@ -257,7 +257,7 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 	} else {
 		outputChan = a.audioOutput
 	}
-	
+
 	select {
 	case outputChan <- tspkt:
 	case <-a.ctx.Done():
@@ -274,12 +274,12 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 func (a *SRTConnectionAdapter) isKeyframe(data []byte) bool {
 	// Look for H.264/HEVC NAL units in PES payload
 	// This is simplified - real implementation would properly parse PES
-	
+
 	// Skip PES header
 	if len(data) < 9 {
 		return false
 	}
-	
+
 	// Look for start codes and check NAL type
 	for i := 0; i < len(data)-4; i++ {
 		if data[i] == 0 && data[i+1] == 0 && data[i+2] == 1 {
@@ -292,7 +292,7 @@ func (a *SRTConnectionAdapter) isKeyframe(data []byte) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
@@ -300,10 +300,10 @@ func (a *SRTConnectionAdapter) isKeyframe(data []byte) bool {
 func (a *SRTConnectionAdapter) SetPIDs(videoPID, audioPID uint16) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	
+
 	a.videoPID = videoPID
 	a.audioPID = audioPID
-	
+
 	a.mpegtsParser.SetVideoPID(videoPID)
 	a.mpegtsParser.SetAudioPID(audioPID)
 }
@@ -312,25 +312,25 @@ func (a *SRTConnectionAdapter) SetPIDs(videoPID, audioPID uint16) {
 func (a *SRTConnectionAdapter) detectBFrames(currentPTS int64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	
+
 	// Skip if already detected
 	if a.bFrameDetected {
 		return
 	}
-	
+
 	// Need at least 2 frames to detect
 	if a.frameCount == 0 {
 		a.lastFramePTS = currentPTS
 		a.frameCount++
 		return
 	}
-	
+
 	// B-frames are present if PTS goes backwards
 	// I P B B -> PTS order: 0, 3, 1, 2 (B-frames have lower PTS than previous P-frame)
 	if currentPTS < a.lastFramePTS {
 		a.hasBFrames = true
 		a.bFrameDetected = true
-		
+
 		// Common configurations:
 		// - 2 B-frames between references: delay = 2 frames
 		// - 3 B-frames between references: delay = 3 frames
@@ -339,16 +339,16 @@ func (a *SRTConnectionAdapter) detectBFrames(currentPTS int64) {
 		// At 30fps: ~3003 per frame, at 25fps: 3600 per frame
 		// Use 3600 for safety
 		a.frameReorderingDelay = framesDelay * 3600
-		
+
 		a.logger.WithFields(map[string]interface{}{
 			"stream_id": a.GetStreamID(),
 			"delay_ms":  a.frameReorderingDelay * 1000 / 90000,
 		}).Info("B-frames detected in video stream")
 	}
-	
+
 	a.lastFramePTS = currentPTS
 	a.frameCount++
-	
+
 	// After analyzing first 30 frames, assume no B-frames if not detected
 	if a.frameCount >= 30 && !a.hasBFrames {
 		a.bFrameDetected = true

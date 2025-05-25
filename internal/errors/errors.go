@@ -141,11 +141,11 @@ func GetAppError(err error) (*AppError, bool) {
 
 // StreamError represents a stream-specific error with additional context
 type StreamError struct {
-	StreamID  string    `json:"stream_id"`
-	Component string    `json:"component"`
-	Operation string    `json:"operation"`
-	Err       error     `json:"-"`
-	Timestamp time.Time `json:"timestamp"`
+	StreamID  string                 `json:"stream_id"`
+	Component string                 `json:"component"`
+	Operation string                 `json:"operation"`
+	Err       error                  `json:"-"`
+	Timestamp time.Time              `json:"timestamp"`
 	Details   map[string]interface{} `json:"details,omitempty"`
 }
 

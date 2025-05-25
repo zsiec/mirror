@@ -50,7 +50,7 @@ func (m *MockStreamConnection) Read(p []byte) (n int, err error) {
 	if atomic.LoadInt32(&m.closed) == 1 {
 		return 0, io.EOF
 	}
-	
+
 	select {
 	case data := <-m.data:
 		n = copy(p, data)
@@ -117,39 +117,39 @@ func (m *MockStreamConnection) GenerateData(size int, interval time.Duration, co
 func TestBackpressure_DirectBufferPressure(t *testing.T) {
 	t.Skip("Backpressure test needs to be updated for unified video-aware handler")
 	streamID := "test-stream"
-	
+
 	// Create mock SRT connection
 	mockStream := NewMockStreamConnection(streamID)
 	mockStream.maxBandwidth = 52428800 // 50 Mbps default
 	mockConn := &mockSRTConnection{
 		MockStreamConnection: mockStream,
 	}
-	
+
 	// Create memory controller
 	memCtrl := memory.NewController(100*1024*1024, 50*1024*1024) // 100MB total
-	
+
 	// Create a properly sized buffer with low bitrate to trigger backpressure
 	// Using 80Kbps (10KB/s) bitrate means 300KB buffer for 30 seconds
 	_, err := buffer.NewProperSizedBuffer(streamID, 80*1024, memCtrl) // 80Kbps
 	require.NoError(t, err)
-	
+
 	// Create queue for the handler
 	queue, err := queue.NewHybridQueue(streamID, 1000, t.TempDir())
 	require.NoError(t, err)
 	defer queue.Close()
-	
+
 	// Create StreamHandler using the mock connection directly
 	// The handler will detect it's not a known adapter type and use basic handling
 	handler := NewStreamHandler(context.Background(), streamID, mockConn, queue, memCtrl, logrus.New())
-	
+
 	// Test applying backpressure
 	initialBW := mockConn.GetMaxBW()
 	handler.applyBackpressure() // No pressure parameter in new API
-	
+
 	// Check that bandwidth was reduced
 	newBW := mockConn.GetMaxBW()
 	assert.Less(t, newBW, initialBW, "Bandwidth should be reduced under pressure")
-	
+
 	// Test releasing backpressure
 	handler.releaseBackpressure()
 	finalBW := mockConn.GetMaxBW()
@@ -161,7 +161,7 @@ func TestBackpressure_QueuePressure(t *testing.T) {
 	t.Skip("Backpressure test needs to be updated for unified video-aware handler")
 	tempDir := t.TempDir()
 	streamID := "queue-pressure-test"
-	
+
 	// Create components
 	cfg := &config.IngestionConfig{
 		Buffer: config.BufferConfig{
@@ -170,40 +170,40 @@ func TestBackpressure_QueuePressure(t *testing.T) {
 		},
 		QueueDir: tempDir,
 	}
-	
+
 	mgr, err := createTestManager(cfg)
 	require.NoError(t, err)
 	defer mgr.Stop()
-	
+
 	// Override memory controller with smaller limits for testing
 	mgr.memoryController = memory.NewController(10*1024*1024, 5*1024*1024) // 10MB total, 5MB per stream
-	
+
 	// Create connection
 	conn := NewMockStreamConnection(streamID)
 	rtpConn := &mockRTPConnection{MockStreamConnection: conn}
-	
+
 	// Create queue and buffer for the handler
 	queue, err := queue.NewHybridQueue(streamID, 1000, tempDir)
 	require.NoError(t, err)
 	defer queue.Close()
-	
+
 	buffer, err := buffer.NewProperSizedBuffer(streamID, 1024*1024, mgr.memoryController)
 	require.NoError(t, err)
 	defer buffer.Close()
-	
+
 	// Create RTP adapter to wrap the connection
 	// Note: RTP adapter expects an rtp.Session, but we have a mock
 	// For testing, we'll use the mock directly as it implements StreamConnection
 	handler := NewStreamHandler(context.Background(), streamID, rtpConn, queue, mgr.memoryController, mgr.logger)
-	
+
 	// Simulate high pressure and verify RTCP is sent
 	handler.applyBackpressure()
-	
+
 	// Check that RTCP feedback was logged
 	conn.bandwidthMu.RLock()
 	rtcpSent := len(conn.backpressureLog) > 0
 	conn.bandwidthMu.RUnlock()
-	
+
 	assert.True(t, rtcpSent, "RTCP feedback should be sent under pressure")
 }
 
@@ -211,7 +211,7 @@ func TestBackpressure_QueuePressure(t *testing.T) {
 func TestBackpressure_MemoryEviction(t *testing.T) {
 	// Create memory controller with low limits
 	memCtrl := memory.NewController(1*1024*1024, 512*1024) // 1MB total, 512KB per stream
-	
+
 	evictionCount := 0
 	memCtrl.SetEvictionCallback(func(streamID string, bytes int64) {
 		evictionCount++
@@ -219,25 +219,25 @@ func TestBackpressure_MemoryEviction(t *testing.T) {
 		// Simulate actual memory release after eviction
 		memCtrl.ReleaseMemory(streamID, bytes)
 	})
-	
+
 	// First allocate enough to get close to the limit
 	// This ensures we're above 80% pressure when we need eviction
 	err := memCtrl.RequestMemory("stream1", 450*1024) // 450KB
 	require.NoError(t, err)
-	
+
 	err = memCtrl.RequestMemory("stream2", 450*1024) // 450KB
 	require.NoError(t, err)
-	
+
 	// Now we're at 900KB out of 1MB (90% pressure)
 	// Next allocation should trigger eviction
 	err = memCtrl.RequestMemory("stream3", 200*1024) // 200KB more
 	if err != nil {
 		t.Logf("Stream3 allocation result: %v", err)
 	}
-	
+
 	// Should have triggered evictions due to memory pressure
 	assert.Greater(t, evictionCount, 0, "Evictions should occur under memory pressure")
-	
+
 	// Check final pressure
 	pressure := memCtrl.GetPressure()
 	t.Logf("Final memory pressure: %.2f", pressure)
@@ -274,23 +274,22 @@ func (m *mockRTPConnection) SendRTCP(pkt rtcp.Packet) error {
 	return m.MockStreamConnection.SendRTCP(pkt)
 }
 
-
 // Helper function to create test manager
 func createTestManager(cfg *config.IngestionConfig) (*Manager, error) {
 	// Create logger
 	log := logrus.New()
 	log.SetLevel(logrus.DebugLevel)
-	
+
 	// Create memory controller with realistic memory for testing
 	// For 10Mbps streams with 30s buffer: 10*30/8 = 37.5MB per stream
 	memController := memory.NewController(200*1024*1024, 50*1024*1024) // 200MB total, 50MB per stream
-	
+
 	// Create mock registry
 	reg := &mockRegistry{
 		streams: make(map[string]*registry.Stream),
 		mu:      sync.RWMutex{},
 	}
-	
+
 	return &Manager{
 		config:           cfg,
 		registry:         reg,

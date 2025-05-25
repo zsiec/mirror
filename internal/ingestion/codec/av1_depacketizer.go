@@ -11,24 +11,24 @@ import (
 // AV1Depacketizer handles depacketization of AV1 RTP streams
 // Based on draft-ietf-payload-av1 (RTP Payload Format for AV1)
 type AV1Depacketizer struct {
-	fragments      [][]byte
-	lastSeq        uint16
-	fragmentedOBU  bool
-	obuType        uint8
+	fragments       [][]byte
+	lastSeq         uint16
+	fragmentedOBU   bool
+	obuType         uint8
 	temporalUnitBuf [][]byte
 }
 
 // OBU (Open Bitstream Unit) type constants
 const (
-	obuSequenceHeader        = 1
-	obuTemporalDelimiter     = 2
-	obuFrameHeader           = 3
-	obuTileGroup             = 4
-	obuMetadata              = 5
-	obuFrame                 = 6
-	obuRedundantFrameHeader  = 7
-	obuTileList              = 8
-	obuPadding               = 15
+	obuSequenceHeader       = 1
+	obuTemporalDelimiter    = 2
+	obuFrameHeader          = 3
+	obuTileGroup            = 4
+	obuMetadata             = 5
+	obuFrame                = 6
+	obuRedundantFrameHeader = 7
+	obuTileList             = 8
+	obuPadding              = 15
 )
 
 // AV1 aggregation header constants
@@ -36,7 +36,6 @@ const (
 	av1AggregationHeaderSize = 1
 	av1PayloadHeaderSize     = 1
 )
-
 
 // Depacketize processes an RTP packet and returns complete OBUs
 func (d *AV1Depacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
@@ -49,11 +48,11 @@ func (d *AV1Depacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 
 	// Parse AV1 aggregation header (first byte)
 	aggHeader := payload[0]
-	zBit := (aggHeader & 0x80) != 0      // First OBU fragment indicator
-	yBit := (aggHeader & 0x40) != 0      // Last OBU fragment indicator
-	wField := (aggHeader & 0x30) >> 4    // Number of OBU elements (0-3)
-	nBit := (aggHeader & 0x08) != 0      // New temporal unit indicator
-	
+	zBit := (aggHeader & 0x80) != 0   // First OBU fragment indicator
+	yBit := (aggHeader & 0x40) != 0   // Last OBU fragment indicator
+	wField := (aggHeader & 0x30) >> 4 // Number of OBU elements (0-3)
+	nBit := (aggHeader & 0x08) != 0   // New temporal unit indicator
+
 	// Skip aggregation header
 	payload = payload[1:]
 
@@ -130,7 +129,7 @@ func (d *AV1Depacketizer) processSingleOBU(payload []byte, zBit, yBit bool) ([]b
 		// First fragment of OBU
 		d.fragments = [][]byte{}
 		d.fragmentedOBU = true
-		
+
 		// Parse OBU header to get type
 		d.obuType, _ = d.parseOBUHeader(payload)
 	} else if !d.fragmentedOBU {
@@ -200,7 +199,7 @@ func (d *AV1Depacketizer) parseOBUHeader(data []byte) (uint8, error) {
 	}
 
 	header := data[0]
-	
+
 	// OBU header format:
 	// forbidden_bit (1) | type (4) | extension_flag (1) | has_size_field (1) | reserved (1)
 	if (header & 0x80) != 0 {
@@ -290,22 +289,22 @@ func NewAV1DepacketizerWithMemory(streamID string, memController *memory.Control
 func (d *AV1DepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 	// Estimate memory needed for this packet
 	estimatedSize := int64(len(packet.Payload) * 2) // Conservative estimate
-	
+
 	// Check if we would exceed memory limit
 	if d.currentUsage+estimatedSize > d.memoryLimit {
 		return nil, fmt.Errorf("frame size would exceed memory limit: current=%d, needed=%d, limit=%d",
 			d.currentUsage, estimatedSize, d.memoryLimit)
 	}
-	
+
 	// Request memory from controller
 	if err := d.memController.RequestMemory(d.streamID, estimatedSize); err != nil {
 		return nil, fmt.Errorf("memory allocation failed: %w", err)
 	}
 	d.currentUsage += estimatedSize
-	
+
 	// Process packet
 	obus, err := d.AV1Depacketizer.Depacketize(packet)
-	
+
 	// If we got complete OBUs, release fragment memory
 	if len(obus) > 0 {
 		// Calculate actual memory used
@@ -313,18 +312,18 @@ func (d *AV1DepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, e
 		for _, obu := range obus {
 			actualSize += int64(len(obu))
 		}
-		
+
 		// Release excess memory
 		if estimatedSize > actualSize {
 			excessMemory := estimatedSize - actualSize
 			d.memController.ReleaseMemory(d.streamID, excessMemory)
 			d.currentUsage -= excessMemory
 		}
-		
+
 		// Reset fragment memory tracking
 		d.currentUsage = 0
 	}
-	
+
 	return obus, err
 }
 
@@ -335,6 +334,6 @@ func (d *AV1DepacketizerWithMemory) Reset() {
 		d.memController.ReleaseMemory(d.streamID, d.currentUsage)
 		d.currentUsage = 0
 	}
-	
+
 	d.AV1Depacketizer.Reset()
 }

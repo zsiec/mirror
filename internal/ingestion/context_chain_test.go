@@ -113,7 +113,7 @@ func TestStreamHandler_ContextCancellation(t *testing.T) {
 func TestVideoPipeline_ContextPropagation(t *testing.T) {
 	// This test verifies that the video pipeline receives the proper context
 	// from the stream handler, which in turn gets it from the manager
-	
+
 	manager, mr := setupTestManager(t)
 	defer mr.Close()
 

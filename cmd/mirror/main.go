@@ -11,7 +11,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
-	
+
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/internal/ingestion"
 	"github.com/zsiec/mirror/internal/logger"
@@ -26,7 +26,7 @@ func main() {
 		showVersion    bool
 		mutexProfiling bool
 	)
-	
+
 	flag.StringVar(&configPath, "config", "configs/default.yaml", "Path to configuration file")
 	flag.BoolVar(&showVersion, "version", false, "Show version information")
 	flag.BoolVar(&mutexProfiling, "mutex-profiling", false, "Enable mutex profiling for debugging")
@@ -104,17 +104,17 @@ func main() {
 		if err != nil {
 			log.WithError(err).Fatal("Failed to create ingestion manager")
 		}
-		
+
 		// Register ingestion routes
 		ingestionHandlers := ingestion.NewHandlers(ingestionMgr, log)
 		srv.RegisterRoutes(ingestionHandlers.RegisterRoutes)
-		
+
 		// Start ingestion
 		if err := ingestionMgr.Start(); err != nil {
 			log.WithError(err).Fatal("Failed to start ingestion manager")
 		}
 		log.Info("Ingestion manager started")
-		
+
 		defer func() {
 			if err := ingestionMgr.Stop(); err != nil {
 				log.WithError(err).Error("Failed to stop ingestion manager")

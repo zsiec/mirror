@@ -33,14 +33,14 @@ func TestGenerateStreamID(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			id := GenerateStreamID(tt.streamType, tt.sourceAddr)
 			tt.validate(t, id)
 		})
 	}
-	
+
 	// Test uniqueness
 	id1 := GenerateStreamID(StreamTypeSRT, "addr1")
 	id2 := GenerateStreamID(StreamTypeSRT, "addr2")
@@ -53,7 +53,7 @@ func TestStream_Stats(t *testing.T) {
 		PacketsReceived: 100,
 		PacketsLost:     5,
 	}
-	
+
 	// Verify stats
 	assert.Equal(t, int64(50000), stream.BytesReceived)
 	assert.Equal(t, int64(100), stream.PacketsReceived)
@@ -66,13 +66,13 @@ func TestStream_Timing(t *testing.T) {
 		Status:        StatusActive,
 		LastHeartbeat: time.Now(),
 	}
-	
+
 	// Test stream with old heartbeat
 	stream2 := &Stream{
 		Status:        StatusActive,
 		LastHeartbeat: time.Now().Add(-5 * time.Minute),
 	}
-	
+
 	// Verify LastHeartbeat is set
 	assert.NotZero(t, stream1.LastHeartbeat)
 	assert.NotZero(t, stream2.LastHeartbeat)
@@ -105,7 +105,7 @@ func TestStream_Status(t *testing.T) {
 			status: StatusPaused,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stream := &Stream{
@@ -121,12 +121,12 @@ func TestStreamCounter(t *testing.T) {
 	id1 := GenerateStreamID(StreamTypeSRT, "addr1")
 	id2 := GenerateStreamID(StreamTypeSRT, "addr2")
 	id3 := GenerateStreamID(StreamTypeRTP, "addr3")
-	
+
 	// All IDs should be unique
 	assert.NotEqual(t, id1, id2)
 	assert.NotEqual(t, id1, id3)
 	assert.NotEqual(t, id2, id3)
-	
+
 	// Should have correct prefixes
 	assert.Contains(t, id1, "srt_")
 	assert.Contains(t, id2, "srt_")

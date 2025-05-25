@@ -11,25 +11,25 @@ import (
 
 // SyncStatusResponse represents the sync status for a stream
 type SyncStatusResponse struct {
-	StreamID string                 `json:"stream_id"`
-	Status   sync.SyncStatusType    `json:"status"`
-	Video    *TrackStatusDTO        `json:"video,omitempty"`
-	Audio    *TrackStatusDTO        `json:"audio,omitempty"`
-	Drift    *DriftStatusDTO        `json:"drift,omitempty"`
-	Time     time.Time              `json:"time"`
+	StreamID string              `json:"stream_id"`
+	Status   sync.SyncStatusType `json:"status"`
+	Video    *TrackStatusDTO     `json:"video,omitempty"`
+	Audio    *TrackStatusDTO     `json:"audio,omitempty"`
+	Drift    *DriftStatusDTO     `json:"drift,omitempty"`
+	Time     time.Time           `json:"time"`
 }
 
 // TrackStatusDTO represents the status of a single track
 type TrackStatusDTO struct {
-	Type         string        `json:"type"`
-	LastPTS      int64         `json:"last_pts"`
-	LastDTS      int64         `json:"last_dts"`
-	BaseTime     time.Time     `json:"base_time"`
-	PacketCount  int64         `json:"packet_count"`
-	DroppedCount int64         `json:"dropped_count"`
-	WrapCount    int           `json:"wrap_count"`
-	JumpCount    int           `json:"jump_count"`
-	ErrorCount   int           `json:"error_count"`
+	Type         string    `json:"type"`
+	LastPTS      int64     `json:"last_pts"`
+	LastDTS      int64     `json:"last_dts"`
+	BaseTime     time.Time `json:"base_time"`
+	PacketCount  int64     `json:"packet_count"`
+	DroppedCount int64     `json:"dropped_count"`
+	WrapCount    int       `json:"wrap_count"`
+	JumpCount    int       `json:"jump_count"`
+	ErrorCount   int       `json:"error_count"`
 }
 
 // DriftStatusDTO represents drift statistics
@@ -64,7 +64,7 @@ func (m *Manager) HandleStreamSync(w http.ResponseWriter, r *http.Request) {
 
 	// Get sync statistics
 	stats := syncManager.GetStatistics()
-	
+
 	// Build response
 	response := SyncStatusResponse{
 		StreamID: streamID,
@@ -136,7 +136,7 @@ func (m *Manager) HandleStreamSync(w http.ResponseWriter, r *http.Request) {
 	// Add drift info if available
 	if response.Video != nil && response.Audio != nil {
 		response.Drift = &DriftStatusDTO{}
-		
+
 		if currentDriftMs, ok := stats["current_drift_ms"].(int64); ok {
 			response.Drift.CurrentDrift = time.Duration(currentDriftMs) * time.Millisecond
 		}
