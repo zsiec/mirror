@@ -102,18 +102,21 @@ func (rb *RingBuffer) Write(data []byte) (int, error) {
 		}
 	}
 
-	// Check available space
-	available := rb.size - (rb.written - rb.read)
+	// Check available space atomically to avoid race conditions
+	currentWritten := rb.written
+	currentRead := rb.read
+	available := rb.size - (currentWritten - currentRead)
 	if available < dataLen {
-		pressure := float64(rb.written-rb.read) / float64(rb.size)
+		pressure := float64(currentWritten-currentRead) / float64(rb.size)
 		
 		// Track consecutive drops
-		if time.Since(rb.lastDropTime) < time.Second {
+		now := time.Now()
+		if now.Sub(rb.lastDropTime) < time.Second {
 			rb.consecutiveDrops++
 		} else {
 			rb.consecutiveDrops = 1
 		}
-		rb.lastDropTime = time.Now()
+		rb.lastDropTime = now
 		
 		// Update metrics
 		atomic.AddInt64(&rb.drops, dataLen)

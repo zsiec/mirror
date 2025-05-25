@@ -616,7 +616,8 @@ func (h *StreamHandler) Stop() error {
 // GetStats returns current statistics
 func (h *StreamHandler) GetStats() StreamStats {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
+	started := h.started
+	h.mu.RUnlock()
 	
 	stats := StreamStats{
 		StreamID:        h.streamID,
@@ -630,6 +631,8 @@ func (h *StreamHandler) GetStats() StreamStats {
 		KeyframeCount:   h.keyframeCount.Load(),
 		PFrameCount:     h.pFrameCount.Load(),
 		BFrameCount:     h.bFrameCount.Load(),
+		Backpressure:    h.backpressure.Load(),
+		Started:         started,
 	}
 	
 	// Get queue stats if available
@@ -691,7 +694,9 @@ func (h *StreamHandler) calculateBitrate() float64 {
 	for i < len(h.bitrateWindow) && h.bitrateWindow[i].timestamp.Before(cutoff) {
 		i++
 	}
-	h.bitrateWindow = h.bitrateWindow[i:]
+	if i > 0 {
+		h.bitrateWindow = h.bitrateWindow[i:]
+	}
 	
 	// Need at least 2 points to calculate bitrate
 	if len(h.bitrateWindow) < 2 {
@@ -821,11 +826,34 @@ func (h *StreamHandler) storeRecentFrame(frame *types.VideoFrame) {
 		FrameNumber:  frame.FrameNumber,
 		Duration:     frame.Duration,
 		PresentationTime: frame.PresentationTime,
-		// Don't copy NALUnits to save memory
+		GOPPosition:  frame.GOPPosition,
+		// Don't copy NALUnits to save memory but copy the length
 	}
 	
-	// Copy flags
+	// Copy flags atomically
 	frameCopy.Flags = frame.Flags
+	
+	// Deep copy NAL units if present (first few bytes for frame type detection)
+	if len(frame.NALUnits) > 0 {
+		nalCount := len(frame.NALUnits)
+		if nalCount > 1 {
+			nalCount = 1
+		}
+		frameCopy.NALUnits = make([]types.NALUnit, 0, nalCount)
+		// Only copy the first NAL unit header for type detection
+		if len(frame.NALUnits[0].Data) > 0 {
+			headerSize := len(frame.NALUnits[0].Data)
+			if headerSize > 32 {
+				headerSize = 32 // Just header
+			}
+			nalCopy := types.NALUnit{
+				Type: frame.NALUnits[0].Type,
+				Data: make([]byte, headerSize),
+			}
+			copy(nalCopy.Data, frame.NALUnits[0].Data[:headerSize])
+			frameCopy.NALUnits = append(frameCopy.NALUnits, nalCopy)
+		}
+	}
 	
 	// Now lock and store
 	h.recentFramesMu.Lock()

@@ -81,12 +81,18 @@ func (b *Buffer) AddGOP(gop *GOP) {
 	elem := b.gops.PushBack(gop)
 	b.gopIndex[gop.ID] = elem
 	
-	// Update frame index
+	// Update frame index - create locations outside of loop to avoid races
+	frameLocations := make([]*FrameLocation, len(gop.Frames))
 	for i, frame := range gop.Frames {
-		b.frameIndex[frame.ID] = &FrameLocation{
+		frameLocations[i] = &FrameLocation{
 			GOP:      gop,
 			Position: i,
 		}
+	}
+	
+	// Now update the index atomically
+	for i, frame := range gop.Frames {
+		b.frameIndex[frame.ID] = frameLocations[i]
 	}
 	
 	// Update metrics
@@ -279,25 +285,34 @@ func (b *Buffer) dropBFrames(gopCount int) []*types.VideoFrame {
 	for elem := b.gops.Front(); elem != nil && (gopCount < 0 || count < gopCount); elem = elem.Next() {
 		gop := elem.Value.(*GOP)
 		
-		// Drop B frames from this GOP
-		for i := len(gop.Frames) - 1; i >= 0; i-- {
-			frame := gop.Frames[i]
+		// Collect B frames to drop first to avoid modifying slice while iterating
+		var bFramesToDrop []int
+		for i, frame := range gop.Frames {
 			if frame.Type == types.FrameTypeB {
-				dropped = append(dropped, frame)
-				
-				// Remove from GOP
-				gop.Frames = append(gop.Frames[:i], gop.Frames[i+1:]...)
-				gop.BFrames--
-				gop.FrameCount--
-				gop.TotalSize -= int64(frame.TotalSize)
-				
-				// Remove from index
-				delete(b.frameIndex, frame.ID)
+				bFramesToDrop = append(bFramesToDrop, i)
 			}
 		}
 		
+		// Drop B frames from highest index to lowest to maintain slice integrity
+		for i := len(bFramesToDrop) - 1; i >= 0; i-- {
+			frameIdx := bFramesToDrop[i]
+			frame := gop.Frames[frameIdx]
+			dropped = append(dropped, frame)
+			
+			// Remove from GOP
+			gop.Frames = append(gop.Frames[:frameIdx], gop.Frames[frameIdx+1:]...)
+			gop.BFrames--
+			gop.FrameCount--
+			gop.TotalSize -= int64(frame.TotalSize)
+			
+			// Remove from index
+			delete(b.frameIndex, frame.ID)
+		}
+		
 		// Update GOP duration after dropping frames
-		gop.UpdateDuration()
+		if len(bFramesToDrop) > 0 {
+			gop.UpdateDuration()
+		}
 		
 		count++
 	}

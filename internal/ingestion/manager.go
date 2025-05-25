@@ -273,8 +273,10 @@ func (m *Manager) GetStats(ctx context.Context) IngestionStats {
 		stats.TotalStreams = len(streams)
 	}
 	
-	// Get active stream handlers count
+	// Get active stream handlers count safely
+	m.handlersMu.RLock()
 	stats.ActiveHandlers = len(m.streamHandlers)
+	m.handlersMu.RUnlock()
 	
 	return stats
 }
