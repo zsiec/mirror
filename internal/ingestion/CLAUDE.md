@@ -247,8 +247,8 @@ ingestion:
   frame_timeout: 5s            # Frame assembly timeout
   sync_threshold: 100ms        # A/V sync threshold
   memory:
-    global_limit: 4GB          # Total memory limit
-    per_stream_limit: 200MB    # Per-stream limit
+    global_limit: 8GB          # Total memory limit
+    per_stream_limit: 400MB    # Per-stream limit
 ```
 
 ## Testing

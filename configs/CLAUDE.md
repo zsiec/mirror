@@ -89,8 +89,8 @@ ingestion:
   gop_buffer_size: 3           # Number of GOPs to buffer
   sync_threshold: 100ms        # A/V sync drift threshold
   memory:
-    global_limit: 4GB          # Global memory limit
-    per_stream_limit: 200MB    # Per-stream memory limit
+    global_limit: 8GB          # Global memory limit
+    per_stream_limit: 400MB    # Per-stream memory limit
     check_interval: 1s         # Memory check interval
   queue:
     memory_size: 100MB         # In-memory queue size
@@ -130,8 +130,8 @@ MIRROR_INGESTION_RTP_PORT=5004
 MIRROR_INGESTION_MAX_CONNECTIONS=25
 MIRROR_INGESTION_BUFFER_SIZE=1048576
 MIRROR_INGESTION_GOP_BUFFER_SIZE=3
-MIRROR_INGESTION_MEMORY_GLOBAL_LIMIT=4GB
-MIRROR_INGESTION_MEMORY_PER_STREAM_LIMIT=200MB
+MIRROR_INGESTION_MEMORY_GLOBAL_LIMIT=8GB
+MIRROR_INGESTION_MEMORY_PER_STREAM_LIMIT=400MB
 MIRROR_INGESTION_QUEUE_MEMORY_SIZE=100MB
 MIRROR_INGESTION_QUEUE_DISK_PATH=/tmp/mirror
 ```

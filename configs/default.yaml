@@ -76,8 +76,8 @@ ingestion:
     redis_db: 0
     ttl: 1h
   memory:
-    max_total: 2684354560      # 2.5GB total memory limit
-    max_per_stream: 209715200  # 200MB per stream limit
+    max_total: 8589934592      # 8GB total memory limit
+    max_per_stream: 419430400  # 400MB per stream limit
   
   # Stream handling configuration
   stream_handling:

@@ -457,8 +457,8 @@ ingestion:
     pool_size: 30
     
   memory:
-    global_limit: 4294967296  # 4GB
-    per_stream_limit: 209715200  # 200MB
+    global_limit: 8589934592  # 8GB
+    per_stream_limit: 419430400  # 400MB
     
   backpressure:
     enabled: true

@@ -445,8 +445,8 @@ ingestion:
     
   # Memory management
   memory:
-    global_limit: 4294967296   # 4GB total
-    per_stream_limit: 209715200 # 200MB per stream
+    global_limit: 8589934592   # 8GB total
+    per_stream_limit: 419430400 # 400MB per stream
     gc_interval: 1m
     
   # Backpressure control

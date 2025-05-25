@@ -66,5 +66,5 @@ ingestion:
       profile: "main"
       subsampling: "422"
   memory:
-    max_total: 1073741824      # 1GB for development (lower than production)
-    max_per_stream: 104857600  # 100MB per stream for development
+    max_total: 8589934592      # 8GB for development (matching production for testing)
+    max_per_stream: 419430400  # 400MB per stream for development
