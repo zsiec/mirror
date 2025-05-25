@@ -3,6 +3,7 @@ package rtp
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,10 +14,13 @@ import (
 )
 
 type mockRegistry struct {
+	mu      sync.RWMutex
 	streams map[string]*registry.Stream
 }
 
 func (m *mockRegistry) Register(ctx context.Context, stream *registry.Stream) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.streams == nil {
 		m.streams = make(map[string]*registry.Stream)
 	}
@@ -25,6 +29,8 @@ func (m *mockRegistry) Register(ctx context.Context, stream *registry.Stream) er
 }
 
 func (m *mockRegistry) Get(ctx context.Context, streamID string) (*registry.Stream, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if stream, ok := m.streams[streamID]; ok {
 		return stream, nil
 	}
@@ -32,16 +38,25 @@ func (m *mockRegistry) Get(ctx context.Context, streamID string) (*registry.Stre
 }
 
 func (m *mockRegistry) Update(ctx context.Context, stream *registry.Stream) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.streams == nil {
+		m.streams = make(map[string]*registry.Stream)
+	}
 	m.streams[stream.ID] = stream
 	return nil
 }
 
 func (m *mockRegistry) Unregister(ctx context.Context, streamID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.streams, streamID)
 	return nil
 }
 
 func (m *mockRegistry) List(ctx context.Context) ([]*registry.Stream, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var streams []*registry.Stream
 	for _, s := range m.streams {
 		streams = append(streams, s)
@@ -50,6 +65,8 @@ func (m *mockRegistry) List(ctx context.Context) ([]*registry.Stream, error) {
 }
 
 func (m *mockRegistry) UpdateStatus(ctx context.Context, streamID string, status registry.StreamStatus) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if stream, ok := m.streams[streamID]; ok {
 		stream.Status = status
 	}
@@ -57,6 +74,8 @@ func (m *mockRegistry) UpdateStatus(ctx context.Context, streamID string, status
 }
 
 func (m *mockRegistry) UpdateHeartbeat(ctx context.Context, streamID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if stream, ok := m.streams[streamID]; ok {
 		stream.LastHeartbeat = time.Now()
 	}
@@ -64,6 +83,8 @@ func (m *mockRegistry) UpdateHeartbeat(ctx context.Context, streamID string) err
 }
 
 func (m *mockRegistry) UpdateStats(ctx context.Context, streamID string, stats *registry.StreamStats) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if stream, ok := m.streams[streamID]; ok {
 		if stats != nil {
 			stream.BytesReceived = stats.BytesReceived

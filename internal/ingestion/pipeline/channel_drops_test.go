@@ -86,7 +86,7 @@ loop:
 	
 	// Verify the bug: frames were dropped
 	assert.Less(t, receivedFrames, framesSent, "Some frames should have been dropped")
-	assert.Greater(t, errors, uint64(0), "Errors should be recorded for dropped frames")
+	assert.Greater(t, atomic.LoadUint64(&errors), uint64(0), "Errors should be recorded for dropped frames")
 	
 	t.Logf("Sent %d frames, received %d, dropped %d", framesSent, receivedFrames, framesSent-receivedFrames)
 }

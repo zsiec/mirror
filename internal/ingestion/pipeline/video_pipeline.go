@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zsiec/mirror/internal/ingestion/frame"
@@ -28,11 +29,11 @@ type VideoPipeline struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	
-	// Metrics
-	packetsProcessed uint64
-	framesOutput     uint64
-	errors           uint64
-	framesReordered  uint64
+	// Metrics (using atomic for thread-safety)
+	packetsProcessed atomic.Uint64
+	framesOutput     atomic.Uint64
+	errors           atomic.Uint64
+	framesReordered  atomic.Uint64
 	
 	logger          logger.Logger
 	wg              sync.WaitGroup
@@ -141,11 +142,11 @@ func (p *VideoPipeline) Stop() error {
 	reordererStats := p.bframeReorderer.GetStats()
 	
 	p.logger.WithFields(map[string]interface{}{
-		"packets_processed": p.packetsProcessed,
-		"frames_output":     p.framesOutput,
-		"frames_reordered":  p.framesReordered,
+		"packets_processed": p.packetsProcessed.Load(),
+		"frames_output":     p.framesOutput.Load(),
+		"frames_reordered":  p.framesReordered.Load(),
 		"frames_dropped":    reordererStats.FramesDropped,
-		"errors":            p.errors,
+		"errors":            p.errors.Load(),
 	}).Info("Video pipeline stopped")
 	
 	return nil
@@ -168,13 +169,13 @@ func (p *VideoPipeline) processPackets() {
 			
 			// Process packet
 			if err := p.frameAssembler.AddPacket(pkt); err != nil {
-				p.errors++
+				p.errors.Add(1)
 				if err != frame.ErrNoFrameContext {
 					p.logger.WithError(err).Debug("Failed to add packet to assembler")
 				}
 			}
 			
-			p.packetsProcessed++
+			p.packetsProcessed.Add(1)
 		}
 	}
 }
@@ -199,7 +200,7 @@ func (p *VideoPipeline) processFrames() {
 			// Send frame to B-frame reorderer
 			reorderedFrames, err := p.bframeReorderer.AddFrame(frame)
 			if err != nil {
-				p.errors++
+				p.errors.Add(1)
 				p.logger.WithError(err).Debug("Failed to add frame to reorderer")
 				continue
 			}
@@ -210,8 +211,8 @@ func (p *VideoPipeline) processFrames() {
 				case <-p.ctx.Done():
 					return
 				case p.output <- reorderedFrame:
-					p.framesOutput++
-					p.framesReordered++
+					p.framesOutput.Add(1)
+					p.framesReordered.Add(1)
 				}
 			}
 		}
@@ -230,8 +231,8 @@ func (p *VideoPipeline) processReorderedFrames() {
 	for _, frame := range remainingFrames {
 		select {
 		case p.output <- frame:
-			p.framesOutput++
-			p.framesReordered++
+			p.framesOutput.Add(1)
+			p.framesReordered.Add(1)
 		default:
 			// If output channel is full, drop the frame
 			p.logger.Debug("Dropping frame during shutdown flush")
@@ -250,10 +251,10 @@ func (p *VideoPipeline) GetStats() PipelineStats {
 	reordererStats := p.bframeReorderer.GetStats()
 	
 	return PipelineStats{
-		PacketsProcessed: p.packetsProcessed,
-		FramesOutput:     p.framesOutput,
-		FramesReordered:  p.framesReordered,
-		Errors:           p.errors,
+		PacketsProcessed: p.packetsProcessed.Load(),
+		FramesOutput:     p.framesOutput.Load(),
+		FramesReordered:  p.framesReordered.Load(),
+		Errors:           p.errors.Load(),
 		AssemblerStats:   assemblerStats,
 		ReordererStats:   reordererStats,
 	}

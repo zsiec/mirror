@@ -1,6 +1,7 @@
 package backpressure
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,10 +26,13 @@ func TestControllerResponsiveness(t *testing.T) {
 	
 	controller := NewController("test-stream", config, logger)
 	
-	// Track rate changes
+	// Track rate changes (thread-safe)
 	var rateChanges []int64
+	var rateChangesMu sync.Mutex
 	controller.SetRateChangeCallback(func(newRate int64) {
+		rateChangesMu.Lock()
 		rateChanges = append(rateChanges, newRate)
+		rateChangesMu.Unlock()
 	})
 	
 	// Start the controller
@@ -39,27 +43,45 @@ func TestControllerResponsiveness(t *testing.T) {
 	controller.UpdatePressure(0.9) // Above target
 	time.Sleep(200 * time.Millisecond)
 	
+	rateChangesMu.Lock()
 	initialChanges := len(rateChanges)
+	rateChangesMu.Unlock()
 	assert.Greater(t, initialChanges, 0, "Should have rate changes for high pressure")
 	
 	// Test 1: Low pressure should increase rate
 	controller.UpdatePressure(0.5) // Well below target of 0.7
 	time.Sleep(200 * time.Millisecond)
 	
-	assert.Greater(t, len(rateChanges), initialChanges, "Should have more rate changes for low pressure")
+	rateChangesMu.Lock()
+	currentChanges := len(rateChanges)
+	var lastRate, initialRate int64
 	if len(rateChanges) > initialChanges {
+		lastRate = rateChanges[len(rateChanges)-1]
+		initialRate = rateChanges[initialChanges-1]
+	}
+	rateChangesMu.Unlock()
+	
+	assert.Greater(t, currentChanges, initialChanges, "Should have more rate changes for low pressure")
+	if currentChanges > initialChanges {
 		// Rate should increase when pressure is low
-		assert.Greater(t, rateChanges[len(rateChanges)-1], rateChanges[initialChanges-1], "Low pressure should increase rate")
+		assert.Greater(t, lastRate, initialRate, "Low pressure should increase rate")
 	}
 	
 	// Test 2: High pressure should decrease rate
 	controller.UpdatePressure(0.9) // Above target
 	time.Sleep(150 * time.Millisecond)
 	
-	assert.Greater(t, len(rateChanges), 1, "Should have more rate changes for high pressure")
+	rateChangesMu.Lock()
+	highPressureChanges := len(rateChanges)
+	var highPressureLastRate int64
 	if len(rateChanges) > 1 {
-		lastRate := rateChanges[len(rateChanges)-1]
-		assert.Less(t, lastRate, int64(10000), "High pressure should decrease rate")
+		highPressureLastRate = rateChanges[len(rateChanges)-1]
+	}
+	rateChangesMu.Unlock()
+	
+	assert.Greater(t, highPressureChanges, 1, "Should have more rate changes for high pressure")
+	if highPressureChanges > 1 {
+		assert.Less(t, highPressureLastRate, int64(10000), "High pressure should decrease rate")
 	}
 	
 	// Test 3: Return to target should stabilize
@@ -67,9 +89,14 @@ func TestControllerResponsiveness(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	
 	// Rate might still adjust slightly but should be stable
+	rateChangesMu.Lock()
 	finalCount := len(rateChanges)
+	rateChangesMu.Unlock()
 	time.Sleep(200 * time.Millisecond)
-	assert.LessOrEqual(t, len(rateChanges)-finalCount, 4, "Rate should stabilize near target pressure")
+	rateChangesMu.Lock()
+	finalFinalCount := len(rateChanges)
+	rateChangesMu.Unlock()
+	assert.LessOrEqual(t, finalFinalCount-finalCount, 4, "Rate should stabilize near target pressure")
 }
 
 // TestControllerDeadZone verifies the dead zone is not too wide
