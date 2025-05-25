@@ -83,7 +83,7 @@ func (b *Buffer) AddGOP(gop *GOP) {
 	
 	// Update frame index - create locations outside of loop to avoid races
 	frameLocations := make([]*FrameLocation, len(gop.Frames))
-	for i, frame := range gop.Frames {
+	for i := range gop.Frames {
 		frameLocations[i] = &FrameLocation{
 			GOP:      gop,
 			Position: i,
