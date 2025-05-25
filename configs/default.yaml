@@ -78,3 +78,20 @@ ingestion:
   memory:
     max_total: 2684354560      # 2.5GB total memory limit
     max_per_stream: 209715200  # 200MB per stream limit
+  
+  # Stream handling configuration
+  stream_handling:
+    frame_assembly_timeout: 200ms  # Timeout for frame assembly
+    gop_buffer_size: 3            # Number of GOPs to buffer per stream
+    max_gop_age: 5s               # Maximum age of GOP before cleanup
+    error_retry_limit: 3          # Maximum retries for stream errors
+  
+  # Backpressure control configuration
+  backpressure:
+    enabled: true                 # Enable backpressure control
+    low_watermark: 0.25          # Low pressure threshold (25%)
+    medium_watermark: 0.5        # Medium pressure threshold (50%)
+    high_watermark: 0.75         # High pressure threshold (75%)
+    critical_watermark: 0.9      # Critical pressure threshold (90%)
+    response_window: 500ms       # Response time window for pressure changes
+    frame_drop_ratio: 0.1        # Percentage of frames to drop under pressure (10%)

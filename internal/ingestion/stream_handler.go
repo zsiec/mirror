@@ -317,9 +317,18 @@ func (h *StreamHandler) processFrames() {
 			// Check for frame corruption
 			if h.detectFrameCorruption(frame) {
 				frame.SetFlag(types.FrameFlagCorrupted)
-				h.recoveryHandler.HandleError(recovery.ErrorTypeCorruption, frame)
+				if err := h.recoveryHandler.HandleError(recovery.ErrorTypeCorruption, frame); err != nil {
+					h.logger.WithFields(map[string]interface{}{
+						"stream_id": h.streamID,
+						"frame_id":  frame.ID,
+						"error":     err.Error(),
+					}).Error("Failed to handle corruption recovery")
+				}
 				h.framesDropped.Add(1)
-				h.logger.WithField("frame_id", frame.ID).Warn("Dropping corrupted frame")
+				h.logger.WithFields(map[string]interface{}{
+					"stream_id": h.streamID,
+					"frame_id":  frame.ID,
+				}).Warn("Dropping corrupted frame")
 				continue // Skip processing corrupted frames
 			}
 			

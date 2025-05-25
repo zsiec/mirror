@@ -66,6 +66,8 @@ type IngestionConfig struct {
 	Codecs          CodecsConfig          `mapstructure:"codecs"`
 	Memory          MemoryConfig          `mapstructure:"memory"`
 	QueueDir        string                `mapstructure:"queue_dir"` // Directory for queue overflow
+	StreamHandling  StreamHandlingConfig  `mapstructure:"stream_handling"`
+	Backpressure    BackpressureConfig    `mapstructure:"backpressure"`
 }
 
 type SRTConfig struct {
@@ -150,6 +152,23 @@ type JPEGXSCodecConfig struct {
 type MemoryConfig struct {
 	MaxTotal     int64 `mapstructure:"max_total"`      // Total memory limit in bytes
 	MaxPerStream int64 `mapstructure:"max_per_stream"` // Per-stream memory limit in bytes
+}
+
+type StreamHandlingConfig struct {
+	FrameAssemblyTimeout time.Duration `mapstructure:"frame_assembly_timeout"` // Default: 200ms
+	GOPBufferSize        int           `mapstructure:"gop_buffer_size"`        // GOP buffer limit per stream
+	MaxGOPAge            time.Duration `mapstructure:"max_gop_age"`            // Maximum age of GOP before cleanup
+	ErrorRetryLimit      int           `mapstructure:"error_retry_limit"`      // Max retries for stream errors
+}
+
+type BackpressureConfig struct {
+	Enabled              bool    `mapstructure:"enabled"`                  // Enable backpressure control
+	LowWatermark         float64 `mapstructure:"low_watermark"`            // Low pressure threshold (0.0-1.0)
+	MediumWatermark      float64 `mapstructure:"medium_watermark"`         // Medium pressure threshold (0.0-1.0)
+	HighWatermark        float64 `mapstructure:"high_watermark"`           // High pressure threshold (0.0-1.0)
+	CriticalWatermark    float64 `mapstructure:"critical_watermark"`       // Critical pressure threshold (0.0-1.0)
+	ResponseWindow       time.Duration `mapstructure:"response_window"`     // Response time window
+	FrameDropRatio       float64 `mapstructure:"frame_drop_ratio"`         // Percentage of frames to drop under pressure
 }
 
 
@@ -269,4 +288,19 @@ func setDefaults() {
 	viper.SetDefault("ingestion.codecs.av1.level", "5.1")
 	viper.SetDefault("ingestion.codecs.jpegxs.profile", "main")
 	viper.SetDefault("ingestion.codecs.jpegxs.subsampling", "422")
+
+	// Stream handling defaults  
+	viper.SetDefault("ingestion.stream_handling.frame_assembly_timeout", "200ms")
+	viper.SetDefault("ingestion.stream_handling.gop_buffer_size", 3)
+	viper.SetDefault("ingestion.stream_handling.max_gop_age", "5s")
+	viper.SetDefault("ingestion.stream_handling.error_retry_limit", 3)
+
+	// Backpressure defaults
+	viper.SetDefault("ingestion.backpressure.enabled", true)
+	viper.SetDefault("ingestion.backpressure.low_watermark", 0.25)
+	viper.SetDefault("ingestion.backpressure.medium_watermark", 0.5)
+	viper.SetDefault("ingestion.backpressure.high_watermark", 0.75)
+	viper.SetDefault("ingestion.backpressure.critical_watermark", 0.9)
+	viper.SetDefault("ingestion.backpressure.response_window", "500ms")
+	viper.SetDefault("ingestion.backpressure.frame_drop_ratio", 0.1)
 }

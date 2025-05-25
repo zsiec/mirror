@@ -316,7 +316,7 @@ func (d *Detector) DetectFromSRTMetadata(metadata map[string]string) (Type, *Inf
 	if ok {
 		info.Type = ParseType(codecStr)
 		if info.Type == TypeUnknown {
-			return TypeUnknown, nil, fmt.Errorf("unknown codec: %s", codecStr)
+			return TypeUnknown, nil, fmt.Errorf("unknown codec '%s' - supported codecs: H264, HEVC, AV1, JPEGXS", codecStr)
 		}
 	} else {
 		return TypeUnknown, nil, fmt.Errorf("no codec information in metadata")

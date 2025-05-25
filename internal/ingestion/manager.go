@@ -604,6 +604,12 @@ func (m *Manager) HandleSRTConnection(conn *srt.Connection) error {
 	// Create and start stream handler
 	handler, err := m.CreateStreamHandler(conn.GetStreamID(), adapter)
 	if err != nil {
+		// Cleanup adapter on failure
+		if closer, ok := adapter.(interface{ Close() error }); ok {
+			if closeErr := closer.Close(); closeErr != nil {
+				m.logger.WithError(closeErr).Warn("Failed to close adapter after handler creation failure")
+			}
+		}
 		return fmt.Errorf("failed to create stream handler: %w", err)
 	}
 	
@@ -639,6 +645,12 @@ func (m *Manager) HandleRTPSession(session *rtp.Session) error {
 	// Create and start stream handler
 	handler, err := m.CreateStreamHandler(session.GetStreamID(), adapter)
 	if err != nil {
+		// Cleanup adapter on failure
+		if closer, ok := adapter.(interface{ Close() error }); ok {
+			if closeErr := closer.Close(); closeErr != nil {
+				m.logger.WithError(closeErr).Warn("Failed to close adapter after handler creation failure")
+			}
+		}
 		return fmt.Errorf("failed to create stream handler: %w", err)
 	}
 	

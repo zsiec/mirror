@@ -12,7 +12,7 @@ import (
 
 var (
 	// ErrNoFrameContext indicates packets received without frame context
-	ErrNoFrameContext = errors.New("no frame context")
+	ErrNoFrameContext = errors.New("no frame context - received packet without active frame assembly (possible fragmented/incomplete frame start)")
 	
 	// ErrFrameTimeout indicates frame assembly timeout
 	ErrFrameTimeout = errors.New("frame assembly timeout")
