@@ -28,6 +28,9 @@ type Server struct {
 	redis        *redis.Client
 	healthMgr    *health.Manager
 	errorHandler *errors.ErrorHandler
+	
+	// Additional handlers can be registered
+	additionalRoutes []func(*mux.Router)
 }
 
 // New creates a new server instance.
@@ -37,12 +40,13 @@ func New(cfg *config.ServerConfig, log *logrus.Logger, redisClient *redis.Client
 	errorHandler := errors.NewErrorHandler(log)
 
 	s := &Server{
-		config:       cfg,
-		router:       router,
-		logger:       log,
-		redis:        redisClient,
-		healthMgr:    healthMgr,
-		errorHandler: errorHandler,
+		config:           cfg,
+		router:           router,
+		logger:           log,
+		redis:            redisClient,
+		healthMgr:        healthMgr,
+		errorHandler:     errorHandler,
+		additionalRoutes: make([]func(*mux.Router), 0),
 	}
 
 	// Register health checkers
@@ -140,10 +144,16 @@ func (s *Server) setupRoutes() {
 	// Version endpoint
 	s.router.HandleFunc("/version", s.handleVersion).Methods("GET")
 
-	// API routes will be added in future phases
+	// API routes
 	api := s.router.PathPrefix("/api/v1").Subrouter()
+	// Placeholder endpoint - replaced when ingestion is enabled via RegisterRoutes
 	api.HandleFunc("/streams", s.handleStreamsPlaceholder).Methods("GET")
 
+	// Register any additional routes
+	for _, registerFunc := range s.additionalRoutes {
+		registerFunc(s.router)
+	}
+	
 	// 404 handler
 	s.router.NotFoundHandler = http.HandlerFunc(s.errorHandler.HandleNotFound)
 	s.router.MethodNotAllowedHandler = http.HandlerFunc(s.errorHandler.HandleMethodNotAllowed)
@@ -162,6 +172,11 @@ func (s *Server) registerHealthCheckers() {
 	// Register memory checker
 	memChecker := health.NewMemoryChecker(0.9)
 	s.healthMgr.Register(memChecker)
+}
+
+// RegisterRoutes adds additional route handlers to the server
+func (s *Server) RegisterRoutes(registerFunc func(*mux.Router)) {
+	s.additionalRoutes = append(s.additionalRoutes, registerFunc)
 }
 
 // GetRouter returns the router for testing.

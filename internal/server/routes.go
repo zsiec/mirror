@@ -20,14 +20,14 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleStreamsPlaceholder is a placeholder for the streams endpoint
+// handleStreamsPlaceholder is a placeholder for the streams endpoint when ingestion is not enabled
 func (s *Server) handleStreamsPlaceholder(w http.ResponseWriter, r *http.Request) {
 	response := struct {
 		Message string `json:"message"`
 		Phase   string `json:"phase"`
 	}{
-		Message: "Streams endpoint will be implemented in Phase 2",
-		Phase:   "1",
+		Message: "Streams endpoint requires ingestion to be enabled",
+		Phase:   "2",
 	}
 	
 	w.Header().Set("Content-Type", "application/json")

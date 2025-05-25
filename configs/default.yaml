@@ -35,3 +35,46 @@ metrics:
   enabled: true
   path: "/metrics"
   port: 9090
+
+ingestion:
+  queue_dir: "/tmp/mirror/queue"  # Directory for queue overflow to disk
+  srt:
+    enabled: true
+    listen_addr: "0.0.0.0"
+    port: 1234
+    latency: 120ms         # SRT latency window
+    max_bandwidth: 52428800  # 50 Mbps - maximum allowed bandwidth per stream
+    input_bandwidth: 52428800  # 50 Mbps - expected input rate for buffer sizing
+    payload_size: 1316     # MTU-friendly payload size
+    fc_window: 25600       # Flow control window size
+    peer_idle_timeout: 5s  # Peer idle timeout
+    max_connections: 25    # Maximum concurrent connections
+    encryption:
+      enabled: false
+      passphrase: ""
+      key_length: 128      # 0 (auto), 128, 192, or 256
+      pbkdf_iterations: 0  # 0 for auto
+  rtp:
+    enabled: true
+    listen_addr: "0.0.0.0"
+    port: 5004
+    rtcp_port: 5005
+    buffer_size: 65536       # 64KB receive buffer
+    max_sessions: 25         # Maximum concurrent RTP sessions
+    session_timeout: 10s     # Session idle timeout
+  buffer:
+    ring_size: 4194304     # 4MB per stream (temporary - will be replaced by dynamic)
+    pool_size: 50          # Should be >= total max connections (SRT: 25 + RTP: 25)
+    write_timeout: 10ms
+    read_timeout: 10ms
+    metrics_enabled: true
+    default_bitrate: 52428800  # 50 Mbps default
+    target_duration: 30s   # 30 seconds of buffer
+  registry:
+    redis_addr: "localhost:6379"
+    redis_password: ""
+    redis_db: 0
+    ttl: 1h
+  memory:
+    max_total: 2684354560      # 2.5GB total memory limit
+    max_per_stream: 209715200  # 200MB per stream limit

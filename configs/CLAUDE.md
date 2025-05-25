@@ -77,6 +77,25 @@ metrics:
   enabled: true                # Enable Prometheus metrics
   port: 9090                   # Metrics server port
   path: "/metrics"             # Metrics endpoint path
+
+ingestion:
+  srt_port: 30000              # SRT listener port
+  rtp_port: 5004               # RTP listener port
+  max_connections: 25          # Maximum concurrent streams
+  connection_timeout: 10s      # Connection establishment timeout
+  stream_timeout: 30s          # Stream idle timeout
+  buffer_size: 1048576         # Ring buffer size (1MB)
+  frame_timeout: 5s            # Frame assembly timeout
+  gop_buffer_size: 3           # Number of GOPs to buffer
+  sync_threshold: 100ms        # A/V sync drift threshold
+  memory:
+    global_limit: 4GB          # Global memory limit
+    per_stream_limit: 200MB    # Per-stream memory limit
+    check_interval: 1s         # Memory check interval
+  queue:
+    memory_size: 100MB         # In-memory queue size
+    disk_path: "/tmp/mirror"   # Disk overflow path
+    max_disk_usage: 10GB       # Maximum disk usage
 ```
 
 ## Environment Variable Mapping
@@ -104,6 +123,17 @@ MIRROR_LOGGING_FILE_PATH=/var/log/mirror/app.log
 # Metrics settings
 MIRROR_METRICS_ENABLED=true
 MIRROR_METRICS_PORT=9090
+
+# Ingestion settings
+MIRROR_INGESTION_SRT_PORT=30000
+MIRROR_INGESTION_RTP_PORT=5004
+MIRROR_INGESTION_MAX_CONNECTIONS=25
+MIRROR_INGESTION_BUFFER_SIZE=1048576
+MIRROR_INGESTION_GOP_BUFFER_SIZE=3
+MIRROR_INGESTION_MEMORY_GLOBAL_LIMIT=4GB
+MIRROR_INGESTION_MEMORY_PER_STREAM_LIMIT=200MB
+MIRROR_INGESTION_QUEUE_MEMORY_SIZE=100MB
+MIRROR_INGESTION_QUEUE_DISK_PATH=/tmp/mirror
 ```
 
 ## Adding New Configuration

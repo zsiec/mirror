@@ -1,0 +1,174 @@
+openapi: 3.0.3
+info:
+  title: Mirror Server API
+  description: Core server API endpoints for the Mirror platform
+  version: 1.0.0
+  contact:
+    name: Mirror Support
+    email: support@mirror.example.com
+servers:
+  - url: https://localhost:8443
+    description: Local development server (HTTP/3)
+  - url: https://api.mirror.example.com
+    description: Production server
+tags:
+  - name: health
+    description: Health check endpoints
+  - name: system
+    description: System information endpoints
+paths:
+  /health:
+    get:
+      tags:
+        - health
+      summary: Get detailed health status
+      description: Returns detailed health information including all health checks
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  
+  /ready:
+    get:
+      tags:
+        - health
+      summary: Readiness check
+      description: Simple readiness check for Kubernetes/load balancers
+      operationId: getReady
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: 'OK'
+        '503':
+          description: Service is not ready
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: 'Service Unavailable'
+  
+  /live:
+    get:
+      tags:
+        - health
+      summary: Liveness check
+      description: Basic liveness check for Kubernetes/load balancers
+      operationId: getLive
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: 'OK'
+  
+  /version:
+    get:
+      tags:
+        - system
+      summary: Get version information
+      description: Returns version information about the server
+      operationId: getVersion
+      responses:
+        '200':
+          description: Version information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionInfo'
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - checks
+        - time
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          description: Overall health status
+        message:
+          type: string
+          description: Optional health message
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/HealthCheck'
+          description: Individual health check results
+        time:
+          type: string
+          format: date-time
+          description: Health check timestamp
+    
+    HealthCheck:
+      type: object
+      required:
+        - name
+        - status
+      properties:
+        name:
+          type: string
+          description: Name of the health check
+          example: 'redis'
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          description: Health check status
+        message:
+          type: string
+          description: Optional status message
+        error:
+          type: string
+          description: Error message if unhealthy
+    
+    VersionInfo:
+      type: object
+      required:
+        - version
+        - build_time
+        - go_version
+        - os
+        - arch
+      properties:
+        version:
+          type: string
+          description: Application version
+          example: '1.0.0'
+        commit:
+          type: string
+          description: Git commit hash
+          example: 'a1b2c3d4'
+        build_time:
+          type: string
+          description: Build timestamp
+          example: '2024-01-20T10:00:00Z'
+        go_version:
+          type: string
+          description: Go version used to build
+          example: 'go1.23.0'
+        os:
+          type: string
+          description: Operating system
+          example: 'darwin'
+        arch:
+          type: string
+          description: Architecture
+          example: 'arm64'

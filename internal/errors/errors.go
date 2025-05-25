@@ -3,6 +3,7 @@ package errors
 import (
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // ErrorType represents the type of error.
@@ -136,4 +137,76 @@ func IsAppError(err error) bool {
 func GetAppError(err error) (*AppError, bool) {
 	appErr, ok := err.(*AppError)
 	return appErr, ok
+}
+
+// StreamError represents a stream-specific error with additional context
+type StreamError struct {
+	StreamID  string    `json:"stream_id"`
+	Component string    `json:"component"`
+	Operation string    `json:"operation"`
+	Err       error     `json:"-"`
+	Timestamp time.Time `json:"timestamp"`
+	Details   map[string]interface{} `json:"details,omitempty"`
+}
+
+// Error implements the error interface
+func (e *StreamError) Error() string {
+	return fmt.Sprintf("[%s] %s: %s failed: %v", e.StreamID, e.Component, e.Operation, e.Err)
+}
+
+// Unwrap returns the wrapped error
+func (e *StreamError) Unwrap() error {
+	return e.Err
+}
+
+// NewStreamError creates a new stream error
+func NewStreamError(streamID, component, operation string, err error) *StreamError {
+	return &StreamError{
+		StreamID:  streamID,
+		Component: component,
+		Operation: operation,
+		Err:       err,
+		Timestamp: time.Now(),
+		Details:   make(map[string]interface{}),
+	}
+}
+
+// WithDetails adds details to the stream error
+func (e *StreamError) WithDetails(key string, value interface{}) *StreamError {
+	if e.Details == nil {
+		e.Details = make(map[string]interface{})
+	}
+	e.Details[key] = value
+	return e
+}
+
+// WithDetailsMap adds multiple details to the stream error
+func (e *StreamError) WithDetailsMap(details map[string]interface{}) *StreamError {
+	if e.Details == nil {
+		e.Details = make(map[string]interface{})
+	}
+	for k, v := range details {
+		e.Details[k] = v
+	}
+	return e
+}
+
+// IsStreamError checks if an error is a StreamError
+func IsStreamError(err error) bool {
+	_, ok := err.(*StreamError)
+	return ok
+}
+
+// GetStreamError extracts StreamError from an error
+func GetStreamError(err error) (*StreamError, bool) {
+	streamErr, ok := err.(*StreamError)
+	return streamErr, ok
+}
+
+// WrapWithStreamError wraps an error with stream context
+func WrapWithStreamError(streamID, component, operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return NewStreamError(streamID, component, operation, err)
 }

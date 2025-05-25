@@ -23,8 +23,19 @@ Mirror is a high-performance video streaming platform built in Go, designed to h
 - GitHub Actions CI/CD
 - 71% test coverage
 
+### Phase 2 ✅ COMPLETED
+- Stream ingestion with SRT and RTP protocols
+- Video-aware buffering and GOP management
+- Automatic codec detection (H.264, HEVC, AV1, JPEGXS)
+- Frame assembly and validation
+- A/V synchronization with drift correction
+- Backpressure control and memory management
+- Stream recovery and reconnection
+- Comprehensive metrics and monitoring
+- Redis-based stream registry
+- 85%+ test coverage for ingestion components
+
 ### Next Phases
-- Phase 2: Stream Ingestion (SRT/RTP)
 - Phase 3: Video Processing & Transcoding
 - Phase 4: HLS Packaging & Distribution
 - Phase 5: Multi-stream Management
@@ -38,20 +49,29 @@ Mirror is a high-performance video streaming platform built in Go, designed to h
 - **HTTP/3 Server**: `quic-go/quic-go` for low-latency delivery
 - **Configuration**: Viper for YAML + environment variable support
 - **Logging**: Logrus with log rotation
-- **State Management**: Redis for session management
+- **State Management**: Redis for session management and stream registry
 - **Metrics**: Prometheus for monitoring
 - **Container**: Docker with multi-stage builds
+- **Stream Protocols**: SRT (Haivision), RTP/RTCP
+- **Video Codecs**: H.264, HEVC/H.265, AV1, JPEGXS
+- **Container Formats**: MPEG-TS
 
 ### Service Architecture
 ```
 HTTP/3 Server (QUIC)
     ├── Health Checks (/health, /ready, /live)
     ├── Version Info (/version)
-    └── Stream Endpoints (Phase 2+)
-        ├── Ingestion Service → 
-        ├── Transcoding Service → 
-        ├── HLS Packager → 
-        └── CDN Distribution
+    ├── Metrics (/metrics - Prometheus)
+    └── Stream API (/api/v1/)
+        ├── Ingestion Service
+        │   ├── SRT Listener (port 30000)
+        │   ├── RTP Listener (port 5004)
+        │   ├── Stream Management (/streams)
+        │   ├── Statistics (/stats)
+        │   └── A/V Sync Control (/sync)
+        ├── Transcoding Service (Phase 3)
+        ├── HLS Packager (Phase 4)
+        └── CDN Distribution (Phase 6)
 ```
 
 ## Repository Structure
@@ -65,16 +85,28 @@ mirror/
 │   ├── config/           # Configuration management
 │   ├── errors/           # Error handling framework
 │   ├── health/           # Health check system
+│   ├── ingestion/        # Stream ingestion (Phase 2)
+│   │   ├── buffer/       # Video-aware buffering
+│   │   ├── codec/        # Codec detection & handling
+│   │   ├── frame/        # Frame assembly & detection
+│   │   ├── gop/          # GOP management
+│   │   ├── rtp/          # RTP protocol implementation
+│   │   ├── srt/          # SRT protocol implementation
+│   │   ├── sync/         # A/V synchronization
+│   │   └── ...           # Recovery, backpressure, etc.
 │   ├── logger/           # Logging utilities
+│   ├── metrics/          # Prometheus metrics
+│   ├── queue/            # Hybrid memory/disk queue
 │   └── server/           # HTTP/3 server implementation
 ├── pkg/                   # Public packages
 │   └── version/          # Version information
 ├── configs/              # Configuration files
 ├── docker/               # Docker-related files
 ├── docs/                 # Documentation
+│   ├── openapi/          # API specifications
 │   └── phase-*.md       # Implementation phase docs
 ├── .github/              # GitHub Actions workflows
-└── tests/                # Integration tests (future)
+└── tests/                # Integration test helpers
 ```
 
 ## Development Guidelines
@@ -151,9 +183,18 @@ The application uses a hierarchical configuration system:
 
 Example environment variables:
 ```bash
+# Server configuration
 MIRROR_SERVER_HTTP3_PORT=8443
 MIRROR_REDIS_ADDR=localhost:6379
 MIRROR_LOGGING_LEVEL=debug
+
+# Ingestion configuration
+MIRROR_INGESTION_SRT_PORT=30000
+MIRROR_INGESTION_RTP_PORT=5004
+MIRROR_INGESTION_MAX_CONNECTIONS=25
+MIRROR_INGESTION_STREAM_TIMEOUT=30s
+MIRROR_INGESTION_BUFFER_SIZE=1048576
+MIRROR_INGESTION_GOP_BUFFER_SIZE=3
 ```
 
 ## Error Handling
@@ -199,10 +240,37 @@ Health checks include:
 - Error rate counters
 - Custom business metrics (future)
 
+## Video Streaming Components (Phase 2)
+
+### Stream Ingestion
+- **Protocol Support**: SRT (primary) and RTP with automatic detection
+- **Codec Support**: H.264, HEVC, AV1, JPEGXS with automatic detection
+- **Buffer Management**: Ring buffers with size limits and backpressure
+- **Frame Assembly**: Codec-aware frame reconstruction from packets
+- **GOP Buffering**: Maintains complete GOPs for clean switching
+- **A/V Sync**: Automatic drift detection and correction
+
+### API Endpoints
+- `GET /api/v1/streams` - List active streams
+- `GET /api/v1/streams/{id}` - Get stream details
+- `DELETE /api/v1/streams/{id}` - Stop a stream
+- `POST /api/v1/streams/{id}/pause` - Pause ingestion
+- `POST /api/v1/streams/{id}/resume` - Resume ingestion
+- `GET /api/v1/stats` - System-wide statistics
+- `GET /api/v1/video/preview/{id}` - Stream preview data
+- `GET /api/v1/sync/status/{id}` - A/V sync status
+
+### Key Design Patterns
+- **Adapter Pattern**: Unified interface for SRT/RTP protocols
+- **Pipeline Pattern**: Packet → Frame → GOP → Output processing
+- **Observer Pattern**: Metrics and monitoring throughout
+- **Circuit Breaker**: Automatic recovery and reconnection
+- **Backpressure**: Flow control at every stage
+
 ## Future Considerations
-When implementing video streaming phases:
-- Use buffer pools for video data
-- Implement backpressure for stream ingestion
-- Consider memory-mapped files for segments
-- Plan for horizontal scaling
-- Design for CDN integration from the start
+When implementing remaining phases:
+- Leverage existing buffer pools and memory management
+- Extend GOP buffer for transcoding decisions
+- Use hybrid queue for HLS segment storage
+- Build on metrics infrastructure for CDN routing
+- Consider CUDA integration points in pipeline

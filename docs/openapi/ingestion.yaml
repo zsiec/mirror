@@ -1,0 +1,959 @@
+openapi: 3.0.3
+info:
+  title: Mirror Ingestion API
+  description: API for managing video stream ingestion in the Mirror platform
+  version: 1.0.0
+  contact:
+    name: Mirror Support
+    email: support@mirror.example.com
+servers:
+  - url: https://localhost:8443/api/v1
+    description: Local development server
+  - url: https://api.mirror.example.com/api/v1
+    description: Production server
+tags:
+  - name: streams
+    description: Stream management operations
+  - name: system
+    description: System information and statistics
+paths:
+  /streams:
+    get:
+      tags:
+        - streams
+      summary: List all active streams
+      description: Returns a list of all currently active streams with their metadata
+      operationId: listStreams
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamListResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /streams/{streamId}:
+    get:
+      tags:
+        - streams
+      summary: Get stream details
+      description: Returns detailed information about a specific stream
+      operationId: getStream
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamDTO'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    
+    delete:
+      tags:
+        - streams
+      summary: Terminate a stream
+      description: Terminates an active stream and removes it from the registry
+      operationId: deleteStream
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+      responses:
+        '200':
+          description: Stream terminated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /streams/{streamId}/stats:
+    get:
+      tags:
+        - streams
+      summary: Get stream statistics
+      description: Returns detailed statistics for a specific stream
+      operationId: getStreamStats
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamStatsDTO'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /streams/{streamId}/pause:
+    post:
+      tags:
+        - streams
+      summary: Pause stream ingestion
+      description: Pauses data ingestion for a stream without terminating the connection
+      operationId: pauseStream
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+      responses:
+        '200':
+          description: Stream paused successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /streams/{streamId}/resume:
+    post:
+      tags:
+        - streams
+      summary: Resume stream ingestion
+      description: Resumes data ingestion for a paused stream
+      operationId: resumeStream
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+      responses:
+        '200':
+          description: Stream resumed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /streams/{streamId}/buffer:
+    get:
+      tags:
+        - streams
+      summary: Get frame buffer statistics
+      description: Returns frame buffer and GOP statistics for a stream
+      operationId: getStreamBuffer
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FrameBufferResponse'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /streams/{streamId}/preview:
+    get:
+      tags:
+        - streams
+      summary: Get stream preview
+      description: Returns a preview of recent frames
+      operationId: getStreamPreview
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+        - name: duration
+          in: query
+          description: Duration of preview in seconds
+          required: false
+          schema:
+            type: number
+            format: float
+            minimum: 0.1
+            default: 1.0
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamPreviewResponse'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /streams/{streamId}/data:
+    get:
+      tags:
+        - streams
+      summary: Get stream data
+      description: Returns a stream of frame data
+      operationId: getStreamData
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+      responses:
+        '200':
+          description: Stream data response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /streams/{streamId}/sync:
+    get:
+      tags:
+        - streams
+      summary: Get A/V synchronization status
+      description: Returns audio/video synchronization status for a stream
+      operationId: getStreamSync
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncStatusResponse'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /streams/{streamId}/backpressure:
+    get:
+      tags:
+        - streams
+      summary: Get backpressure statistics
+      description: Returns backpressure statistics and current state
+      operationId: getStreamBackpressure
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackpressureResponse'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /streams/{streamId}/backpressure/control:
+    post:
+      tags:
+        - streams
+      summary: Control backpressure settings
+      description: Allows manual control of backpressure settings
+      operationId: controlStreamBackpressure
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackpressureControlRequest'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackpressureControlResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /streams/{streamId}/recovery:
+    get:
+      tags:
+        - streams
+      summary: Get error recovery statistics
+      description: Returns error recovery statistics and current state
+      operationId: getStreamRecovery
+      parameters:
+        - $ref: '#/components/parameters/streamId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecoveryResponse'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /stats:
+    get:
+      tags:
+        - system
+      summary: Get ingestion statistics
+      description: Returns overall ingestion system statistics
+      operationId: getStats
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionStats'
+  
+  /streams/stats/video:
+    get:
+      tags:
+        - streams
+      summary: Get video statistics for all streams
+      description: Returns video-specific statistics for all active streams
+      operationId: getVideoStats
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoStatsResponse'
+
+components:
+  parameters:
+    streamId:
+      name: streamId
+      in: path
+      description: Unique identifier of the stream
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]*$'
+        maxLength: 64
+        example: 'stream-123'
+  
+  schemas:
+    StreamListResponse:
+      type: object
+      required:
+        - streams
+        - count
+        - time
+      properties:
+        streams:
+          type: array
+          items:
+            $ref: '#/components/schemas/StreamDTO'
+        count:
+          type: integer
+          description: Total number of streams
+          example: 2
+        time:
+          type: string
+          format: date-time
+          description: Response timestamp
+    
+    StreamDTO:
+      type: object
+      required:
+        - id
+        - type
+        - source_addr
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+          description: Unique stream identifier
+          example: 'stream-123'
+        type:
+          type: string
+          enum: [srt, rtp]
+          description: Stream protocol type
+        source_addr:
+          type: string
+          description: Source IP address and port
+          example: '192.168.1.100:10080'
+        status:
+          type: string
+          enum: [connecting, active, paused, error, closed]
+          description: Current stream status
+        created_at:
+          type: string
+          format: date-time
+          description: Stream creation timestamp
+        last_heartbeat:
+          type: string
+          format: date-time
+          description: Last heartbeat timestamp
+        video_codec:
+          type: string
+          description: Video codec (e.g., HEVC, H264)
+          example: 'HEVC'
+        resolution:
+          type: string
+          description: Video resolution
+          example: '1920x1080'
+        bitrate:
+          type: integer
+          format: int64
+          description: Stream bitrate in bps
+          example: 50000000
+        frame_rate:
+          type: number
+          format: float
+          description: Frame rate in fps
+          example: 29.97
+        stats:
+          $ref: '#/components/schemas/StreamStatsDTO'
+    
+    StreamStatsDTO:
+      type: object
+      properties:
+        bytes_received:
+          type: integer
+          format: int64
+          description: Total bytes received
+        packets_received:
+          type: integer
+          format: int64
+          description: Total packets received
+        packets_lost:
+          type: integer
+          format: int64
+          description: Total packets lost
+        bitrate:
+          type: integer
+          format: int64
+          description: Current bitrate in bps
+        frame_buffer_stats:
+          $ref: '#/components/schemas/FrameBufferStatsDTO'
+    
+    FrameBufferStatsDTO:
+      type: object
+      required:
+        - capacity
+        - used
+        - available
+        - frames_assembled
+        - frames_dropped
+        - queue_pressure
+      properties:
+        capacity:
+          type: integer
+          format: int64
+          description: Maximum frames in buffer
+        used:
+          type: integer
+          format: int64
+          description: Current frames in buffer
+        available:
+          type: integer
+          format: int64
+          description: Available frame slots
+        frames_assembled:
+          type: integer
+          format: int64
+          description: Total frames assembled
+        frames_dropped:
+          type: integer
+          format: int64
+          description: Frames dropped due to pressure
+        queue_pressure:
+          type: number
+          format: float
+          description: Current pressure (0-1)
+        keyframes:
+          type: integer
+          format: int64
+          description: Number of keyframes
+        p_frames:
+          type: integer
+          format: int64
+          description: Number of P frames
+        b_frames:
+          type: integer
+          format: int64
+          description: Number of B frames
+    
+    StreamPreviewResponse:
+      type: object
+      required:
+        - stream_id
+        - duration_seconds
+        - frame_count
+        - preview
+        - timestamp
+      properties:
+        stream_id:
+          type: string
+          description: Stream identifier
+        duration_seconds:
+          type: number
+          format: float
+          description: Preview duration in seconds
+        frame_count:
+          type: integer
+          description: Number of frames in preview
+        preview:
+          type: string
+          description: Preview data
+        timestamp:
+          type: string
+          format: date-time
+          description: Preview generation timestamp
+    
+    IngestionStats:
+      type: object
+      required:
+        - started
+        - srt_enabled
+        - rtp_enabled
+      properties:
+        started:
+          type: boolean
+          description: Whether ingestion manager is started
+        srt_enabled:
+          type: boolean
+          description: Whether SRT ingestion is enabled
+        rtp_enabled:
+          type: boolean
+          description: Whether RTP ingestion is enabled
+        srt_sessions:
+          type: integer
+          description: Number of active SRT sessions
+        rtp_sessions:
+          type: integer
+          description: Number of active RTP sessions
+        total_streams:
+          type: integer
+          description: Total number of active streams
+        buffer_pool_size:
+          type: integer
+          description: Total buffer pool size
+        buffer_pool_used:
+          type: integer
+          description: Number of buffers in use
+    
+    SuccessResponse:
+      type: object
+      required:
+        - message
+        - timestamp
+      properties:
+        message:
+          type: string
+          description: Success message
+          example: 'Operation completed successfully'
+        data:
+          type: object
+          description: Additional response data
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp
+    
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - time
+      properties:
+        error:
+          type: string
+          description: HTTP status text
+          example: 'Not Found'
+        message:
+          type: string
+          description: Detailed error message
+          example: 'Stream not found: stream-123'
+        time:
+          type: string
+          format: date-time
+          description: Error timestamp
+    
+    FrameBufferResponse:
+      type: object
+      required:
+        - capacity
+        - used
+        - available
+        - frames_assembled
+        - frames_dropped
+        - queue_pressure
+        - stream_id
+        - codec
+        - gop
+        - gop_buffer
+      properties:
+        capacity:
+          type: integer
+          format: int64
+          description: Maximum frames in buffer
+        used:
+          type: integer
+          format: int64
+          description: Current frames in buffer
+        available:
+          type: integer
+          format: int64
+          description: Available frame slots
+        frames_assembled:
+          type: integer
+          format: int64
+          description: Total frames assembled
+        frames_dropped:
+          type: integer
+          format: int64
+          description: Frames dropped due to pressure
+        queue_pressure:
+          type: number
+          format: float
+          description: Current pressure (0-1)
+        keyframes:
+          type: integer
+          format: int64
+          description: Number of keyframes
+        p_frames:
+          type: integer
+          format: int64
+          description: Number of P frames
+        b_frames:
+          type: integer
+          format: int64
+          description: Number of B frames
+        stream_id:
+          type: string
+          description: Stream identifier
+        codec:
+          type: string
+          description: Video codec
+        gop:
+          type: object
+          properties:
+            total_gops:
+              type: integer
+              format: int64
+              description: Total GOPs processed
+            current_gop_size:
+              type: integer
+              format: int64
+              description: Current GOP size
+            average_gop_size:
+              type: number
+              format: float
+              description: Average GOP size
+            average_duration_ms:
+              type: integer
+              format: int64
+              description: Average GOP duration in milliseconds
+            i_frame_ratio:
+              type: number
+              format: float
+              description: I-frame ratio
+            p_frame_ratio:
+              type: number
+              format: float
+              description: P-frame ratio
+            b_frame_ratio:
+              type: number
+              format: float
+              description: B-frame ratio
+        gop_buffer:
+          type: object
+          properties:
+            gop_count:
+              type: integer
+              description: Number of GOPs in buffer
+            frame_count:
+              type: integer
+              description: Total frames in GOP buffer
+            total_bytes:
+              type: integer
+              format: int64
+              description: Total bytes in GOP buffer
+            duration_ms:
+              type: integer
+              format: int64
+              description: Total duration in milliseconds
+            dropped_gops:
+              type: integer
+              format: int64
+              description: Number of dropped GOPs
+            dropped_frames:
+              type: integer
+              format: int64
+              description: Number of dropped frames
+    
+    SyncStatusResponse:
+      type: object
+      required:
+        - stream_id
+        - status
+        - time
+      properties:
+        stream_id:
+          type: string
+          description: Stream identifier
+        status:
+          type: string
+          enum: [synced, drifting, unknown]
+          description: Current sync status
+        video:
+          $ref: '#/components/schemas/TrackStatusDTO'
+        audio:
+          $ref: '#/components/schemas/TrackStatusDTO'
+        drift:
+          $ref: '#/components/schemas/DriftStatusDTO'
+        time:
+          type: string
+          format: date-time
+          description: Response timestamp
+    
+    TrackStatusDTO:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [video, audio]
+          description: Track type
+        last_pts:
+          type: integer
+          format: int64
+          description: Last PTS value
+        last_dts:
+          type: integer
+          format: int64
+          description: Last DTS value
+        base_time:
+          type: string
+          format: date-time
+          description: Base time reference
+        packet_count:
+          type: integer
+          format: int64
+          description: Total packet count
+        dropped_count:
+          type: integer
+          format: int64
+          description: Dropped packet count
+        wrap_count:
+          type: integer
+          description: Timestamp wrap count
+        jump_count:
+          type: integer
+          description: Timestamp jump count
+        error_count:
+          type: integer
+          description: Error count
+    
+    DriftStatusDTO:
+      type: object
+      properties:
+        current_drift:
+          type: integer
+          format: int64
+          description: Current drift in milliseconds
+        max_drift:
+          type: integer
+          format: int64
+          description: Maximum drift in milliseconds
+        min_drift:
+          type: integer
+          format: int64
+          description: Minimum drift in milliseconds
+        avg_drift:
+          type: integer
+          format: int64
+          description: Average drift in milliseconds
+        sample_count:
+          type: integer
+          description: Number of samples
+        last_corrected:
+          type: string
+          format: date-time
+          description: Last correction timestamp
+    
+    BackpressureResponse:
+      type: object
+      required:
+        - stream_id
+        - current_pressure
+        - current_rate_bps
+        - statistics
+        - should_drop_gop
+        - timestamp
+      properties:
+        stream_id:
+          type: string
+          description: Stream identifier
+        current_pressure:
+          type: number
+          format: float
+          description: Current pressure (0-1)
+        current_rate_bps:
+          type: integer
+          format: int64
+          description: Current bitrate in bps
+        statistics:
+          type: object
+          description: Backpressure statistics
+        should_drop_gop:
+          type: boolean
+          description: Whether GOPs should be dropped
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp
+    
+    BackpressureControlRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum: [set_pressure, reset, drop_gop]
+          description: Control action
+        pressure:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Pressure value for set_pressure action
+    
+    BackpressureControlResponse:
+      type: object
+      required:
+        - stream_id
+        - action
+        - success
+        - timestamp
+      properties:
+        stream_id:
+          type: string
+          description: Stream identifier
+        action:
+          type: string
+          description: Action performed
+        success:
+          type: boolean
+          description: Whether action succeeded
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp
+    
+    RecoveryResponse:
+      type: object
+      required:
+        - stream_id
+        - state
+        - is_healthy
+        - recovery_count
+        - corruption_count
+        - resync_count
+        - statistics
+        - timestamp
+      properties:
+        stream_id:
+          type: string
+          description: Stream identifier
+        state:
+          type: string
+          enum: [normal, recovering, resyncing, failed]
+          description: Recovery state
+        is_healthy:
+          type: boolean
+          description: Whether stream is healthy
+        recovery_count:
+          type: integer
+          format: int64
+          description: Number of recoveries
+        corruption_count:
+          type: integer
+          format: int64
+          description: Number of corruptions detected
+        resync_count:
+          type: integer
+          format: int64
+          description: Number of resyncs
+        last_recovery_time:
+          type: string
+          format: date-time
+          description: Last recovery timestamp
+        statistics:
+          type: object
+          description: Recovery statistics
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp
+    
+    VideoStatsResponse:
+      type: object
+      required:
+        - streams
+        - count
+        - timestamp
+      properties:
+        streams:
+          type: object
+          additionalProperties:
+            type: object
+            description: Stream-specific video statistics
+        count:
+          type: integer
+          description: Number of streams
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp

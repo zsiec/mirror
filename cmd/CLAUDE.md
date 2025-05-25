@@ -11,6 +11,8 @@ Key features:
 - HTTP/3 server with QUIC protocol
 - Health check endpoints
 - Prometheus metrics server
+- Stream ingestion (SRT/RTP) - Phase 2
+- Stream management API
 - Graceful shutdown handling
 - Signal handling (SIGINT, SIGTERM)
 
@@ -33,14 +35,22 @@ Features:
 - HTTP/3 client with QUIC support
 - TLS configuration (accepts self-signed certs in dev)
 - Response body and header display
+- JSON response pretty-printing
 
 Usage:
 ```bash
 # Test health endpoint
 ./test-client -url https://localhost:8443/health
 
-# Test any HTTP/3 endpoint
+# Test version endpoint
 ./test-client -url https://localhost:8443/version
+
+# Test stream API endpoints
+./test-client -url https://localhost:8443/api/v1/streams
+./test-client -url https://localhost:8443/api/v1/stats
+
+# Test metrics endpoint
+./test-client -url https://localhost:8443/metrics
 ```
 
 ## Building
@@ -71,13 +81,28 @@ docker build -f docker/Dockerfile -t mirror:latest .
 docker-compose up -d
 ```
 
+## Stream Testing
+
+To test stream ingestion:
+
+```bash
+# Send test stream via SRT
+ffmpeg -re -i test_video.mp4 -c copy -f mpegts srt://localhost:30000?streamid=test-stream
+
+# Send test stream via RTP
+ffmpeg -re -i test_video.mp4 -c copy -f rtp rtp://localhost:5004
+
+# Check active streams
+./test-client -url https://localhost:8443/api/v1/streams
+```
+
 ## Future Applications
 
 As the project evolves, additional command-line tools may be added:
-- `stream-ingest`: Dedicated stream ingestion service
-- `transcode-worker`: Standalone transcoding worker
-- `hls-packager`: HLS packaging service
+- `transcode-worker`: Standalone transcoding worker (Phase 3)
+- `hls-packager`: HLS packaging service (Phase 4)
 - `mirror-cli`: Administrative CLI tool
+- `stream-simulator`: Load testing tool for multiple streams
 
 ## Development Tips
 
