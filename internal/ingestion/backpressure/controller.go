@@ -148,8 +148,23 @@ func (c *Controller) UpdateGOPStats(stats *gop.GOPStatistics) {
 
 // adjustRate adjusts the ingestion rate based on pressure
 func (c *Controller) adjustRate() {
-	pressure := c.GetSmoothedPressure()
+	currentPressure := c.GetPressure()
+	smoothedPressure := c.GetSmoothedPressure()
 	currentRate := c.currentRate.Load()
+	
+	// Use current pressure for immediate responsiveness, but consider smoothed for stability
+	pressure := currentPressure
+	
+	// If there's a significant difference between current and smoothed pressure,
+	// use a weighted blend favoring immediate response to rapid changes
+	pressureDiff := currentPressure - smoothedPressure
+	if pressureDiff > 0.1 || pressureDiff < -0.1 {
+		// Rapid change detected, favor immediate pressure for responsiveness
+		pressure = currentPressure*0.7 + smoothedPressure*0.3
+	} else {
+		// Stable conditions, use smoothed pressure
+		pressure = smoothedPressure
+	}
 	
 	var newRate int64
 	
@@ -183,10 +198,12 @@ func (c *Controller) adjustRate() {
 		}
 		
 		c.logger.WithFields(map[string]interface{}{
-			"old_rate":     currentRate,
-			"new_rate":     newRate,
-			"pressure":     pressure,
-			"target":       c.targetPressure,
+			"old_rate":        currentRate,
+			"new_rate":        newRate,
+			"pressure":        pressure,
+			"current_pressure": currentPressure,
+			"smoothed_pressure": smoothedPressure,
+			"target":          c.targetPressure,
 		}).Info("Rate adjusted")
 	}
 }
@@ -379,4 +396,11 @@ type Statistics struct {
 // IncrementGOPsDropped increments the GOPs dropped counter
 func (c *Controller) IncrementGOPsDropped() {
 	c.gopsDropped.Add(1)
+}
+
+// ClearPressureHistory clears the pressure history (for testing)
+func (c *Controller) ClearPressureHistory() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pressureHistory = c.pressureHistory[:0]
 }
