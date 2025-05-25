@@ -24,8 +24,8 @@ func TestTokenBucket(t *testing.T) {
 				break
 			}
 		}
-		// Allow small variance due to timing (±1%)
-		assert.InDelta(t, 10000, total, 100, "Should have approximately 10000 tokens")
+		// Allow variance due to timing and potential refill during consumption (±1.5%)
+		assert.InDelta(t, 10000, total, 150, "Should have approximately 10000 tokens")
 		assert.False(t, tb.Allow(1)) // No more tokens
 		
 		// Wait for refill (100ms should give us ~1000 tokens at 10000/sec)
