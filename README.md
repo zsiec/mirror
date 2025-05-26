@@ -634,21 +634,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [quic-go/quic-go](https://github.com/quic-go/quic-go) - HTTP/3 implementation
 - [go-astiav](https://github.com/asticode/go-astiav) - FFmpeg bindings
 
-## 💬 Community
-
-- **Discord**: [Join our server](https://discord.gg/mirror)
-- **Twitter**: [@MirrorStreaming](https://twitter.com/mirrorstreaming)
-- **Blog**: [blog.mirror.dev](https://blog.mirror.dev)
-
 ---
 
 <div align="center">
   <p>
     <strong>Built with ❤️ by the Mirror Team</strong>
-  </p>
-  <p>
-    <a href="https://mirror.dev">Website</a> •
-    <a href="https://docs.mirror.dev">Documentation</a> •
-    <a href="https://status.mirror.dev">Status</a>
   </p>
 </div>
