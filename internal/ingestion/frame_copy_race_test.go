@@ -24,7 +24,8 @@ func TestP2_10_FrameCopyRaceCondition(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	logger := logger.FromContext(ctx)
+	logEntry := logger.FromContext(ctx)
+	testLogger := logger.NewLogrusAdapter(logEntry)
 
 	// Create a minimal StreamHandler for testing
 	h := &StreamHandler{
@@ -33,7 +34,7 @@ func TestP2_10_FrameCopyRaceCondition(t *testing.T) {
 		recentFrames:    make([]*types.VideoFrame, 0, 100),
 		maxRecentFrames: 100,
 		ctx:             ctx,
-		logger:          logger,
+		logger:          testLogger,
 	}
 
 	// Number of concurrent operations
@@ -121,11 +122,12 @@ func TestP2_10_FrameCopyRaceCondition(t *testing.T) {
 // TestP2_10_FrameDataRace shows the specific race on frame fields
 func TestP2_10_FrameDataRace(t *testing.T) {
 	// Create a mock stream handler with recent frames storage
+	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	handler := &StreamHandler{
 		streamID:        "test-stream",
 		recentFrames:    make([]*types.VideoFrame, 0, 100),
 		maxRecentFrames: 100,
-		logger:          logrus.NewEntry(logrus.New()),
+		logger:          testLogger,
 		codec:           types.CodecH264,
 	}
 
@@ -198,7 +200,8 @@ func TestP2_10_SafeFrameHandling(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	logger := logger.FromContext(ctx)
+	logEntry := logger.FromContext(ctx)
+	testLogger := logger.NewLogrusAdapter(logEntry)
 
 	h := &StreamHandler{
 		streamID:        "test-stream",
@@ -206,7 +209,7 @@ func TestP2_10_SafeFrameHandling(t *testing.T) {
 		recentFrames:    make([]*types.VideoFrame, 0, 100),
 		maxRecentFrames: 100,
 		ctx:             ctx,
-		logger:          logger,
+		logger:          testLogger,
 	}
 
 	const numGoroutines = 10

@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gorilla/mux"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -18,12 +20,39 @@ import (
 )
 
 func TestHandleStreamSync(t *testing.T) {
-	// Set up test logger
-	testLogger, err := logger.New(&config.LoggingConfig{Level: "debug"})
+	// Setup Redis
+	mr, err := miniredis.Run()
 	require.NoError(t, err)
+	defer mr.Close()
 
-	// Create test manager
-	cfg := &config.IngestionConfig{}
+	// Set up test logger
+	logrusLogger, err := logger.New(&config.LoggingConfig{Level: "debug"})
+	require.NoError(t, err)
+	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
+
+	// Create test manager with proper Redis config
+	cfg := &config.IngestionConfig{
+		SRT: config.SRTConfig{
+			Enabled:    false,
+			ListenAddr: "127.0.0.1",
+			Port:       1234,
+		},
+		RTP: config.RTPConfig{
+			Enabled:    false,
+			ListenAddr: "127.0.0.1",
+			Port:       5004,
+		},
+		Buffer: config.BufferConfig{
+			RingSize: 4096,
+			PoolSize: 10,
+		},
+		Registry: config.RegistryConfig{
+			RedisAddr:     mr.Addr(),
+			RedisPassword: "",
+			RedisDB:       0,
+			TTL:           5 * time.Minute,
+		},
+	}
 
 	manager, err := NewManager(cfg, testLogger)
 	require.NoError(t, err)

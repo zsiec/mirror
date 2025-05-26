@@ -102,7 +102,6 @@ func (d *H264Depacketizer) handleSTAPA(payload []byte) ([][]byte, error) {
 	maxNALUnits := 100 // Reasonable limit for aggregated packets
 
 	for offset < len(payload) && len(nalUnits) < maxNALUnits {
-		// CRITICAL FIX: Check if we have enough bytes for the NAL size field BEFORE reading
 		if offset+2 > len(payload) {
 			// Not enough data for size field
 			return nalUnits, fmt.Errorf("STAP-A truncated at offset %d: need 2 bytes for size, have %d",
@@ -113,7 +112,6 @@ func (d *H264Depacketizer) handleSTAPA(payload []byte) ([][]byte, error) {
 		nalSize := binary.BigEndian.Uint16(payload[offset : offset+2])
 		offset += 2
 
-		// CRITICAL FIX: Validate NAL size before using it
 		if nalSize == 0 {
 			// Skip zero-size NAL units
 			continue
@@ -123,7 +121,6 @@ func (d *H264Depacketizer) handleSTAPA(payload []byte) ([][]byte, error) {
 			return nalUnits, fmt.Errorf(security.ErrMsgNALUnitTooLarge, nalSize, security.MaxNALUnitSize)
 		}
 
-		// CRITICAL FIX: Check if we have enough bytes for the NAL unit
 		if offset+int(nalSize) > len(payload) {
 			return nalUnits, fmt.Errorf("STAP-A NAL unit out of bounds: offset=%d, nalSize=%d, available=%d",
 				offset, nalSize, len(payload)-offset)

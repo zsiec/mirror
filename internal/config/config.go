@@ -25,6 +25,13 @@ type ServerConfig struct {
 	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
 	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
 
+	// HTTP/1.1 and HTTP/2 fallback (for debugging)
+	HTTPPort       int  `mapstructure:"http_port"`       // TCP port for HTTP/1.1 and HTTP/2
+	EnableHTTP     bool `mapstructure:"enable_http"`     // Enable HTTP/1.1 and HTTP/2 server
+	EnableHTTP2    bool `mapstructure:"enable_http2"`    // Enable HTTP/2 support
+	HTTPSRedirect  bool `mapstructure:"https_redirect"`  // Redirect HTTP to HTTPS
+	DebugEndpoints bool `mapstructure:"debug_endpoints"` // Enable debug endpoints (pprof, etc.)
+
 	// QUIC specific
 	MaxIncomingStreams    int64         `mapstructure:"max_incoming_streams"`
 	MaxIncomingUniStreams int64         `mapstructure:"max_incoming_uni_streams"`

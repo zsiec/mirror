@@ -78,7 +78,6 @@ func (rb *RingBuffer) Write(data []byte) (int, error) {
 
 	dataLen := int64(len(data))
 
-	// CRITICAL FIX: Don't drop data silently
 	if dataLen > rb.maxPacketSize {
 		// Record oversized packet metric
 		bufferDropsTotal.WithLabelValues(rb.streamID).Inc()

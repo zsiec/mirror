@@ -41,6 +41,9 @@ type Session struct {
 	paused          int32
 	timeout         time.Duration
 
+	// Callback for sending depacketized NAL units to the adapter
+	nalCallback func(nalUnits [][]byte) error
+
 	// Codec detection results
 	detectedClockRate uint32
 	mediaFormat       string
@@ -125,6 +128,15 @@ func (s *Session) SetTimeout(timeout time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.timeout = timeout
+}
+
+// SetNALCallback sets the callback for receiving depacketized NAL units
+func (s *Session) SetNALCallback(callback func(nalUnits [][]byte) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.logger.Info("RTP Session: Setting NAL callback")
+	s.nalCallback = callback
+	s.logger.Info("RTP Session: NAL callback set successfully")
 }
 
 func (s *Session) Start() {
@@ -511,8 +523,17 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 }
 
 func (s *Session) ProcessPacket(packet *rtp.Packet) {
+	s.logger.WithFields(map[string]interface{}{
+		"payload_type": packet.PayloadType,
+		"ssrc":         packet.SSRC,
+		"sequence":     packet.SequenceNumber,
+		"timestamp":    packet.Timestamp,
+		"payload_size": len(packet.Payload),
+	}).Debug("RTP ProcessPacket: Entry")
+
 	// Check if paused
 	if atomic.LoadInt32(&s.paused) == 1 {
+		s.logger.Debug("RTP ProcessPacket: Session paused, dropping packet")
 		return
 	}
 
@@ -521,12 +542,15 @@ func (s *Session) ProcessPacket(packet *rtp.Packet) {
 	if s.rateLimiter != nil {
 		if err := s.rateLimiter.AllowN(s.ctx, packetSize); err != nil {
 			atomic.AddUint64(&s.stats.RateLimitDrops, 1)
+			s.logger.WithError(err).Debug("RTP ProcessPacket: Rate limit exceeded")
 			return
 		}
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.logger.Debug("RTP ProcessPacket: Acquired lock, updating stats")
 
 	// Update last packet time
 	s.lastPacket = time.Now()
@@ -553,19 +577,38 @@ func (s *Session) ProcessPacket(packet *rtp.Packet) {
 	}
 	s.stats.LastSequence = packet.SequenceNumber
 
+	s.logger.Debug("RTP ProcessPacket: About to handle codec detection")
+
 	// Handle codec detection with depacketizer initialization
 	if !s.handleCodecDetection(packet) {
+		s.logger.Debug("RTP ProcessPacket: Codec detection failed, dropping packet")
 		return
 	}
+
+	s.logger.WithField("codec_type", s.codecType).Debug("RTP ProcessPacket: Codec detection successful, about to depacketize")
 
 	// Depacketize RTP payload
-	_, err := s.depacketizer.Depacketize(packet)
+	nalUnits, err := s.depacketizer.Depacketize(packet)
 	if err != nil {
-		s.logger.WithError(err).Debug("Failed to depacketize RTP payload")
+		s.logger.WithError(err).Debug("RTP ProcessPacket: Failed to depacketize RTP payload")
 		return
 	}
 
-	// Handler will process the NAL units, session just tracks stats
+	s.logger.WithField("nal_units_count", len(nalUnits)).Debug("RTP ProcessPacket: Depacketization successful")
+
+	// Send NAL units to callback if set
+	if s.nalCallback != nil && len(nalUnits) > 0 {
+		s.logger.WithField("nal_units_count", len(nalUnits)).Info("RTP Session: About to call NAL callback")
+		if err := s.nalCallback(nalUnits); err != nil {
+			s.logger.WithError(err).Error("RTP ProcessPacket: NAL callback failed")
+		} else {
+			s.logger.WithField("nal_units_sent", len(nalUnits)).Info("RTP ProcessPacket: NAL units sent to callback successfully")
+		}
+	} else if s.nalCallback == nil {
+		s.logger.Debug("RTP ProcessPacket: No NAL callback set")
+	} else {
+		s.logger.Debug("RTP ProcessPacket: No NAL units to send")
+	}
 }
 
 // ProcessRTCP handles RTCP packets for this session

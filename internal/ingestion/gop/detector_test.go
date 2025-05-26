@@ -56,15 +56,15 @@ func TestDetector_GOPBoundary(t *testing.T) {
 
 	require.NotNil(t, closedGOP)
 	assert.Equal(t, uint64(1), closedGOP.ID)
-	assert.Equal(t, 3, closedGOP.FrameCount)
+	assert.Equal(t, 3, len(closedGOP.Frames))
 	assert.True(t, closedGOP.Closed)
 	assert.Equal(t, int64(1000), closedGOP.StartPTS)
 	assert.Equal(t, int64(2000), closedGOP.EndPTS)
 
 	// Check frame counts
-	assert.Equal(t, 1, closedGOP.IFrames)
-	assert.Equal(t, 1, closedGOP.PFrames)
-	assert.Equal(t, 1, closedGOP.BFrames)
+	assert.Equal(t, 1, countIFrames(closedGOP))
+	assert.Equal(t, 1, closedGOP.PFrameCount)
+	assert.Equal(t, 1, closedGOP.BFrameCount)
 
 	// New GOP should be started
 	currentGOP := detector.GetCurrentGOP()
@@ -167,13 +167,15 @@ func TestGOP_IsComplete(t *testing.T) {
 	// Not complete with just 1 frame
 	assert.False(t, gop.IsComplete())
 
-	// Add frames
+	// Add frames with proper 90kHz PTS timing (30fps = 3000 PTS units per frame)
 	for i := 2; i <= 30; i++ {
 		frameType := types.FrameTypeP
 		if i%3 == 0 {
 			frameType = types.FrameTypeB
 		}
-		detector.ProcessFrame(createTestFrame(uint64(i), frameType, int64(1000+i*33)))
+		// Use proper 90kHz PTS: 30fps = 3000 PTS units per frame
+		pts := int64(1000 + (i-1)*3000) // Start at 1000, increment by 3000 for 30fps
+		detector.ProcessFrame(createTestFrame(uint64(i), frameType, pts))
 	}
 
 	// Complete with 30 frames

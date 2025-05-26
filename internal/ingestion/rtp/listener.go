@@ -15,6 +15,14 @@ import (
 	"github.com/zsiec/mirror/internal/metrics"
 )
 
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // SessionHandler is a function that handles new RTP sessions
 type SessionHandler func(*Session) error
 
@@ -55,7 +63,7 @@ func NewListener(cfg *config.RTPConfig, codecsCfg *config.CodecsConfig, reg regi
 	validatorConfig := &ValidatorConfig{
 		AllowedPayloadTypes: []uint8{96, 97, 98, 99}, // Dynamic payload types
 		MaxSequenceGap:      100,
-		MaxTimestampJump:    90000 * 10, // 10 seconds at 90kHz
+		MaxTimestampJump:    90000 * 60, // 60 seconds at 90kHz - more permissive for video streams
 	}
 	validator := NewValidator(validatorConfig)
 
@@ -205,10 +213,24 @@ func (l *Listener) routePackets() {
 				continue
 			}
 
+			// Log small packets for debugging
+			if n < 12 { // RTP header minimum size
+				l.logger.WithFields(map[string]interface{}{
+					"size":      n,
+					"source":    addr.String(),
+					"raw_bytes": fmt.Sprintf("%x", buf[:n]),
+				}).Debug("Received packet too small for RTP")
+				continue
+			}
+
 			// Parse RTP packet
 			packet := &rtp.Packet{}
 			if err := packet.Unmarshal(buf[:n]); err != nil {
-				l.logger.WithError(err).Debug("Failed to parse RTP packet")
+				l.logger.WithError(err).WithFields(map[string]interface{}{
+					"size":      n,
+					"source":    addr.String(),
+					"raw_bytes": fmt.Sprintf("%x", buf[:min(n, 16)]), // Log first 16 bytes
+				}).Debug("Failed to parse RTP packet")
 				continue
 			}
 

@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -119,4 +120,44 @@ func (s *Stream) IsActive() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.Status == StatusActive || s.Status == StatusConnecting
+}
+
+// MarshalJSON implements the json.Marshaler interface to safely serialize the stream
+// This avoids copying the mutex when marshaling
+func (s *Stream) MarshalJSON() ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Create a struct with only the JSON-serializable fields
+	type streamAlias struct {
+		ID              string       `json:"id"`
+		Type            StreamType   `json:"type"`
+		SourceAddr      string       `json:"source_addr"`
+		Status          StreamStatus `json:"status"`
+		CreatedAt       time.Time    `json:"created_at"`
+		LastHeartbeat   time.Time    `json:"last_heartbeat"`
+		VideoCodec      string       `json:"video_codec"`
+		Resolution      string       `json:"resolution"`
+		Bitrate         int64        `json:"bitrate"`
+		FrameRate       float64      `json:"frame_rate"`
+		BytesReceived   int64        `json:"bytes_received"`
+		PacketsReceived int64        `json:"packets_received"`
+		PacketsLost     int64        `json:"packets_lost"`
+	}
+
+	return json.Marshal(streamAlias{
+		ID:              s.ID,
+		Type:            s.Type,
+		SourceAddr:      s.SourceAddr,
+		Status:          s.Status,
+		CreatedAt:       s.CreatedAt,
+		LastHeartbeat:   s.LastHeartbeat,
+		VideoCodec:      s.VideoCodec,
+		Resolution:      s.Resolution,
+		Bitrate:         s.Bitrate,
+		FrameRate:       s.FrameRate,
+		BytesReceived:   s.BytesReceived,
+		PacketsReceived: s.PacketsReceived,
+		PacketsLost:     s.PacketsLost,
+	})
 }

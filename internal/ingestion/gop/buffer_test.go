@@ -9,15 +9,18 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zsiec/mirror/internal/ingestion/types"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
-func createTestGOP(id uint64, frameCount int) *GOP {
+func createTestGOP(id uint64, frameCount int) *types.GOP {
 	baseTime := time.Now()
-	gop := &GOP{
+	gop := &types.GOP{
 		ID:        id,
+		StreamID:  "test-stream",
 		StartPTS:  int64(id * 1000),
 		StartTime: baseTime.Add(time.Duration(id) * 100 * time.Millisecond), // Closer together
 		Frames:    make([]*types.VideoFrame, 0, frameCount),
+		Complete:  true,
 		Closed:    true,
 	}
 
@@ -31,7 +34,7 @@ func createTestGOP(id uint64, frameCount int) *GOP {
 	}
 	gop.Frames = append(gop.Frames, keyframe)
 	gop.Keyframe = keyframe
-	gop.IFrames = 1
+	// IFrames count is derived from countIFrames() when needed
 	gop.TotalSize = int64(keyframe.TotalSize)
 
 	// Add P and B frames
@@ -50,21 +53,21 @@ func createTestGOP(id uint64, frameCount int) *GOP {
 		gop.Frames = append(gop.Frames, frame)
 
 		if frameType == types.FrameTypeP {
-			gop.PFrames++
+			gop.PFrameCount++
 		} else {
-			gop.BFrames++
+			gop.BFrameCount++
 		}
 		gop.TotalSize += int64(frame.TotalSize)
 	}
 
-	gop.FrameCount = len(gop.Frames)
-	gop.Duration = time.Duration(frameCount*33) * time.Millisecond
+	// FrameCount is now len(gop.Frames) - automatically updated
+	gop.Duration = int64(frameCount * 33 * 90) // Convert milliseconds to PTS units (90kHz)
 
 	return gop
 }
 
 func TestBuffer_AddGOP(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := BufferConfig{
 		MaxGOPs:     5,
 		MaxBytes:    1000000, // 1MB to avoid byte limit
@@ -93,7 +96,7 @@ func TestBuffer_AddGOP(t *testing.T) {
 }
 
 func TestBuffer_EnforceLimits(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := BufferConfig{
 		MaxGOPs:     3,
 		MaxBytes:    500000, // Increased to avoid byte limit triggering
@@ -119,7 +122,7 @@ func TestBuffer_EnforceLimits(t *testing.T) {
 }
 
 func TestBuffer_GetFrame(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := BufferConfig{MaxGOPs: 5}
 	buffer := NewBuffer("test-stream", config, logger)
 
@@ -137,7 +140,7 @@ func TestBuffer_GetFrame(t *testing.T) {
 }
 
 func TestBuffer_DropFramesForPressure(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := BufferConfig{MaxGOPs: 5}
 	buffer := NewBuffer("test-stream", config, logger)
 
@@ -180,12 +183,12 @@ func TestBuffer_DropFramesForPressure(t *testing.T) {
 }
 
 func TestBuffer_DropStrategies(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := BufferConfig{MaxGOPs: 5}
 	buffer := NewBuffer("test-stream", config, logger)
 
 	// Create a GOP with specific structure for testing
-	gop := &GOP{
+	gop := &types.GOP{
 		ID:        1,
 		StartPTS:  1000,
 		StartTime: time.Now(),
@@ -218,15 +221,15 @@ func TestBuffer_DropStrategies(t *testing.T) {
 
 		if i == 0 {
 			gop.Keyframe = frame
-			gop.IFrames = 1
+			// IFrames count is derived from countIFrames() when needed
 		} else if f.frameType == types.FrameTypeP {
-			gop.PFrames++
+			gop.PFrameCount++
 		} else {
-			gop.BFrames++
+			gop.BFrameCount++
 		}
 	}
 
-	gop.FrameCount = len(gop.Frames)
+	// FrameCount is now len(gop.Frames) - automatically updated
 	gop.TotalSize = int64(len(gop.Frames) * 1000)
 
 	buffer.AddGOP(gop)
@@ -240,12 +243,12 @@ func TestBuffer_DropStrategies(t *testing.T) {
 
 	// Verify GOP structure after dropping
 	remainingGOP := buffer.GetGOP(1)
-	assert.Equal(t, 3, remainingGOP.FrameCount) // I + 2P
-	assert.Equal(t, 0, remainingGOP.BFrames)
+	assert.Equal(t, 3, len(remainingGOP.Frames)) // I + 2P
+	assert.Equal(t, 0, remainingGOP.BFrameCount)
 }
 
 func TestBuffer_ExtremePresssure(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := BufferConfig{MaxGOPs: 5}
 	buffer := NewBuffer("test-stream", config, logger)
 
@@ -264,7 +267,7 @@ func TestBuffer_ExtremePresssure(t *testing.T) {
 }
 
 func TestBuffer_Clear(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := BufferConfig{MaxGOPs: 5}
 	buffer := NewBuffer("test-stream", config, logger)
 
@@ -280,4 +283,40 @@ func TestBuffer_Clear(t *testing.T) {
 	assert.Equal(t, 0, stats.GOPCount)
 	assert.Equal(t, 0, stats.FrameCount)
 	assert.Equal(t, int64(0), stats.TotalBytes)
+}
+
+// SESSION-AWARE EXTRACTION TESTS - DEPRECATED
+// These tests have been removed as part of the session-long parameter caching implementation.
+// Parameter set extraction is now handled at the StreamHandler level, not the GOP buffer level.
+
+// func TestBuffer_ExtractParameterSetsRobust - REMOVED
+// This test was removed as part of session-long parameter caching implementation.
+
+// func TestEncoderSessionIntegration_EndToEnd - REMOVED
+// This test was removed as part of session-long parameter caching implementation.
+
+// Helper function to create test iframe with parameter sets
+func createTestIFrameWithParameters(id uint64, pts int64, t *testing.T) *types.VideoFrame {
+	t.Helper()
+
+	// Create SPS NAL unit (H.264)
+	spsData := []byte{0x67, 0x42, 0x00, 0x1f, 0xda, 0x01, 0x40, 0x16, 0xec, 0x04, 0x40, 0x00, 0x00, 0x03, 0x00, 0x40, 0x00, 0x00, 0x0f, 0x03, 0xc5, 0x8b, 0xa8}
+
+	// Create PPS NAL unit
+	ppsData := []byte{0x68, 0xce, 0x3c, 0x80}
+
+	// Create IDR slice
+	idrData := []byte{0x65, 0x88, 0x84, 0x00, 0x33, 0xff}
+
+	return &types.VideoFrame{
+		ID:        id,
+		PTS:       pts,
+		Type:      types.FrameTypeIDR, // Use IDR type for keyframes
+		TotalSize: len(spsData) + len(ppsData) + len(idrData),
+		NALUnits: []types.NALUnit{
+			{Type: 7, Data: spsData}, // SPS
+			{Type: 8, Data: ppsData}, // PPS
+			{Type: 5, Data: idrData}, // IDR slice
+		},
+	}
 }

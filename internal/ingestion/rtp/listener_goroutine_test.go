@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zsiec/mirror/internal/config"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 // TestP2_11_HandlerGoroutineLeak demonstrates that session handler goroutines
@@ -37,7 +38,7 @@ func TestP2_11_HandlerGoroutineLeak(t *testing.T) {
 
 	codecsCfg := &config.CodecsConfig{}
 	reg := &mockRegistry{}
-	log := logrus.NewEntry(logrus.New())
+	log := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 
 	// Create listener
 	listener := NewListener(cfg, codecsCfg, reg, log)

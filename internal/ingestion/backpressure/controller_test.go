@@ -8,10 +8,11 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zsiec/mirror/internal/ingestion/gop"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 func TestController_BasicOperation(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,    // 1KB/s min
 		MaxRate:        1000000, // 1MB/s max
@@ -34,7 +35,7 @@ func TestController_BasicOperation(t *testing.T) {
 }
 
 func TestController_RateAdjustment(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,
@@ -68,7 +69,7 @@ func TestController_RateAdjustment(t *testing.T) {
 }
 
 func TestController_PressureSmoothing(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,
@@ -90,7 +91,7 @@ func TestController_PressureSmoothing(t *testing.T) {
 }
 
 func TestController_GOPAwareAdjustment(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,
@@ -117,7 +118,7 @@ func TestController_GOPAwareAdjustment(t *testing.T) {
 }
 
 func TestController_ExtremePressure(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,
@@ -151,7 +152,7 @@ func TestController_ExtremePressure(t *testing.T) {
 }
 
 func TestController_RateLimits(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        10000,  // 10KB/s
 		MaxRate:        100000, // 100KB/s
@@ -174,7 +175,7 @@ func TestController_RateLimits(t *testing.T) {
 }
 
 func TestController_Callbacks(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,
@@ -201,7 +202,7 @@ func TestController_Callbacks(t *testing.T) {
 }
 
 func TestController_Statistics(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,

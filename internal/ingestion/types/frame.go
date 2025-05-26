@@ -14,6 +14,7 @@ const (
 	FrameTypeIDR                  // Instantaneous Decoder Refresh
 	FrameTypeSPS                  // Sequence Parameter Set
 	FrameTypePPS                  // Picture Parameter Set
+	FrameTypeVPS                  // Video Parameter Set (HEVC)
 	FrameTypeSEI                  // Supplemental Enhancement Info
 	FrameTypeAUD                  // Access Unit Delimiter
 )
@@ -33,6 +34,8 @@ func (f FrameType) String() string {
 		return "SPS"
 	case FrameTypePPS:
 		return "PPS"
+	case FrameTypeVPS:
+		return "VPS"
 	case FrameTypeSEI:
 		return "SEI"
 	case FrameTypeAUD:
@@ -62,7 +65,7 @@ type FrameFlags uint16
 
 const (
 	FrameFlagKeyframe    FrameFlags = 1 << 0
-	FrameFlagReference   FrameFlags = 1 << 1 // Used as reference
+	FrameFlagReference   FrameFlags = 1 << 1
 	FrameFlagCorrupted   FrameFlags = 1 << 2
 	FrameFlagDroppable   FrameFlags = 1 << 3
 	FrameFlagLastInGOP   FrameFlags = 1 << 4
@@ -169,6 +172,5 @@ func (f *VideoFrame) CalculateBitrate() float64 {
 	if f.Duration <= 0 {
 		return 0
 	}
-	// Convert to bits per second
 	return float64(f.TotalSize*8) / (float64(f.Duration) / 90000.0)
 }

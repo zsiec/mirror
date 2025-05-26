@@ -54,6 +54,12 @@ func (h *Handlers) RegisterRoutes(router *mux.Router) {
 
 	// A/V sync endpoint
 	api.HandleFunc("/streams/{id}/sync", h.manager.HandleStreamSync).Methods("GET")
+	
+	// Iframe endpoint
+	api.HandleFunc("/streams/{id}/iframe", h.manager.HandleStreamIframe).Methods("GET")
+	
+	// Parameter set monitoring endpoint
+	api.HandleFunc("/streams/{id}/parameters", h.manager.HandleStreamParameters).Methods("GET")
 
 	h.logger.Info("Ingestion routes registered")
 }
@@ -80,11 +86,21 @@ type StreamDTO struct {
 }
 
 type StreamStatsDTO struct {
-	BytesReceived    int64               `json:"bytes_received"`
-	PacketsReceived  int64               `json:"packets_received"`
-	PacketsLost      int64               `json:"packets_lost"`
-	Bitrate          int64               `json:"bitrate"`
-	FrameBufferStats FrameBufferStatsDTO `json:"frame_buffer_stats"`
+	BytesReceived    int64                    `json:"bytes_received"`
+	PacketsReceived  int64                    `json:"packets_received"`
+	PacketsLost      int64                    `json:"packets_lost"`
+	Bitrate          int64                    `json:"bitrate"`
+	FrameBufferStats FrameBufferStatsDTO      `json:"frame_buffer_stats"`
+	ConnectionStats  *ConnectionStatsDTO      `json:"connection_stats,omitempty"`
+}
+
+type ConnectionStatsDTO struct {
+	PacketsLost      int64   `json:"packets_lost"`
+	PacketsRetrans   int64   `json:"packets_retrans"`
+	RTTMs            float64 `json:"rtt_ms"`
+	BandwidthMbps    float64 `json:"bandwidth_mbps"`
+	DeliveryDelayMs  float64 `json:"delivery_delay_ms"`
+	ConnectionTimeMs int64   `json:"connection_time_ms"`
 }
 
 // FrameBufferStatsDTO contains video-aware buffer statistics
@@ -186,6 +202,70 @@ func convertStreamToDTO(stream *registry.Stream) StreamDTO {
 	}
 }
 
+// convertStreamToDTOWithStats converts a stream to DTO using real-time handler stats
+func convertStreamToDTOWithStats(stream *registry.Stream, handlerStats *StreamStats, handler *StreamHandler) StreamDTO {
+	dto := convertStreamToDTO(stream)
+	if handlerStats != nil {
+		// Override with real-time handler statistics
+		dto.Stats.BytesReceived = int64(handlerStats.BytesProcessed)
+		dto.Stats.PacketsReceived = int64(handlerStats.PacketsReceived)
+		dto.Stats.Bitrate = int64(handlerStats.Bitrate)
+
+		// Update top-level metadata with real-time values
+		dto.Bitrate = int64(handlerStats.Bitrate)
+
+		// Update video codec with detected codec from handler
+		if handlerStats.Codec != "" && handlerStats.Codec != "unknown" {
+			dto.VideoCodec = handlerStats.Codec
+		}
+
+		// Calculate frame rate from GOP stats if available
+		if handlerStats.GOPStats.AverageDuration > 0 && handlerStats.GOPStats.AverageGOPSize > 0 {
+			avgFramesPerGOP := float64(handlerStats.GOPStats.AverageGOPSize)
+			avgGOPDurationSec := handlerStats.GOPStats.AverageDuration.Seconds()
+			if avgGOPDurationSec > 0 {
+				dto.FrameRate = avgFramesPerGOP / avgGOPDurationSec
+			}
+		}
+
+		// Use resolution and framerate from handler stats
+		if handlerStats.Resolution.Width > 0 && handlerStats.Resolution.Height > 0 {
+			dto.Resolution = handlerStats.Resolution.String()
+		}
+		if handlerStats.Framerate > 0 {
+			dto.FrameRate = handlerStats.Framerate
+		}
+
+		// Add connection-level statistics if available
+		if handlerStats.ConnectionStats != nil {
+			dto.Stats.ConnectionStats = &ConnectionStatsDTO{
+				PacketsLost:      handlerStats.ConnectionStats.PacketsLost,
+				PacketsRetrans:   handlerStats.ConnectionStats.PacketsRetrans,
+				RTTMs:            handlerStats.ConnectionStats.RTTMs,
+				BandwidthMbps:    handlerStats.ConnectionStats.BandwidthMbps,
+				DeliveryDelayMs:  handlerStats.ConnectionStats.DeliveryDelayMs,
+				ConnectionTimeMs: handlerStats.ConnectionStats.ConnectionTimeMs,
+			}
+			// Override packets lost with connection-level data
+			dto.Stats.PacketsLost = handlerStats.ConnectionStats.PacketsLost
+		}
+
+		// Populate frame buffer stats from handler
+		dto.Stats.FrameBufferStats = FrameBufferStatsDTO{
+			Capacity:        100, // Default frame buffer capacity
+			Used:            handlerStats.QueueDepth,
+			Available:       100 - handlerStats.QueueDepth,
+			FramesAssembled: handlerStats.FramesAssembled,
+			FramesDropped:   handlerStats.FramesDropped,
+			QueuePressure:   handlerStats.QueuePressure,
+			Keyframes:       handlerStats.KeyframeCount,
+			PFrames:         handlerStats.PFrameCount,
+			BFrames:         handlerStats.BFrameCount,
+		}
+	}
+	return dto
+}
+
 // HandleListStreams - GET /api/v1/streams
 func (m *Manager) HandleListStreams(w http.ResponseWriter, r *http.Request) {
 	streams, err := m.registry.List(r.Context())
@@ -201,9 +281,16 @@ func (m *Manager) HandleListStreams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, stream := range streams {
-		dto := convertStreamToDTO(stream)
-		// Video-aware handlers don't use byte buffers
-		response.Streams = append(response.Streams, dto)
+		// Try to get real-time stats from handler if available (race-condition safe)
+		if handler, stats, exists := m.GetStreamHandlerAndStats(stream.ID); exists {
+			// Use real-time stats from handler
+			dto := convertStreamToDTOWithStats(stream, &stats, handler)
+			response.Streams = append(response.Streams, dto)
+		} else {
+			// Fallback to registry stats when handler not available
+			dto := convertStreamToDTO(stream)
+			response.Streams = append(response.Streams, dto)
+		}
 	}
 
 	writeJSON(r.Context(), w, http.StatusOK, response)
@@ -220,7 +307,35 @@ func (m *Manager) HandleGetStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dto := convertStreamToDTO(stream)
+	// Try to get real-time stats from handler if available
+	handler, exists := m.GetStreamHandler(streamID)
+	var dto StreamDTO
+	if exists {
+		// Use async stats collection with timeout to prevent deadlock
+		ctx, cancel := context.WithTimeout(r.Context(), 100*time.Millisecond)
+		defer cancel()
+
+		statsChannel := make(chan StreamStats, 1)
+		go func() {
+			stats := handler.GetStats()
+			select {
+			case statsChannel <- stats:
+			case <-ctx.Done():
+			}
+		}()
+
+		select {
+		case stats := <-statsChannel:
+			// Use real-time stats
+			dto = convertStreamToDTOWithStats(stream, &stats, handler)
+		case <-ctx.Done():
+			// Fall back to registry stats on timeout
+			dto = convertStreamToDTO(stream)
+		}
+	} else {
+		// Fallback to registry stats
+		dto = convertStreamToDTO(stream)
+	}
 
 	writeJSON(r.Context(), w, http.StatusOK, dto)
 }
@@ -244,14 +359,35 @@ func (m *Manager) HandleStreamStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats := handler.GetStats()
+	// Use async stats collection with timeout to prevent deadlock
+	ctx, cancel := context.WithTimeout(r.Context(), 100*time.Millisecond)
+	defer cancel()
 
-	// Build response with video-aware stats
+	statsChannel := make(chan StreamStats, 1)
+	go func() {
+		stats := handler.GetStats()
+		select {
+		case statsChannel <- stats:
+		case <-ctx.Done():
+		}
+	}()
+
+	var stats StreamStats
+	select {
+	case stats = <-statsChannel:
+		// Got real-time stats
+	case <-ctx.Done():
+		// Timeout - return error since this endpoint specifically requires handler stats
+		writeError(r.Context(), w, http.StatusServiceUnavailable, "Stats collection timeout", nil)
+		return
+	}
+
+	// Build response with video-aware stats (use real-time handler stats)
 	response := StreamStatsDTO{
-		BytesReceived:   stream.BytesReceived,
-		PacketsReceived: stream.PacketsReceived,
-		PacketsLost:     stream.PacketsLost,
-		Bitrate:         stream.Bitrate,
+		BytesReceived:   int64(stats.BytesProcessed),
+		PacketsReceived: int64(stats.PacketsReceived),
+		PacketsLost:     stream.PacketsLost, // Keep registry value for lost packets
+		Bitrate:         int64(stats.Bitrate),
 		FrameBufferStats: FrameBufferStatsDTO{
 			Capacity:        100, // Default frame buffer capacity
 			Used:            stats.QueueDepth,

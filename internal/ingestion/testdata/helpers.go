@@ -3,7 +3,7 @@ package testdata
 import (
 	"net"
 	"time"
-	
+
 	"github.com/pion/rtp"
 )
 
@@ -17,7 +17,7 @@ func GenerateTestHEVCStream(width, height, fps int, durationMs int) []byte {
 func GenerateTestRTPPackets(width, height, fps int, durationMs int, ssrc uint32) []*rtp.Packet {
 	gen := NewHEVCGenerator(width, height, fps)
 	customPackets := gen.GenerateRTPStream(durationMs, ssrc)
-	
+
 	// Convert to pion/rtp packets
 	packets := make([]*rtp.Packet, len(customPackets))
 	for i, pkt := range customPackets {
@@ -36,7 +36,7 @@ func GenerateTestRTPPackets(width, height, fps int, durationMs int, ssrc uint32)
 			Payload: pkt.Payload,
 		}
 	}
-	
+
 	return packets
 }
 
@@ -47,22 +47,22 @@ func SendRTPPackets(conn *net.UDPConn, addr *net.UDPAddr, packets []*rtp.Packet,
 	if packetsPerFrame == 0 {
 		packetsPerFrame = 1
 	}
-	
+
 	interval := time.Second / time.Duration(fps) / time.Duration(packetsPerFrame)
-	
+
 	for _, packet := range packets {
 		data, err := packet.Marshal()
 		if err != nil {
 			return err
 		}
-		
+
 		if _, err := conn.WriteToUDP(data, addr); err != nil {
 			return err
 		}
-		
+
 		time.Sleep(interval)
 	}
-	
+
 	return nil
 }
 

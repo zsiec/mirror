@@ -72,13 +72,43 @@ func (r *BFrameReorderer) AddFrame(frame *types.VideoFrame) ([]*types.VideoFrame
 	// Add frame to buffer
 	heap.Push(&r.buffer, frame)
 
+	// Log frame addition with sampling
+	if sampledLogger, ok := r.logger.(*logger.SampledLogger); ok {
+		sampledLogger.DebugWithCategory(logger.CategoryFrameReordering, "Added frame to reorder buffer", map[string]interface{}{
+			"frame_id":    frame.ID,
+			"frame_type":  frame.Type.String(),
+			"pts":         frame.PTS,
+			"dts":         frame.DTS,
+			"buffer_size": len(r.buffer),
+		})
+	} else {
+		r.logger.WithFields(map[string]interface{}{
+			"frame_id":    frame.ID,
+			"frame_type":  frame.Type.String(),
+			"buffer_size": len(r.buffer),
+		}).Debug("Added frame to reorder buffer")
+	}
+
 	// Update max buffer size metric
 	if len(r.buffer) > r.maxBufferSize {
 		r.maxBufferSize = len(r.buffer)
 	}
 
 	// Check if we can output frames
-	return r.checkOutput(), nil
+	outputFrames := r.checkOutput()
+
+	// Log output with sampling
+	if len(outputFrames) > 0 {
+		if sampledLogger, ok := r.logger.(*logger.SampledLogger); ok {
+			sampledLogger.DebugWithCategory(logger.CategoryFrameReordering, "Frames ready for output", map[string]interface{}{
+				"output_count": len(outputFrames),
+			})
+		} else {
+			r.logger.WithField("output_count", len(outputFrames)).Debug("Frames ready for output")
+		}
+	}
+
+	return outputFrames, nil
 }
 
 // Flush returns all remaining frames in order
@@ -125,9 +155,20 @@ func (r *BFrameReorderer) validateFrame(frame *types.VideoFrame) error {
 		frame.DTS = frame.PTS
 	}
 
-	// Check for DTS discontinuity
+	// Check for DTS discontinuity (with wraparound detection)
 	if r.lastOutputDTS >= 0 && frame.DTS < r.lastOutputDTS {
-		return fmt.Errorf("DTS went backwards: %d < %d", frame.DTS, r.lastOutputDTS)
+		// MPEG-TS uses 33-bit PCR values that wrap at 2^33 in 90kHz units
+		// Check if this is wraparound vs real backwards jump
+		const maxDTSWrap = int64(1) << 32 // 2^32 = 4,294,967,296
+		dtsDiff := r.lastOutputDTS - frame.DTS
+		
+		isWraparound := dtsDiff > maxDTSWrap
+		if !isWraparound {
+			return fmt.Errorf("DTS went backwards: %d < %d", frame.DTS, r.lastOutputDTS)
+		}
+		
+		// Handle wraparound: reset lastOutputDTS to allow new sequence
+		r.lastOutputDTS = -1
 	}
 
 	return nil
@@ -164,7 +205,13 @@ func (r *BFrameReorderer) checkOutput() []*types.VideoFrame {
 			shouldOutput = true
 		}
 
-		// Condition 4: Check if this is a keyframe (I-frame)
+		// Condition 4: Check if this is an IDR frame
+		// IDR frames can be output immediately as they don't depend on future frames
+		if nextFrame.Type == types.FrameTypeIDR {
+			shouldOutput = true
+		}
+
+		// Condition 5: Check if this is a keyframe (I-frame)
 		// I-frames can be output once we have the next frame
 		if nextFrame.Type == types.FrameTypeI && len(r.buffer) > 1 {
 			shouldOutput = true

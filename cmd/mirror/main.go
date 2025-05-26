@@ -11,6 +11,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
+	"github.com/sirupsen/logrus"
 
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/internal/ingestion"
@@ -51,11 +52,12 @@ func main() {
 	}
 
 	// Initialize logger
-	log, err := logger.New(&cfg.Logging)
+	logrusLogger, err := logger.New(&cfg.Logging)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
+	log := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
 
 	// Log startup information
 	log.WithField("version", version.GetInfo().Short()).Info("Starting Mirror streaming server")
@@ -94,7 +96,7 @@ func main() {
 	}
 
 	// Create server
-	srv := server.New(&cfg.Server, log, redisClient)
+	srv := server.New(&cfg.Server, logrusLogger, redisClient)
 
 	// Create ingestion manager if enabled
 	var ingestionMgr *ingestion.Manager

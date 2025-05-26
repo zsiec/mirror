@@ -59,6 +59,19 @@ func (s *ServerConfig) Validate() error {
 		return fmt.Errorf("max_incoming_uni_streams must be positive")
 	}
 
+	// Validate HTTP/1.1 and HTTP/2 configuration if enabled
+	if s.EnableHTTP {
+		if s.HTTPPort < 1 || s.HTTPPort > 65535 {
+			return fmt.Errorf("invalid HTTP port: %d", s.HTTPPort)
+		}
+
+		// Warn if debug endpoints are enabled
+		if s.DebugEndpoints {
+			// This is just a warning, not an error
+			// The logger might not be available here, so we'll handle this at startup
+		}
+	}
+
 	return nil
 }
 

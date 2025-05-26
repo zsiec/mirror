@@ -71,52 +71,112 @@ Mirror is a cutting-edge video streaming platform designed to handle the demands
 
 ### Prerequisites
 
-- Go 1.23 or later
-- Docker and Docker Compose
-- Redis 7.0+
-- (Optional) NVIDIA GPU with CUDA 12.0+ for hardware acceleration
+- **Go 1.23+** - [Download here](https://go.dev/dl/)
+- **Docker & Docker Compose** - [Install Docker](https://docs.docker.com/get-docker/)
+- **Redis 7.0+** (automatically included in Docker setup)
+- **SRT Library** (automatically installed via `make setup`)
+- (Optional) **NVIDIA GPU with CUDA 12.0+** for hardware acceleration
 
-### Installation
+### Installation & Setup
 
+**Option 1: Complete Setup (Recommended for new developers)**
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/mirror.git
 cd mirror
 
-# Generate self-signed certificates for development
-make certs
+# 🚀 One-command setup - installs everything including SRT
+make setup
 
-# Build the application
-make build
+# Start all services with Docker
+make docker-compose
 
-# Run with Docker Compose (includes Redis)
-make docker-run
+# View logs
+make docker-compose-logs
+```
+
+**Option 2: Manual Setup**
+```bash
+# 1. Install dependencies
+make deps
+
+# 2. Check/install SRT library (required for video streaming)
+make srt-check          # Check if SRT is available
+make srt-setup          # Auto-install SRT (macOS/Ubuntu)
+
+# 3. Generate certificates
+make generate-certs
+
+# 4. Start services
+make docker-compose
+```
+
+**🔧 SRT Library Notes:**
+- **macOS**: Installed via Homebrew (`brew install srt`)
+- **Ubuntu/Debian**: Installed via apt (`libsrt-openssl-dev`)
+- **Other systems**: See [SRT installation guide](https://github.com/Haivision/srt#requirements)
+- The Makefile handles SRT environment automatically - no manual setup needed!
+
+### Docker Commands
+
+```bash
+# Docker Compose operations
+make docker-compose          # Start all services
+make docker-compose-logs     # View logs
+make docker-compose-restart  # Restart services
+make docker-compose-down     # Stop services
+
+# Run with monitoring stack (Prometheus + Grafana)
+make docker-compose-monitoring
+
+# Build and run standalone
+make docker              # Build Docker image
+make docker-run          # Run with all ports mapped
+make docker-clean        # Clean up Docker resources
 ```
 
 ### Basic Usage
 
 #### Start streaming with SRT:
 ```bash
-# Stream to Mirror using FFmpeg
-ffmpeg -re -i input.mp4 -c copy -f mpegts \
-  "srt://localhost:30000?streamid=mystream&passphrase=secret"
+# Stream to Mirror using FFmpeg (generates test pattern)
+ffmpeg -re -f lavfi -i testsrc=duration=5:size=640x480:rate=30 -c:v libx264 -preset ultrafast -tune zerolatency -g 30 -keyint_min 30 -f mpegts "srt://localhost:30000?streamid=test"
 ```
 
 #### Start streaming with RTP:
 ```bash
-# Stream to Mirror using GStreamer
-gst-launch-1.0 filesrc location=input.mp4 ! \
-  qtdemux ! h264parse ! rtph264pay ! \
-  udpsink host=localhost port=5004
+# Stream to Mirror using GStreamer (generates test pattern)
+gst-launch-1.0 videotestsrc pattern=ball ! video/x-raw,width=1920,height=1080,framerate=30/1 ! \
+  x264enc bitrate=5000 ! h264parse ! rtph264pay ! udpsink host=localhost port=5004
+
+# Or stream with audio
+gst-launch-1.0 videotestsrc pattern=smpte ! video/x-raw,width=1920,height=1080,framerate=30/1 ! \
+  x264enc bitrate=5000 ! h264parse ! rtph264pay pt=96 ! udpsink host=localhost port=5004
 ```
 
-#### Access the stream:
+#### Access the API:
 ```bash
-# View stream information
+# View active streams
 curl https://localhost:8443/api/v1/streams
 
-# Access HLS playlist (after Phase 4)
-curl https://localhost:8443/live/mystream/playlist.m3u8
+# Get specific stream details
+curl https://localhost:8443/api/v1/streams/test
+
+# Get stream statistics
+curl https://localhost:8443/api/v1/streams/test/stats
+
+# Get system-wide statistics
+curl https://localhost:8443/api/v1/stats
+
+# Get A/V sync status
+curl https://localhost:8443/api/v1/streams/test/sync
+
+# Control stream playback
+curl -X POST https://localhost:8443/api/v1/streams/test/pause
+curl -X POST https://localhost:8443/api/v1/streams/test/resume
+
+# Stop a stream
+curl -X DELETE https://localhost:8443/api/v1/streams/test
 ```
 
 ## 🏗️ Architecture
@@ -182,9 +242,38 @@ Mirror follows a modular, microservices-inspired architecture while maintaining 
 
 ### API Documentation
 
-Interactive API documentation is available at:
-- Development: https://localhost:8443/docs
+#### Current API Endpoints (Phase 2)
+
+**Stream Management:**
+- `GET /api/v1/streams` - List all active streams
+- `GET /api/v1/streams/{id}` - Get stream details
+- `DELETE /api/v1/streams/{id}` - Stop a stream
+- `GET /api/v1/streams/{id}/stats` - Get stream statistics
+
+**Stream Control:**
+- `POST /api/v1/streams/{id}/pause` - Pause stream ingestion
+- `POST /api/v1/streams/{id}/resume` - Resume stream ingestion
+
+**System Information:**
+- `GET /api/v1/stats` - System-wide statistics
+- `GET /api/v1/streams/stats/video` - Video-specific statistics
+
+**Stream Data Access:**
+- `GET /api/v1/streams/{id}/data` - Stream data information
+- `GET /api/v1/streams/{id}/buffer` - Buffer status
+- `GET /api/v1/streams/{id}/preview` - Preview data
+- `GET /api/v1/streams/{id}/sync` - A/V synchronization status
+
+**Health & Monitoring:**
+- `GET /health` - Comprehensive health check
+- `GET /ready` - Readiness check
+- `GET /live` - Liveness check
+- `GET /metrics` - Prometheus metrics
+- `GET /version` - Server version info
+
+Interactive API documentation:
 - [OpenAPI Specification](docs/openapi/server.yaml)
+- [Ingestion API Spec](docs/openapi/ingestion.yaml)
 
 ### Configuration
 
@@ -193,26 +282,55 @@ Mirror uses a hierarchical configuration system:
 ```yaml
 # configs/default.yaml
 server:
-  http3_port: 8443
+  http3_port: 8443              # HTTP/3 (QUIC) primary port
+  http_port: 8080               # HTTP/1.1/2 fallback port
+  enable_http: false            # Enable fallback HTTP server
+  enable_http2: true            # HTTP/2 support when HTTP enabled
+  debug_endpoints: false        # Enable /debug/pprof/* endpoints
   tls_cert_file: "./certs/cert.pem"
   tls_key_file: "./certs/key.pem"
 
 ingestion:
+  queue_dir: "/tmp/mirror/queue" # Disk overflow directory
   srt:
-    port: 30000
-    latency: 120ms
-    max_bandwidth: 60000000  # 60 Mbps
+    enabled: true
+    port: 30000                 # SRT listener port
+    latency: 120ms              # SRT latency window
+    max_bandwidth: 52428800     # 50 Mbps max per stream
+    input_bandwidth: 52428800   # Input bandwidth for sizing
+    max_connections: 25         # Concurrent streams
+    encryption:
+      enabled: false
+      passphrase: ""
+      key_length: 128           # AES key length
   rtp:
-    port: 5004
-    buffer_size: 2097152     # 2MB
-
-transcoding:
-  gpu_enabled: true
-  preset: "medium"
-  output_formats:
-    - codec: "h264"
-      bitrate: "5M"
-      resolution: "1920x1080"
+    enabled: true
+    port: 5004                  # RTP listener port
+    rtcp_port: 5005             # RTCP listener port
+    buffer_size: 65536          # 64KB receive buffer
+    max_sessions: 25            # Concurrent sessions
+    session_timeout: 10s        # Session idle timeout
+  buffer:
+    pool_size: 50               # Buffer pool size >= max connections
+    ring_size: 4194304          # 4MB per stream
+    write_timeout: 10ms
+    read_timeout: 10ms
+  memory:
+    max_total: 8589934592       # 8GB total limit
+    max_per_stream: 419430400   # 400MB per stream
+  stream_handling:
+    frame_assembly_timeout: 200ms # Frame assembly timeout
+    gop_buffer_size: 3          # GOP buffer depth
+    max_gop_age: 5s             # GOP cleanup age
+    error_retry_limit: 3        # Error retry attempts
+  backpressure:
+    enabled: true               # Flow control enabled
+    low_watermark: 0.25         # Low pressure (25%)
+    medium_watermark: 0.5       # Medium pressure (50%)
+    high_watermark: 0.75        # High pressure (75%)
+    critical_watermark: 0.9     # Critical pressure (90%)
+    response_window: 500ms      # Response time window
+    frame_drop_ratio: 0.1       # Frame drop ratio (10%)
 ```
 
 Environment variables override configuration:
@@ -244,9 +362,72 @@ make bench
 
 # Run integration tests
 make test-integration
+
+# Run comprehensive full system integration test
+make test-full-integration
 ```
 
+### Full Integration Testing
+
+The `make test-full-integration` command runs a comprehensive end-to-end test that:
+
+- ✅ **Starts a complete Mirror server** with all components
+- ✅ **Generates RTP streams** with H.264 video packets
+- ✅ **Simulates SRT streams** with MPEG-TS data
+- ✅ **Validates server health** and API responses
+- ✅ **Tests stream ingestion** and processing
+- ✅ **Checks real-time metrics** and statistics
+- ✅ **Verifies logging** and debugging output
+
+This test is designed to be run in isolation and provides extensive validation of the entire streaming platform. It includes verbose output to help debug issues and verify correct operation.
+
 ## 🛠️ Development
+
+### New Developer Quick Start
+
+**1. Initial Setup**
+```bash
+# One command to rule them all
+make setup              # Installs Go deps, SRT library, generates certs
+
+# Or check what you need
+make help               # Shows all commands with SRT status
+make srt-check          # Verify SRT is installed
+```
+
+**2. Development Workflow**
+```bash
+# Run tests (automatically handles SRT environment)
+make test               # Unit tests
+make test-coverage      # Tests with coverage report
+make test-race          # Tests with race detector
+
+# Code quality
+make lint               # Run linters  
+make fmt                # Format code
+make check              # Run all checks (fmt, vet, lint, test)
+
+# Local development
+make build              # Build binary
+make run                # Build and run locally
+make dev                # Hot reload (requires `air`)
+```
+
+**3. Docker Development**
+```bash
+# Recommended development environment
+make docker-compose             # Start all services
+make docker-compose-logs        # View logs
+make docker-compose-monitoring  # Include Prometheus/Grafana
+make docker-compose-down        # Stop everything
+```
+
+**4. SRT Environment (Automatic)**
+The Makefile automatically handles SRT compilation:
+- ✅ No more `source scripts/srt-env.sh` required
+- ✅ Automatic SRT detection and setup
+- ✅ Cross-platform support (macOS, Ubuntu/Debian)
+- ✅ Clear error messages if SRT is missing
 
 ### Project Structure
 
@@ -261,15 +442,19 @@ mirror/
 │   ├── distribution/     # HLS packaging (Phase 4)
 │   └── ...
 ├── pkg/                   # Public packages
-├── api/                   # API definitions
-├── web/                   # Web UI assets
-└── docs/                  # Documentation
+├── scripts/              # Build and setup scripts
+├── configs/              # Configuration files
+├── docker/               # Docker configurations
+└── docs/                 # Documentation
 ```
 
 ### Building from Source
 
 ```bash
-# Standard build
+# Standard build (SRT environment handled automatically)
+make build
+
+# Manual build
 go build -o bin/mirror ./cmd/mirror
 
 # Production build with optimizations
@@ -277,6 +462,84 @@ go build -ldflags="-s -w" -o bin/mirror ./cmd/mirror
 
 # Cross-compilation
 GOOS=linux GOARCH=amd64 go build -o bin/mirror-linux-amd64 ./cmd/mirror
+```
+
+### Common Development Tasks
+
+```bash
+# Full development cycle
+make check              # Run all quality checks
+make test-coverage      # Verify test coverage
+make docker-compose     # Test in containerized environment
+
+# Debugging
+make srt-check          # Check SRT status
+VERBOSE=1 make test     # Verbose test output
+SRT_DEBUG=1 make build  # Debug SRT compilation
+
+# Cleanup
+make clean              # Remove build artifacts
+make docker-clean       # Clean Docker resources
+```
+
+### Troubleshooting
+
+**SRT Library Issues**
+```bash
+# Check SRT status
+make srt-check
+
+# Install SRT automatically
+make srt-setup
+
+# Manual SRT installation
+# macOS:
+brew install srt
+
+# Ubuntu/Debian:
+sudo apt-get install libsrt-openssl-dev
+
+# Verify SRT is working
+pkg-config --exists srt && echo "SRT OK" || echo "SRT Missing"
+```
+
+**Build Issues**
+```bash
+# Clean and rebuild
+make clean && make build
+
+# Check Go version (need 1.23+)
+go version
+
+# Update dependencies
+make deps
+```
+
+**Test Failures**
+```bash
+# Run tests with verbose output
+VERBOSE=1 make test
+
+# Run specific test
+go test -v ./internal/config/...
+
+# Check test coverage
+make test-coverage
+```
+
+**Docker Issues**
+```bash
+# Reset Docker environment
+make docker-clean
+make docker-compose
+
+# Check Docker logs
+make docker-compose-logs
+
+# Rebuild containers
+make docker-compose down
+make docker
+make docker-compose
 ```
 
 ## 🤝 Contributing
@@ -294,31 +557,35 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ### Development Setup
 
 ```bash
-# Install development dependencies
-make setup-dev
+# Complete setup for new developers
+make setup              # Install deps, SRT, generate certs
 
-# Run linters
-make lint
+# Development commands
+make test               # Run tests
+make lint               # Run linters  
+make fmt                # Format code
+make check              # Run all checks (fmt, vet, lint, test)
 
-# Format code
-make fmt
-
-# Run pre-commit checks
-make pre-commit
+# Verify your environment
+make help               # Shows all commands + SRT status
+make srt-check          # Check SRT library availability
 ```
 
 ## 📊 Performance
 
 Mirror is designed for high-performance video streaming:
 
-| Metric | Value |
-|--------|-------|
-| Concurrent Streams | 25+ |
-| Stream Bitrate | Up to 50 Mbps |
-| Transcoding Latency | < 100ms |
-| Distribution Latency | < 2s (LL-HLS) |
-| Memory per Stream | ~200MB |
-| CPU Usage | < 50% (25 streams) |
+| Metric | Phase 2 Value |
+|--------|---------------|
+| Concurrent SRT Streams | 25 |
+| Concurrent RTP Sessions | 25 |
+| Max Stream Bitrate | 50 Mbps |
+| Ingestion Latency | < 200ms |
+| Memory per Stream | ~400MB |
+| A/V Sync Accuracy | ±100ms |
+| Frame Assembly Timeout | 200ms |
+| GOP Buffer Depth | 3 GOPs |
+| Codec Support | H.264, HEVC, AV1, JPEG-XS |
 
 ## 🔒 Security
 

@@ -46,7 +46,7 @@ func NewManager(streamID string, config *SyncConfig, log logger.Logger) *Manager
 	}
 
 	if log == nil {
-		log = logrus.New()
+		log = logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	}
 
 	return &Manager{

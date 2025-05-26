@@ -210,7 +210,66 @@ func TestValidator_TimestampValidation(t *testing.T) {
 			SSRC:           ssrc,
 		},
 	}
+	// Large jump should now be properly detected
 	assert.Equal(t, ErrTimestampJump, validator.ValidatePacket(packet3))
+}
+
+func TestValidator_BFrameReordering(t *testing.T) {
+	validator := NewValidator(&ValidatorConfig{
+		AllowedPayloadTypes: []uint8{96},
+		MaxTimestampJump:    90000, // 1 second at 90kHz
+	})
+
+	ssrc := uint32(12345)
+
+	// I-frame at timestamp 90000
+	packet1 := &rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			PayloadType:    96,
+			SequenceNumber: 1000,
+			Timestamp:      90000,
+			SSRC:           ssrc,
+		},
+	}
+	require.NoError(t, validator.ValidatePacket(packet1))
+
+	// P-frame at timestamp 93600 (40ms later)
+	packet2 := &rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			PayloadType:    96,
+			SequenceNumber: 1001,
+			Timestamp:      93600,
+			SSRC:           ssrc,
+		},
+	}
+	require.NoError(t, validator.ValidatePacket(packet2))
+
+	// B-frame with backwards timestamp 91800 (should be allowed for B-frame reordering)
+	packet3 := &rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			PayloadType:    96,
+			SequenceNumber: 1002,
+			Timestamp:      91800, // Between I and P frame timestamps
+			SSRC:           ssrc,
+		},
+	}
+	require.NoError(t, validator.ValidatePacket(packet3), "B-frame reordering should be allowed")
+
+	// B-frame with much older timestamp should be rejected
+	packet4 := &rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			PayloadType:    96,
+			SequenceNumber: 1003,
+			Timestamp:      0, // Way too old
+			SSRC:           ssrc,
+		},
+	}
+	// Very old timestamps should be rejected (unless it's a valid B-frame)
+	assert.Equal(t, ErrTimestampJump, validator.ValidatePacket(packet4), "Very old timestamps should be rejected")
 }
 
 func TestValidator_MultipleSSRC(t *testing.T) {

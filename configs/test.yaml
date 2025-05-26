@@ -1,0 +1,112 @@
+# Test configuration for Mirror streaming server
+# Based on docker.yaml but with localhost Redis
+
+server:
+  http3_port: 8443
+  tls_cert_file: "./certs/dev-cert.pem"
+  tls_key_file: "./certs/dev-key.pem"
+  read_timeout: 60s
+  write_timeout: 60s
+  shutdown_timeout: 5s
+  max_incoming_streams: 1000
+  max_incoming_uni_streams: 500
+  max_idle_timeout: 60s
+  # HTTP/1.1 and HTTP/2 fallback for testing
+  http_port: 8080         # TCP port for HTTP/1.1 and HTTP/2
+  enable_http: true       # Enable for testing
+  enable_http2: true      # Support HTTP/2
+  https_redirect: false   # No redirect in testing
+  debug_endpoints: true   # Enable debug endpoints
+
+redis:
+  addresses:
+    - "localhost:6379"
+  password: ""
+  db: 0
+  max_retries: 5
+  dial_timeout: 10s
+  read_timeout: 5s
+  write_timeout: 5s
+  pool_size: 50
+  min_idle_conns: 5
+
+logging:
+  level: "debug"
+  format: "text"
+  output: "stdout"
+  max_size: 50     # MB
+  max_backups: 3
+  max_age: 7       # days
+
+metrics:
+  enabled: true
+  path: "/metrics"
+  port: 9091
+
+ingestion:
+  queue_dir: "/tmp/mirror/queue"
+  srt:
+    enabled: true
+    listen_addr: "0.0.0.0"
+    port: 30000
+    latency: 120ms
+    max_bandwidth: 52428800
+    input_bandwidth: 50000000
+    payload_size: 1316
+    fc_window: 25600
+    peer_idle_timeout: 5s
+    max_connections: 25
+    encryption:
+      enabled: false
+      passphrase: ""
+      key_length: 128
+      pbkdf_iterations: 0
+  rtp:
+    enabled: true
+    listen_addr: "0.0.0.0"
+    port: 5004
+    rtcp_port: 5005
+    buffer_size: 65536
+    max_sessions: 25
+    session_timeout: 10s
+  buffer:
+    ring_size: 4194304
+    pool_size: 60
+    write_timeout: 10ms
+    read_timeout: 10ms
+  codecs:
+    supported: ["HEVC", "H264", "AV1", "JPEGXS"]
+    preferred: "HEVC"
+    h264:
+      profiles: ["baseline", "main", "high"]
+      level: "5.1"
+    hevc:
+      profiles: ["main", "main10"]
+      level: "5.1"
+    av1:
+      profile: "0"
+      level: "5.1"
+    jpegxs:
+      profile: "main"
+      subsampling: "422"
+  memory:
+    max_total: 8589934592
+    max_per_stream: 419430400
+  registry:
+    redis_addr: "redis-test:6379"
+    redis_password: ""
+    redis_db: 0
+    ttl: 1h
+  stream_handling:
+    frame_assembly_timeout: 200ms
+    gop_buffer_size: 15
+    max_gop_age: 5s
+    error_retry_limit: 3
+  backpressure:
+    enabled: true
+    low_watermark: 0.25
+    medium_watermark: 0.5
+    high_watermark: 0.75
+    critical_watermark: 0.9
+    response_window: 500ms
+    frame_drop_ratio: 0.1

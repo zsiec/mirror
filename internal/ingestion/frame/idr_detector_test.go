@@ -14,7 +14,7 @@ import (
 func testIDRLogger() logger.Logger {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
-	return log
+	return logger.NewLogrusAdapter(logrus.NewEntry(log))
 }
 
 func TestNewIDRDetector(t *testing.T) {

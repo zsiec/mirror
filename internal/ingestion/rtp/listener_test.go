@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/internal/ingestion/registry"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 type mockRegistry struct {
@@ -121,7 +122,7 @@ func TestListener_NewListener(t *testing.T) {
 		Preferred: "hevc",
 	}
 
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	registry := &mockRegistry{}
 
 	listener := NewListener(cfg, codecsCfg, registry, logger)

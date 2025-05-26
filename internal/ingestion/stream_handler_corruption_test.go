@@ -7,15 +7,17 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/zsiec/mirror/internal/ingestion/types"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 func TestStreamHandler_DetectFrameCorruption(t *testing.T) {
-	logger := logrus.New()
+	logrusLogger := logrus.New()
+	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
 
 	// Create a minimal handler to test corruption detection
 	handler := &StreamHandler{
 		codec:  types.CodecH264,
-		logger: logger,
+		logger: testLogger,
 	}
 
 	tests := []struct {
@@ -111,6 +113,8 @@ func TestStreamHandler_DetectFrameCorruption(t *testing.T) {
 
 // TestStreamHandler_NALUnitValidation tests NAL unit validation for different scenarios
 func TestStreamHandler_NALUnitValidation(t *testing.T) {
+	logrusLogger := logrus.New()
+	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
 	tests := []struct {
 		name              string
 		nalUnits          []types.NALUnit
@@ -206,7 +210,7 @@ func TestStreamHandler_NALUnitValidation(t *testing.T) {
 			handler := &StreamHandler{
 				streamID: "test-stream",
 				codec:    tt.codec,
-				logger:   logrus.NewEntry(logrus.New()),
+				logger:   testLogger,
 			}
 
 			// Create frame with NAL units
@@ -229,8 +233,9 @@ func TestStreamHandler_NALUnitValidation(t *testing.T) {
 
 // TestStreamHandler_OnRateChange tests rate change handling for different connection types
 func TestStreamHandler_OnRateChange(t *testing.T) {
-	logger := logrus.New()
-	logger.SetLevel(logrus.DebugLevel)
+	logrusLogger := logrus.New()
+	logrusLogger.SetLevel(logrus.DebugLevel)
+	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
 
 	tests := []struct {
 		name      string
@@ -250,7 +255,7 @@ func TestStreamHandler_OnRateChange(t *testing.T) {
 			handler := &StreamHandler{
 				streamID: "test-stream",
 				conn:     tt.conn,
-				logger:   logger,
+				logger:   testLogger,
 			}
 
 			// Call onRateChange - should not panic

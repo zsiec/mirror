@@ -3,6 +3,7 @@ package frame
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -80,7 +81,7 @@ func NewAssembler(streamID string, codec types.CodecType, outputBufferSize int) 
 		output:        make(chan *types.VideoFrame, outputBufferSize),
 		ctx:           ctx,
 		cancel:        cancel,
-		logger:        logger.FromContext(ctx).WithField("stream_id", streamID),
+		logger:        logger.NewLogrusAdapter(logger.FromContext(ctx).WithField("stream_id", streamID)),
 		nextFrameID:   1,
 	}
 }
@@ -154,6 +155,17 @@ func (a *Assembler) AddPacket(pkt types.TimestampedPacket) error {
 	} else if a.currentFrame != nil {
 		// Add to current frame
 		a.framePackets = append(a.framePackets, pkt)
+		
+		// **DEBUG: Log packet data being appended to frame**
+		if len(pkt.Data) > 0 {
+			maxBytes := 16
+			if len(pkt.Data) < maxBytes {
+				maxBytes = len(pkt.Data)
+			}
+			fmt.Printf("🔍 FRAME DEBUG: Appending packet to frame %d - PacketSize=%d, FirstBytes=%02x, TotalBufferSize=%d\n", 
+				a.currentFrame.ID, len(pkt.Data), pkt.Data[:maxBytes], len(a.nalBuffer))
+		}
+		
 		a.nalBuffer = append(a.nalBuffer, pkt.Data...)
 
 		// Update frame timing if needed
@@ -163,10 +175,15 @@ func (a *Assembler) AddPacket(pkt types.TimestampedPacket) error {
 		}
 
 	} else {
-		// No frame context, drop packet
-		// Note: This is a dropped packet, not a dropped frame
+		// No frame context - we're starting mid-stream
+		// Instead of erroring, silently wait for the next frame start (keyframe)
+		// This is normal when joining a live stream
 		a.packetsDropped++
-		return ErrNoFrameContext
+		a.logger.WithFields(map[string]interface{}{
+			"pts":         pkt.PTS,
+			"is_keyframe": pkt.IsKeyframe(),
+		}).Debug("Dropping packet while waiting for frame start (normal for mid-stream join)")
+		return nil // Return nil instead of ErrNoFrameContext to avoid error logging
 	}
 
 	// Handle frame end
@@ -241,17 +258,21 @@ func (a *Assembler) completeFrame() error {
 		case a.output <- a.currentFrame:
 			a.framesAssembled++
 		default:
-			// Only create timer if we need to wait
-			timer := time.NewTimer(10 * time.Millisecond)
+			// Output channel blocked, using timer approach
+			// Only create timer if we need to wait - increased timeout for video streaming
+			timer := time.NewTimer(100 * time.Millisecond)
 			defer timer.Stop()
 
 			select {
 			case a.output <- a.currentFrame:
 				a.framesAssembled++
+				// Frame sent after timer wait
 			case <-timer.C:
 				a.framesDropped++
+				a.logger.WithField("frame_id", a.currentFrame.ID).Warn("Frame dropped due to output channel timeout")
 				return ErrOutputBlocked
 			case <-a.ctx.Done():
+				// Context cancelled during timer wait
 				return a.ctx.Err()
 			}
 		}
@@ -272,10 +293,21 @@ func (a *Assembler) parseNALUnits(data []byte) []types.NALUnit {
 		units := a.findStartCodeUnits(data)
 		for _, unitData := range units {
 			if len(unitData) > 0 {
-				nalUnits = append(nalUnits, types.NALUnit{
-					Type: a.getNALType(unitData),
+				nalType := a.getNALType(unitData)
+				nalUnit := types.NALUnit{
+					Type: nalType,
 					Data: unitData,
-				})
+				}
+				
+				// **DEBUG: Log NAL unit extraction**
+				maxBytes := 16
+				if len(unitData) < maxBytes {
+					maxBytes = len(unitData)
+				}
+				fmt.Printf("🔍 NAL DEBUG: Extracted NAL unit - Type=%d, Size=%d, FirstBytes=%02x\n", 
+					nalType, len(unitData), unitData[:maxBytes])
+				
+				nalUnits = append(nalUnits, nalUnit)
 			}
 		}
 
@@ -330,7 +362,16 @@ func (a *Assembler) findStartCodeUnits(data []byte) [][]byte {
 				}
 
 				if unitEnd > unitStart {
-					units = append(units, data[unitStart:unitEnd])
+					unitData := data[unitStart:unitEnd]
+					units = append(units, unitData)
+					
+					// **DEBUG: Log start code unit finding**
+					maxBytes := 16
+					if len(unitData) < maxBytes {
+						maxBytes = len(unitData)
+					}
+					fmt.Printf("🔍 START CODE DEBUG: Found unit - StartPos=%d, EndPos=%d, Size=%d, FirstBytes=%02x\n", 
+						unitStart, unitEnd, len(unitData), unitData[:maxBytes])
 				}
 
 				i = unitEnd

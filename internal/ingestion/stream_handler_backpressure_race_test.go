@@ -39,7 +39,7 @@ func TestStreamHandler_BackpressureRace(t *testing.T) {
 		AdjustInterval: 10 * time.Millisecond, // Fast adjustments for testing
 		HistorySize:    10,
 	}
-	bpController := backpressure.NewController(streamID, bpConfig, logger.Logger(logrus.New()))
+	bpController := backpressure.NewController(streamID, bpConfig, logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())))
 
 	// Create handler
 	handler := &StreamHandler{
@@ -48,7 +48,7 @@ func TestStreamHandler_BackpressureRace(t *testing.T) {
 		frameQueue:       q,
 		memoryController: memCtrl,
 		bpController:     bpController,
-		logger:           logger.Logger(logrus.New()),
+		logger:           logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())),
 		started:          true,
 	}
 
@@ -146,7 +146,7 @@ func TestStreamHandler_ConcurrentMethodCalls(t *testing.T) {
 		AdjustInterval: 10 * time.Millisecond,
 		HistorySize:    10,
 	}
-	bpController := backpressure.NewController(streamID, bpConfig, logger.Logger(logrus.New()))
+	bpController := backpressure.NewController(streamID, bpConfig, logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())))
 
 	// Create handler with minimal setup
 	handler := &StreamHandler{
@@ -155,7 +155,7 @@ func TestStreamHandler_ConcurrentMethodCalls(t *testing.T) {
 		frameQueue:       q,
 		memoryController: memCtrl,
 		bpController:     bpController,
-		logger:           logger.Logger(logrus.New()),
+		logger:           logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())),
 		started:          true,
 		startTime:        time.Now(),
 		bitrateWindow:    make([]bitratePoint, 0, 60),
@@ -240,7 +240,7 @@ func TestStreamHandler_ConcurrentMethodCalls(t *testing.T) {
 func TestStreamHandler_BackpressureInitialization(t *testing.T) {
 	// Create handler
 	handler := &StreamHandler{
-		logger: logger.Logger(logrus.New()),
+		logger: logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())),
 	}
 
 	// Initialize lastBackpressure

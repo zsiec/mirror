@@ -10,6 +10,12 @@ server:
   max_incoming_streams: 5000
   max_incoming_uni_streams: 1000
   max_idle_timeout: 30s
+  # HTTP/1.1 and HTTP/2 fallback (disabled by default)
+  http_port: 8080         # TCP port for HTTP/1.1 and HTTP/2
+  enable_http: false      # Enable HTTP/1.1 and HTTP/2 server
+  enable_http2: true      # Enable HTTP/2 when HTTP server is enabled
+  https_redirect: false   # Redirect HTTP to HTTPS
+  debug_endpoints: false  # Enable debug endpoints (/debug/pprof/*)
 
 redis:
   addresses:
@@ -79,10 +85,29 @@ ingestion:
     max_total: 8589934592      # 8GB total memory limit
     max_per_stream: 419430400  # 400MB per stream limit
   
+  # FFmpeg configuration for video decoding
+  ffmpeg:
+    enabled: true
+    binary_path: ""            # Path to FFmpeg binary (empty = auto-detect)
+    log_level: "error"         # FFmpeg log level (quiet, panic, fatal, error, warning, info, verbose, debug, trace)
+    thread_count: 0            # Number of threads (0 = auto-detect CPU count)
+    hardware_acceleration:
+      enabled: false           # Enable hardware acceleration (disabled by default)
+      preferred_decoders: []   # List of preferred hardware decoders (platform-specific)
+      fallback_software: true  # Fallback to software decoding if hardware fails
+    decoder:
+      buffer_size: 2           # Number of frames to buffer during decoding
+      pixel_format: "yuv420p"  # Output pixel format for decoded frames
+      thread_type: "frame"     # Threading type (frame, slice, auto)
+    jpeg:
+      quality: 80              # JPEG quality for iframe export (1-100)
+      optimize: false          # Optimize JPEG encoding (slower but smaller files)
+      progressive: false       # Progressive JPEG encoding
+  
   # Stream handling configuration
   stream_handling:
     frame_assembly_timeout: 200ms  # Timeout for frame assembly
-    gop_buffer_size: 3            # Number of GOPs to buffer per stream
+    gop_buffer_size: 15           # Number of GOPs to buffer per stream (increased for better parameter collection)
     max_gop_age: 5s               # Maximum age of GOP before cleanup
     error_retry_limit: 3          # Maximum retries for stream errors
   

@@ -145,11 +145,44 @@ func (d *H264Detector) detectBoundariesWithStartCode(pkt *types.TimestampedPacke
 		if nalType == H264NALTypeAUD || nalType == H264NALTypeIDR ||
 			nalType == H264NALTypeSPS || nalType == H264NALTypePPS {
 			isStart = true
+			d.frameStarted = true
 		}
 
-		// Check for frame end (simplified)
-		if d.frameStarted && nalType == H264NALTypeAUD {
-			isEnd = true
+		// Check for frame end - more robust detection
+		if d.frameStarted {
+			// Frame ends when we see:
+			// 1. Access Unit Delimiter (AUD)
+			// 2. Start of next frame (SPS, PPS, IDR, or new slice)
+			if nalType == H264NALTypeAUD {
+				isEnd = true
+				d.frameStarted = false
+			} else if nalType == H264NALTypeSPS || nalType == H264NALTypePPS ||
+				nalType == H264NALTypeIDR || nalType == H264NALTypeSlice {
+				// If we already detected a frame start and see another frame start NAL,
+				// the previous frame has ended
+				if isStart {
+					isEnd = true
+					// Don't reset frameStarted here as we're starting a new frame
+				}
+			}
+		}
+
+		// For MPEG-TS, often each PES packet contains a complete frame
+		// If we detect a frame start and have VCL NALs, assume frame end too
+		if isStart {
+			hasVCLNAL := false
+			for _, nalUnit := range nalUnits {
+				if len(nalUnit) > 0 {
+					nt := nalUnit[0] & 0x1F
+					if d.isVCLNAL(nt) {
+						hasVCLNAL = true
+						break
+					}
+				}
+			}
+			if hasVCLNAL {
+				isEnd = true
+			}
 		}
 	}
 

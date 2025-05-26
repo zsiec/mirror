@@ -7,25 +7,26 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/zsiec/mirror/internal/ingestion/types"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 func TestGOP_UpdateDuration_AfterDropping(t *testing.T) {
 	tests := []struct {
 		name             string
-		setupGOP         func() *GOP
-		dropFrames       func(g *GOP)
+		setupGOP         func() *types.GOP
+		dropFrames       func(g *types.GOP)
 		expectedStartPTS int64
 		expectedEndPTS   int64
-		expectedDuration time.Duration
+		expectedDuration int64
 	}{
 		{
 			name: "drop_last_frames",
-			setupGOP: func() *GOP {
-				return &GOP{
+			setupGOP: func() *types.GOP {
+				return &types.GOP{
 					ID:       1,
 					StartPTS: 0,
 					EndPTS:   90000, // 1 second worth
-					Duration: time.Second,
+					Duration: 90000, // 1 second worth in PTS units
 					Frames: []*types.VideoFrame{
 						{ID: 1, PTS: 0, Type: types.FrameTypeI, TotalSize: 1000},
 						{ID: 2, PTS: 3000, Type: types.FrameTypeP, TotalSize: 500},
@@ -33,42 +34,44 @@ func TestGOP_UpdateDuration_AfterDropping(t *testing.T) {
 						{ID: 4, PTS: 9000, Type: types.FrameTypeB, TotalSize: 300},
 						{ID: 5, PTS: 90000, Type: types.FrameTypeP, TotalSize: 500},
 					},
-					FrameCount: 5,
-					TotalSize:  2600,
+					StreamID:  "test-stream",
+					Complete:  true,
+					TotalSize: 2600,
 				}
 			},
-			dropFrames: func(g *GOP) {
+			dropFrames: func(g *types.GOP) {
 				// Drop last 2 frames
 				g.Frames = g.Frames[:3]
-				g.FrameCount = 3
+				// FrameCount is now len(g.Frames) - automatically updated
 				g.TotalSize = 1800
 			},
 			expectedStartPTS: 0,
 			expectedEndPTS:   6000,
-			expectedDuration: time.Duration(66666666), // ~66.7ms (6000 PTS units at 90kHz)
+			expectedDuration: 6000, // 6000 PTS units
 		},
 		{
 			name: "drop_all_but_keyframe",
-			setupGOP: func() *GOP {
-				return &GOP{
+			setupGOP: func() *types.GOP {
+				return &types.GOP{
 					ID:       2,
 					StartPTS: 1000,
 					EndPTS:   10000,
-					Duration: time.Millisecond * 100,
+					Duration: 9000, // 100ms worth in PTS units
 					Frames: []*types.VideoFrame{
 						{ID: 1, PTS: 1000, Type: types.FrameTypeI, TotalSize: 1000},
 						{ID: 2, PTS: 4000, Type: types.FrameTypeP, TotalSize: 500},
 						{ID: 3, PTS: 7000, Type: types.FrameTypeB, TotalSize: 300},
 						{ID: 4, PTS: 10000, Type: types.FrameTypeP, TotalSize: 500},
 					},
-					FrameCount: 4,
-					TotalSize:  2300,
+					StreamID:  "test-stream",
+					Complete:  true,
+					TotalSize: 2300,
 				}
 			},
-			dropFrames: func(g *GOP) {
+			dropFrames: func(g *types.GOP) {
 				// Keep only keyframe
 				g.Frames = g.Frames[:1]
-				g.FrameCount = 1
+				// FrameCount is now len(g.Frames) - automatically updated
 				g.TotalSize = 1000
 			},
 			expectedStartPTS: 1000,
@@ -77,24 +80,25 @@ func TestGOP_UpdateDuration_AfterDropping(t *testing.T) {
 		},
 		{
 			name: "drop_all_frames",
-			setupGOP: func() *GOP {
-				return &GOP{
+			setupGOP: func() *types.GOP {
+				return &types.GOP{
 					ID:       3,
 					StartPTS: 0,
 					EndPTS:   5000,
-					Duration: time.Millisecond * 55,
+					Duration: 5000, // PTS units
 					Frames: []*types.VideoFrame{
 						{ID: 1, PTS: 0, Type: types.FrameTypeI, TotalSize: 1000},
 						{ID: 2, PTS: 5000, Type: types.FrameTypeP, TotalSize: 500},
 					},
-					FrameCount: 2,
-					TotalSize:  1500,
+					StreamID:  "test-stream",
+					Complete:  true,
+					TotalSize: 1500,
 				}
 			},
-			dropFrames: func(g *GOP) {
+			dropFrames: func(g *types.GOP) {
 				// Drop all frames
 				g.Frames = g.Frames[:0]
-				g.FrameCount = 0
+				// FrameCount is now len(g.Frames) - automatically updated
 				g.TotalSize = 0
 			},
 			expectedStartPTS: 0,
@@ -131,7 +135,7 @@ func TestGOP_UpdateDuration_AfterDropping(t *testing.T) {
 
 // TestBuffer_DropFrames_UpdatesDuration tests that buffer updates GOP duration when dropping frames
 func TestBuffer_DropFrames_UpdatesDuration(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := BufferConfig{
 		MaxGOPs:     10,
 		MaxBytes:    100000,
@@ -140,12 +144,12 @@ func TestBuffer_DropFrames_UpdatesDuration(t *testing.T) {
 	buffer := NewBuffer("test-stream", config, logger)
 
 	// Create a GOP with B frames
-	gop := &GOP{
+	gop := &types.GOP{
 		ID:       1,
 		Closed:   true,
 		StartPTS: 0,
 		EndPTS:   9000,
-		Duration: time.Millisecond * 100,
+		Duration: 9000, // PTS units
 		Keyframe: &types.VideoFrame{
 			ID:          1,
 			Type:        types.FrameTypeI,
@@ -159,17 +163,18 @@ func TestBuffer_DropFrames_UpdatesDuration(t *testing.T) {
 			{ID: 3, Type: types.FrameTypeB, PTS: 6000, TotalSize: 300, CaptureTime: time.Now()},
 			{ID: 4, Type: types.FrameTypeB, PTS: 9000, TotalSize: 300, CaptureTime: time.Now()},
 		},
-		FrameCount: 4,
-		BFrames:    2,
-		PFrames:    1,
-		TotalSize:  2100,
+		StreamID:    "test-stream",
+		Complete:    true,
+		BFrameCount: 2,
+		PFrameCount: 1,
+		TotalSize:   2100,
 	}
 
 	// Add GOP to buffer
 	buffer.AddGOP(gop)
 
 	// Verify initial state
-	assert.Equal(t, time.Millisecond*100, gop.Duration)
+	assert.Equal(t, int64(9000), gop.Duration)
 	assert.Equal(t, int64(9000), gop.EndPTS)
 
 	// Drop B frames (should trigger duration update)
@@ -180,7 +185,7 @@ func TestBuffer_DropFrames_UpdatesDuration(t *testing.T) {
 	assert.Equal(t, 2, len(gop.Frames))
 
 	// Verify duration was updated
-	expectedDuration := time.Duration(33333333) // ~33.3ms (3000 PTS units at 90kHz)
+	expectedDuration := int64(3000) // 3000 PTS units
 	assert.Equal(t, expectedDuration, gop.Duration)
 	assert.Equal(t, int64(3000), gop.EndPTS) // End PTS should be updated
 	assert.Equal(t, int64(0), gop.StartPTS)  // Start PTS should remain 0

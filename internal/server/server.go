@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	_ "net/http/pprof" // Import for side effects (registers pprof handlers)
 	"time"
 
 	"github.com/gorilla/mux"
@@ -24,6 +26,7 @@ type Server struct {
 	config       *config.ServerConfig
 	router       *mux.Router
 	http3Server  *http3.Server
+	httpServer   *http.Server // HTTP/1.1 and HTTP/2 server
 	logger       *logrus.Logger
 	redis        *redis.Client
 	healthMgr    *health.Manager
@@ -93,7 +96,14 @@ func (s *Server) Start(ctx context.Context) error {
 	healthCtx := ctx
 	go s.healthMgr.StartPeriodicChecks(healthCtx, 30*time.Second)
 
-	// Start server
+	// Start HTTP/1.1 and HTTP/2 server if enabled
+	if s.config.EnableHTTP {
+		if err := s.startHTTPServer(ctx); err != nil {
+			return fmt.Errorf("failed to start HTTP/1.1/2 server: %w", err)
+		}
+	}
+
+	// Start HTTP/3 server
 	s.logger.WithField("port", s.config.HTTP3Port).Info("Starting HTTP/3 server")
 
 	errCh := make(chan error, 1)
@@ -144,19 +154,79 @@ func (s *Server) setupRoutes() {
 	// Version endpoint
 	s.router.HandleFunc("/version", s.handleVersion).Methods("GET")
 
-	// API routes
-	api := s.router.PathPrefix("/api/v1").Subrouter()
-	// Placeholder endpoint - replaced when ingestion is enabled via RegisterRoutes
-	api.HandleFunc("/streams", s.handleStreamsPlaceholder).Methods("GET")
-
-	// Register any additional routes
+	// Register any additional routes first
 	for _, registerFunc := range s.additionalRoutes {
 		registerFunc(s.router)
+	}
+
+	// API routes
+	api := s.router.PathPrefix("/api/v1").Subrouter()
+
+	// Only register placeholder if no additional routes were registered
+	if len(s.additionalRoutes) == 0 {
+		// Placeholder endpoint - replaced when ingestion is enabled via RegisterRoutes
+		api.HandleFunc("/streams", s.handleStreamsPlaceholder).Methods("GET")
+	}
+
+	// Debug endpoints (only if enabled)
+	if s.config.DebugEndpoints {
+		s.setupDebugEndpoints()
 	}
 
 	// 404 handler
 	s.router.NotFoundHandler = http.HandlerFunc(s.errorHandler.HandleNotFound)
 	s.router.MethodNotAllowedHandler = http.HandlerFunc(s.errorHandler.HandleMethodNotAllowed)
+}
+
+// startHTTPServer starts the HTTP/1.1 and HTTP/2 server for debugging
+func (s *Server) startHTTPServer(ctx context.Context) error {
+	addr := fmt.Sprintf(":%d", s.config.HTTPPort)
+
+	// TLS configuration for HTTP/2
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12, // HTTP/2 requires TLS 1.2+
+	}
+
+	// Load certificates
+	cert, err := tls.LoadX509KeyPair(s.config.TLSCertFile, s.config.TLSKeyFile)
+	if err != nil {
+		return fmt.Errorf("failed to load TLS certificates: %w", err)
+	}
+	tlsConfig.Certificates = []tls.Certificate{cert}
+
+	// Configure ALPN for HTTP/2
+	if s.config.EnableHTTP2 {
+		tlsConfig.NextProtos = []string{"h2", "http/1.1"}
+	} else {
+		tlsConfig.NextProtos = []string{"http/1.1"}
+	}
+
+	// Create HTTP server
+	s.httpServer = &http.Server{
+		Addr:         addr,
+		Handler:      s.router,
+		TLSConfig:    tlsConfig,
+		ReadTimeout:  s.config.ReadTimeout,
+		WriteTimeout: s.config.WriteTimeout,
+	}
+
+	// Start server in background
+	go func() {
+		protos := "HTTP/1.1"
+		if s.config.EnableHTTP2 {
+			protos = "HTTP/1.1 and HTTP/2"
+		}
+		s.logger.WithFields(logrus.Fields{
+			"port":      s.config.HTTPPort,
+			"protocols": protos,
+		}).Info("Starting fallback HTTP server")
+
+		if err := s.httpServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			s.logger.WithError(err).Error("HTTP/1.1/2 server error")
+		}
+	}()
+
+	return nil
 }
 
 // registerHealthCheckers registers all health checkers
@@ -172,6 +242,33 @@ func (s *Server) registerHealthCheckers() {
 	// Register memory checker
 	memChecker := health.NewMemoryChecker(0.9)
 	s.healthMgr.Register(memChecker)
+}
+
+// setupDebugEndpoints registers debug endpoints like pprof
+func (s *Server) setupDebugEndpoints() {
+	s.logger.Info("Enabling debug endpoints")
+
+	// pprof endpoints are automatically registered at /debug/pprof/
+	// by importing net/http/pprof
+
+	// Add a debug info endpoint
+	s.router.HandleFunc("/debug/info", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		info := map[string]interface{}{
+			"protocols": map[string]bool{
+				"http3":  true,
+				"http2":  s.config.EnableHTTP2,
+				"http11": s.config.EnableHTTP,
+			},
+			"ports": map[string]int{
+				"http3": s.config.HTTP3Port,
+				"http":  s.config.HTTPPort,
+			},
+			"debug_enabled": true,
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(info)
+	}).Methods("GET")
 }
 
 // RegisterRoutes adds additional route handlers to the server

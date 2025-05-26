@@ -63,7 +63,7 @@ func TestManager_RegistryCleanup(t *testing.T) {
 		registry:       mockReg,
 		streamHandlers: make(map[string]*StreamHandler),
 		streamOpLocks:  make(map[string]*sync.Mutex),
-		logger:         logger.Logger(logrus.New()),
+		logger:         logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())),
 		started:        true,
 	}
 
@@ -103,7 +103,7 @@ func TestManager_RegistryCleanupError(t *testing.T) {
 		registry:       mockReg,
 		streamHandlers: make(map[string]*StreamHandler),
 		streamOpLocks:  make(map[string]*sync.Mutex),
-		logger:         logger.Logger(logrus.New()),
+		logger:         logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())),
 		started:        true,
 	}
 
