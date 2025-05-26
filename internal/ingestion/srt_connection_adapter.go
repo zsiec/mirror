@@ -190,33 +190,15 @@ func (a *SRTConnectionAdapter) processData() {
 	loopIteration := 0
 	for {
 		loopIteration++
-		a.logger.WithFields(map[string]interface{}{
-			"stream_id":      streamID,
-			"loop_iteration": loopIteration,
-		}).Info("Starting loop iteration")
-
 		select {
 		case <-a.ctx.Done():
 			a.logger.WithField("stream_id", streamID).Info("SRT processData context cancelled")
 			return
 		default:
-			a.logger.WithField("stream_id", streamID).Info("Context check passed, continuing with read")
 		}
-
-		a.logger.WithFields(map[string]interface{}{
-			"stream_id":      streamID,
-			"loop_iteration": loopIteration,
-		}).Info("📞 About to call Connection.Read()")
 
 		// Blocking SRT read - should wait for next message
 		n, err := a.Connection.Read(buffer)
-
-		a.logger.WithFields(map[string]interface{}{
-			"stream_id":      streamID,
-			"loop_iteration": loopIteration,
-			"bytes_read":     n,
-			"error":          err,
-		}).Info("📥 SRT Connection.Read() completed")
 
 		if err != nil {
 			a.logger.WithFields(map[string]interface{}{
@@ -259,32 +241,11 @@ func (a *SRTConnectionAdapter) processData() {
 		if n > 0 {
 			consecutiveErrors = 0
 
-			a.logger.WithFields(map[string]interface{}{
-				"stream_id":      streamID,
-				"bytes_read":     n,
-				"loop_iteration": loopIteration,
-			}).Info("SRT adapter received data, about to process")
-
 			// Process the data immediately
-			a.logger.WithField("stream_id", streamID).Info("Calling processMessage...")
 			err = a.processMessage(buffer[:n], streamID)
 			if err != nil {
-				a.logger.WithError(err).WithFields(map[string]interface{}{
-					"stream_id":      streamID,
-					"loop_iteration": loopIteration,
-				}).Warn("Failed to process SRT message")
-			} else {
-				a.logger.WithFields(map[string]interface{}{
-					"stream_id":      streamID,
-					"loop_iteration": loopIteration,
-				}).Info("Message processed successfully")
+				a.logger.WithError(err).WithField("stream_id", streamID).Warn("Failed to process SRT message")
 			}
-
-			// Continue loop for next message
-			a.logger.WithFields(map[string]interface{}{
-				"stream_id":      streamID,
-				"loop_iteration": loopIteration,
-			}).Info("About to continue to next loop iteration...")
 			continue
 		} else {
 			a.logger.WithFields(map[string]interface{}{
@@ -308,10 +269,10 @@ func (a *SRTConnectionAdapter) processMessage(data []byte, streamID string) erro
 
 	// **NEW: Use enhanced MPEG-TS parsing with parameter set extraction**
 	a.logger.WithFields(map[string]interface{}{
-		"stream_id":    streamID,
-		"data_size":    len(data),
+		"stream_id": streamID,
+		"data_size": len(data),
 	}).Info("🔍 TRANSPORT STREAM: About to call ParseWithExtractor")
-	
+
 	packets, err := a.mpegtsParser.ParseWithExtractor(data, a.parameterSetExtractor)
 
 	a.logger.WithFields(map[string]interface{}{
@@ -406,7 +367,7 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 
 	// Extract video bitstream data from PES packet
 	videoData := a.extractVideoBitstream(tsPkt)
-	
+
 	// Create timestamped packet with extracted video data
 	now := time.Now()
 	tspkt := types.TimestampedPacket{
@@ -611,15 +572,15 @@ func (a *SRTConnectionAdapter) detectBFrames(currentPTS int64) {
 
 	// B-frames are present if PTS goes backwards (but not due to wraparound)
 	// I P B B -> PTS order: 0, 3, 1, 2 (B-frames have lower PTS than previous P-frame)
-	// 
+	//
 	// MPEG-TS uses 33-bit PCR values that wrap at 2^33 (8,589,934,592) in 90kHz units
 	// Wraparound detection: if difference is > 2^32, it's likely wraparound
 	const maxPTSWrap = int64(1) << 32 // 2^32 = 4,294,967,296
 	ptsDiff := a.lastFramePTS - currentPTS
-	
+
 	isWraparound := ptsDiff > maxPTSWrap
 	isPTSBackwards := currentPTS < a.lastFramePTS && !isWraparound
-	
+
 	if isPTSBackwards {
 		a.hasBFrames = true
 		a.bFrameDetected = true
@@ -634,19 +595,19 @@ func (a *SRTConnectionAdapter) detectBFrames(currentPTS int64) {
 		a.frameReorderingDelay = framesDelay * 3600
 
 		a.logger.WithFields(map[string]interface{}{
-			"stream_id":      a.GetStreamID(),
-			"delay_ms":       a.frameReorderingDelay * 1000 / 90000,
-			"current_pts":    currentPTS,
-			"last_pts":       a.lastFramePTS,
-			"pts_diff":       ptsDiff,
+			"stream_id":   a.GetStreamID(),
+			"delay_ms":    a.frameReorderingDelay * 1000 / 90000,
+			"current_pts": currentPTS,
+			"last_pts":    a.lastFramePTS,
+			"pts_diff":    ptsDiff,
 		}).Info("B-frames detected in video stream")
 	} else if isWraparound {
 		// Handle PTS wraparound - continue without marking as B-frames
 		a.logger.WithFields(map[string]interface{}{
-			"stream_id":      a.GetStreamID(),
-			"current_pts":    currentPTS,
-			"last_pts":       a.lastFramePTS,
-			"pts_diff":       ptsDiff,
+			"stream_id":   a.GetStreamID(),
+			"current_pts": currentPTS,
+			"last_pts":    a.lastFramePTS,
+			"pts_diff":    ptsDiff,
 		}).Info("PTS wraparound detected, continuing normal operation")
 	}
 
@@ -666,11 +627,11 @@ func (a *SRTConnectionAdapter) parameterSetExtractor(parameterSets [][]byte, str
 	defer a.paramExtractorMu.Unlock()
 
 	streamID := a.GetStreamID()
-	
+
 	a.logger.WithFields(map[string]interface{}{
-		"stream_id":     streamID,
-		"stream_type":   streamType,
-		"param_sets":    len(parameterSets),
+		"stream_id":   streamID,
+		"stream_type": streamType,
+		"param_sets":  len(parameterSets),
 	}).Info("🔍 TRANSPORT STREAM: Parameter set extractor called")
 
 	if a.parameterSetCache == nil {
@@ -697,9 +658,9 @@ func (a *SRTConnectionAdapter) parameterSetExtractor(parameterSets [][]byte, str
 	for i, paramSet := range parameterSets {
 		if len(paramSet) < 5 {
 			a.logger.WithFields(map[string]interface{}{
-				"stream_id":   streamID,
-				"set_index":   i,
-				"param_size":  len(paramSet),
+				"stream_id":  streamID,
+				"set_index":  i,
+				"param_size": len(paramSet),
 			}).Debug("🔍 TRANSPORT STREAM: Skipping parameter set - too small")
 			continue
 		}
@@ -707,7 +668,7 @@ func (a *SRTConnectionAdapter) parameterSetExtractor(parameterSets [][]byte, str
 		// Determine NAL unit type based on stream type
 		var nalType uint8
 		var nalStart int
-		
+
 		// Find start code and extract NAL type
 		if paramSet[0] == 0x00 && paramSet[1] == 0x00 && paramSet[2] == 0x00 && paramSet[3] == 0x01 {
 			nalStart = 4
@@ -730,13 +691,13 @@ func (a *SRTConnectionAdapter) parameterSetExtractor(parameterSets [][]byte, str
 		case 0x1B: // H.264
 			nalType = paramSet[nalStart] & 0x1F
 			a.logger.WithFields(map[string]interface{}{
-				"stream_id":  streamID,
-				"set_index":  i,
-				"nal_type":   nalType,
-				"param_size": len(paramSet),
+				"stream_id":   streamID,
+				"set_index":   i,
+				"nal_type":    nalType,
+				"param_size":  len(paramSet),
 				"first_bytes": fmt.Sprintf("%02x", paramSet[nalStart:nalStart+min(8, len(paramSet)-nalStart)]),
 			}).Info("🔍 TRANSPORT STREAM: Processing H.264 NAL unit")
-			
+
 			if nalType == 7 { // SPS
 				if err := a.parameterSetCache.AddSPS(paramSet); err != nil {
 					a.logger.WithError(err).WithFields(map[string]interface{}{
@@ -791,11 +752,11 @@ func (a *SRTConnectionAdapter) parameterSetExtractor(parameterSets [][]byte, str
 	// Log current parameter set status with detailed breakdown
 	if a.parameterSetCache != nil {
 		stats := a.parameterSetCache.GetStatistics()
-		
+
 		// Get detailed parameter set inventory
 		allSets := a.parameterSetCache.GetAllParameterSets()
 		var spsIDs, ppsIDs []uint8
-		
+
 		if spsMaps, exists := allSets["sps"]; exists {
 			for id := range spsMaps {
 				spsIDs = append(spsIDs, id)
@@ -806,15 +767,15 @@ func (a *SRTConnectionAdapter) parameterSetExtractor(parameterSets [][]byte, str
 				ppsIDs = append(ppsIDs, id)
 			}
 		}
-		
+
 		a.logger.WithFields(map[string]interface{}{
-			"stream_id":      streamID,
-			"sps_count":      stats["sps_count"],
-			"pps_count":      stats["pps_count"],
-			"total_sets":     stats["total_sets"],
-			"sps_ids":        spsIDs,
-			"pps_ids":        ppsIDs,
-			"last_updated":   stats["last_updated"],
+			"stream_id":    streamID,
+			"sps_count":    stats["sps_count"],
+			"pps_count":    stats["pps_count"],
+			"total_sets":   stats["total_sets"],
+			"sps_ids":      spsIDs,
+			"pps_ids":      ppsIDs,
+			"last_updated": stats["last_updated"],
 		}).Info("🔍 TRANSPORT STREAM: Parameter set cache status after update")
 	}
 }
@@ -828,64 +789,65 @@ func (a *SRTConnectionAdapter) GetParameterSetCache() *types.ParameterSetContext
 
 // extractVideoBitstream extracts the actual video bitstream data from MPEG-TS packet
 func (a *SRTConnectionAdapter) extractVideoBitstream(tsPkt *mpegts.Packet) []byte {
-	fmt.Printf("🔍 EXTRACT DEBUG: Called extractVideoBitstream - PID=%d, PayloadStart=%t, Size=%d\n", 
-		tsPkt.PID, tsPkt.PayloadStart, len(tsPkt.Payload))
 	// For non-video packets, return original payload
 	if tsPkt.PID != a.mpegtsParser.GetVideoPID() || !tsPkt.PayloadExists || len(tsPkt.Payload) == 0 {
 		return tsPkt.Payload
 	}
-	
+
 	// If this is not a PES packet start, return the payload as-is (continuation data)
 	if !tsPkt.PayloadStart {
 		return tsPkt.Payload
 	}
-	
+
 	// Parse PES header to extract video bitstream
 	payload := tsPkt.Payload
-	
+
+	// Get stream ID safely for logging
+	streamID := "unknown"
+	if a.Connection != nil {
+		streamID = a.GetStreamID()
+	}
+
 	// Validate PES start code (0x000001)
 	if len(payload) < 9 || payload[0] != 0x00 || payload[1] != 0x00 || payload[2] != 0x01 {
 		a.logger.WithFields(map[string]interface{}{
-			"stream_id":    a.GetStreamID(),
+			"stream_id":    streamID,
 			"payload_size": len(payload),
 			"first_bytes":  fmt.Sprintf("%02x", payload[:min(4, len(payload))]),
 		}).Warn("Invalid PES start code, returning original payload")
 		return payload
 	}
-	
+
 	// Extract PES header length (byte 8)
 	if len(payload) < 9 {
-		a.logger.WithField("stream_id", a.GetStreamID()).Warn("PES packet too short for header length")
+		a.logger.WithField("stream_id", streamID).Warn("PES packet too short for header length")
 		return payload
 	}
-	
+
 	pesHeaderLength := int(payload[8])
 	pesPayloadStart := 9 + pesHeaderLength
-	
+
 	// Validate bounds
 	if pesPayloadStart >= len(payload) {
 		a.logger.WithFields(map[string]interface{}{
-			"stream_id":         a.GetStreamID(),
+			"stream_id":         streamID,
 			"pes_header_length": pesHeaderLength,
 			"payload_start":     pesPayloadStart,
 			"total_size":        len(payload),
 		}).Warn("PES payload start beyond packet boundary")
 		return []byte{} // Return empty slice for invalid packets
 	}
-	
+
 	// Extract the actual video bitstream (skip PES header)
 	videoBitstream := payload[pesPayloadStart:]
-	
-	fmt.Printf("🔍 EXTRACT DEBUG: Extracted bitstream - OriginalSize=%d, HeaderLen=%d, BitstreamSize=%d, FirstBytes=%02x\n",
-		len(payload), pesHeaderLength, len(videoBitstream), videoBitstream[:min(8, len(videoBitstream))])
-	
+
 	a.logger.WithFields(map[string]interface{}{
-		"stream_id":         a.GetStreamID(),
+		"stream_id":         streamID,
 		"original_size":     len(payload),
 		"pes_header_length": pesHeaderLength,
 		"bitstream_size":    len(videoBitstream),
 		"first_bytes":       fmt.Sprintf("%02x", videoBitstream[:min(8, len(videoBitstream))]),
 	}).Debug("Extracted video bitstream from PES packet")
-	
+
 	return videoBitstream
 }

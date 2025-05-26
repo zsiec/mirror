@@ -27,14 +27,15 @@ Mirror is a high-performance video streaming platform built in Go, designed to h
 - Stream ingestion with SRT and RTP protocols (Haivision adapter pattern)
 - Video-aware buffering and GOP management
 - Automatic codec detection (H.264, HEVC, AV1, JPEGXS)
-- Frame assembly and validation with B-frame reordering
+- Frame assembly and validation with optimized B-frame reordering
 - Video resolution detection from bitstream analysis
-- A/V synchronization with drift correction
-- Intelligent backpressure control and memory management
+- A/V synchronization with enhanced timebase conversion and drift correction
+- Intelligent backpressure control and memory management (8GB/400MB limits)
 - Stream recovery and reconnection with circuit breakers
 - Comprehensive metrics and monitoring with sampled logging
 - Redis-based stream registry with race-condition-safe API
-- 85%+ test coverage for ingestion components
+- Parameter set extraction and video bitstream processing
+- 85%+ test coverage for ingestion components with enhanced CI reliability
 
 ### Next Phases
 - Phase 3: Video Processing & Transcoding

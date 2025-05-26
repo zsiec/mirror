@@ -3,7 +3,6 @@ package frame
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -155,17 +154,7 @@ func (a *Assembler) AddPacket(pkt types.TimestampedPacket) error {
 	} else if a.currentFrame != nil {
 		// Add to current frame
 		a.framePackets = append(a.framePackets, pkt)
-		
-		// **DEBUG: Log packet data being appended to frame**
-		if len(pkt.Data) > 0 {
-			maxBytes := 16
-			if len(pkt.Data) < maxBytes {
-				maxBytes = len(pkt.Data)
-			}
-			fmt.Printf("🔍 FRAME DEBUG: Appending packet to frame %d - PacketSize=%d, FirstBytes=%02x, TotalBufferSize=%d\n", 
-				a.currentFrame.ID, len(pkt.Data), pkt.Data[:maxBytes], len(a.nalBuffer))
-		}
-		
+
 		a.nalBuffer = append(a.nalBuffer, pkt.Data...)
 
 		// Update frame timing if needed
@@ -246,40 +235,49 @@ func (a *Assembler) completeFrame() error {
 		a.currentFrame.PresentationTime = a.currentFrame.CaptureTime
 	}
 
-	// Send to output
+	// Send to output with proper timeout handling
+	return a.sendFrameToOutput(a.currentFrame)
+}
+
+// sendFrameToOutput sends a frame to the output channel with proper timeout handling
+func (a *Assembler) sendFrameToOutput(frame *types.VideoFrame) error {
+	// First try non-blocking send
 	select {
-	case a.output <- a.currentFrame:
+	case a.output <- frame:
 		a.framesAssembled++
+		return nil
 	case <-a.ctx.Done():
 		return a.ctx.Err()
 	default:
-		// Non-blocking check first
-		select {
-		case a.output <- a.currentFrame:
-			a.framesAssembled++
-		default:
-			// Output channel blocked, using timer approach
-			// Only create timer if we need to wait - increased timeout for video streaming
-			timer := time.NewTimer(100 * time.Millisecond)
-			defer timer.Stop()
-
-			select {
-			case a.output <- a.currentFrame:
-				a.framesAssembled++
-				// Frame sent after timer wait
-			case <-timer.C:
-				a.framesDropped++
-				a.logger.WithField("frame_id", a.currentFrame.ID).Warn("Frame dropped due to output channel timeout")
-				return ErrOutputBlocked
-			case <-a.ctx.Done():
-				// Context cancelled during timer wait
-				return a.ctx.Err()
-			}
-		}
+		// Channel is blocked, try with timeout
 	}
 
-	// Buffer cleanup handled by defer
-	return nil
+	// Create timer for output timeout - use frame timeout duration
+	outputTimeout := a.frameTimeout
+	if outputTimeout < 50*time.Millisecond {
+		outputTimeout = 50 * time.Millisecond // Minimum timeout
+	}
+	if outputTimeout > 500*time.Millisecond {
+		outputTimeout = 500 * time.Millisecond // Maximum timeout
+	}
+
+	timer := time.NewTimer(outputTimeout)
+	defer timer.Stop()
+
+	select {
+	case a.output <- frame:
+		a.framesAssembled++
+		return nil
+	case <-timer.C:
+		a.framesDropped++
+		a.logger.WithFields(map[string]interface{}{
+			"frame_id":       frame.ID,
+			"output_timeout": outputTimeout,
+		}).Warn("Frame dropped due to output channel timeout")
+		return ErrOutputBlocked
+	case <-a.ctx.Done():
+		return a.ctx.Err()
+	}
 }
 
 // parseNALUnits extracts NAL units from buffer
@@ -298,15 +296,7 @@ func (a *Assembler) parseNALUnits(data []byte) []types.NALUnit {
 					Type: nalType,
 					Data: unitData,
 				}
-				
-				// **DEBUG: Log NAL unit extraction**
-				maxBytes := 16
-				if len(unitData) < maxBytes {
-					maxBytes = len(unitData)
-				}
-				fmt.Printf("🔍 NAL DEBUG: Extracted NAL unit - Type=%d, Size=%d, FirstBytes=%02x\n", 
-					nalType, len(unitData), unitData[:maxBytes])
-				
+
 				nalUnits = append(nalUnits, nalUnit)
 			}
 		}
@@ -364,14 +354,7 @@ func (a *Assembler) findStartCodeUnits(data []byte) [][]byte {
 				if unitEnd > unitStart {
 					unitData := data[unitStart:unitEnd]
 					units = append(units, unitData)
-					
-					// **DEBUG: Log start code unit finding**
-					maxBytes := 16
-					if len(unitData) < maxBytes {
-						maxBytes = len(unitData)
-					}
-					fmt.Printf("🔍 START CODE DEBUG: Found unit - StartPos=%d, EndPos=%d, Size=%d, FirstBytes=%02x\n", 
-						unitStart, unitEnd, len(unitData), unitData[:maxBytes])
+
 				}
 
 				i = unitEnd

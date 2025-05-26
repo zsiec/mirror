@@ -244,10 +244,10 @@ func CreateTestConfig(t *testing.T, tempDir, redisAddr string) *config.Config {
 	// Get available ports for SRT and RTP
 	srtPort, err := getAvailablePort()
 	require.NoError(t, err)
-	
+
 	rtpPort, err := getAvailablePort()
 	require.NoError(t, err)
-	
+
 	rtcpPort, err := getAvailablePort()
 	require.NoError(t, err)
 
@@ -314,9 +314,9 @@ func CreateTestConfig(t *testing.T, tempDir, redisAddr string) *config.Config {
 				ErrorRetryLimit:      3,
 			},
 			Backpressure: config.BackpressureConfig{
-				Enabled:        true,
-				HighWatermark:  0.75,
-				LowWatermark:   0.25,
+				Enabled:       true,
+				HighWatermark: 0.75,
+				LowWatermark:  0.25,
 			},
 			Registry: config.RegistryConfig{
 				RedisAddr:           redisAddr,
@@ -349,12 +349,12 @@ func GenerateTestCertificate(t *testing.T, certFile, keyFile string) {
 			StreetAddress: []string{""},
 			PostalCode:    []string{""},
 		},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(365 * 24 * time.Hour),
-		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
-		DNSNames:     []string{"localhost"},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
+		DNSNames:    []string{"localhost"},
 	}
 
 	// Create certificate

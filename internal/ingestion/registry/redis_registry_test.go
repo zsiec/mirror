@@ -59,12 +59,12 @@ func TestRedisRegistry_Register(t *testing.T) {
 	time.Sleep(1 * time.Millisecond) // Ensure LastHeartbeat changes
 	err = registry.Register(ctx, stream)
 	assert.NoError(t, err) // Should succeed as update
-	
+
 	// Verify the stream was updated, not replaced
 	updatedStream, err := registry.Get(ctx, stream.ID)
 	assert.NoError(t, err)
 	assert.Equal(t, originalCreatedAt.Unix(), updatedStream.CreatedAt.Unix()) // CreatedAt preserved
-	assert.True(t, updatedStream.LastHeartbeat.After(originalCreatedAt)) // LastHeartbeat updated
+	assert.True(t, updatedStream.LastHeartbeat.After(originalCreatedAt))      // LastHeartbeat updated
 }
 
 func TestRedisRegistry_Get(t *testing.T) {

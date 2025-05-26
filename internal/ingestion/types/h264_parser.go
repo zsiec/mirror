@@ -85,11 +85,11 @@ func (bw *BitWriter) WriteBit(bit uint8) {
 	for len(bw.data) <= bw.bytePos {
 		bw.data = append(bw.data, 0)
 	}
-	
+
 	if bit&1 == 1 {
 		bw.data[bw.bytePos] |= (1 << (7 - bw.bitPos))
 	}
-	
+
 	bw.bitPos++
 	if bw.bitPos >= 8 {
 		bw.bitPos = 0
@@ -111,7 +111,7 @@ func (bw *BitWriter) WriteUE(value uint32) {
 		bw.WriteBit(1) // Single bit for value 0
 		return
 	}
-	
+
 	// Calculate the number of leading zeros needed
 	leadingZeros := 0
 	temp := value + 1
@@ -119,12 +119,12 @@ func (bw *BitWriter) WriteUE(value uint32) {
 		temp >>= 1
 		leadingZeros++
 	}
-	
+
 	// Write leading zeros
 	for i := 0; i < leadingZeros; i++ {
 		bw.WriteBit(0)
 	}
-	
+
 	// Write the value + 1 in binary
 	valuePlusOne := value + 1
 	bw.WriteBits(valuePlusOne, leadingZeros+1)

@@ -97,4 +97,3 @@ func (m *MemoryChecker) Check(ctx context.Context) error {
 	// For now, we'll just return nil (healthy)
 	return nil
 }
-

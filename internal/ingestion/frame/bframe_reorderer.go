@@ -161,12 +161,12 @@ func (r *BFrameReorderer) validateFrame(frame *types.VideoFrame) error {
 		// Check if this is wraparound vs real backwards jump
 		const maxDTSWrap = int64(1) << 32 // 2^32 = 4,294,967,296
 		dtsDiff := r.lastOutputDTS - frame.DTS
-		
+
 		isWraparound := dtsDiff > maxDTSWrap
 		if !isWraparound {
 			return fmt.Errorf("DTS went backwards: %d < %d", frame.DTS, r.lastOutputDTS)
 		}
-		
+
 		// Handle wraparound: reset lastOutputDTS to allow new sequence
 		r.lastOutputDTS = -1
 	}

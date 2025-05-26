@@ -678,8 +678,24 @@ func (m *Manager) HandleSRTConnection(conn *srt.Connection) error {
 		return fmt.Errorf("failed to create stream handler: %w", err)
 	}
 
-	// Handler is already started, just wait for completion
-	<-handler.ctx.Done()
+	// Handler is already started, wait for completion or manager shutdown
+	select {
+	case <-handler.ctx.Done():
+		m.logger.WithField("stream_id", streamID).Debug("SRT handler completed normally")
+	case <-m.ctx.Done():
+		m.logger.WithField("stream_id", streamID).Info("Manager shutdown, stopping SRT handler")
+		// Manager is shutting down, stop the handler gracefully
+		if err := handler.Stop(); err != nil {
+			m.logger.WithError(err).Error("Failed to stop SRT handler during manager shutdown")
+		}
+		// Wait a bit for graceful shutdown, but don't block forever
+		select {
+		case <-handler.ctx.Done():
+			m.logger.WithField("stream_id", streamID).Debug("SRT handler stopped gracefully")
+		case <-time.After(5 * time.Second):
+			m.logger.WithField("stream_id", streamID).Warn("SRT handler took too long to stop gracefully")
+		}
+	}
 
 	// Cleanup
 	m.RemoveStreamHandler(streamID)
@@ -734,10 +750,27 @@ func (m *Manager) HandleRTPSession(session *rtp.Session) error {
 
 	m.logger.WithField("stream_id", session.GetStreamID()).Info("HandleRTPSession: Handler created successfully, waiting for completion")
 
-	// Handler is already started, just wait for completion
-	<-handler.ctx.Done()
+	// Handler is already started, wait for completion or manager shutdown
+	streamID := session.GetStreamID()
+	select {
+	case <-handler.ctx.Done():
+		m.logger.WithField("stream_id", streamID).Debug("RTP handler completed normally")
+	case <-m.ctx.Done():
+		m.logger.WithField("stream_id", streamID).Info("Manager shutdown, stopping RTP handler")
+		// Manager is shutting down, stop the handler gracefully
+		if err := handler.Stop(); err != nil {
+			m.logger.WithError(err).Error("Failed to stop RTP handler during manager shutdown")
+		}
+		// Wait a bit for graceful shutdown, but don't block forever
+		select {
+		case <-handler.ctx.Done():
+			m.logger.WithField("stream_id", streamID).Debug("RTP handler stopped gracefully")
+		case <-time.After(5 * time.Second):
+			m.logger.WithField("stream_id", streamID).Warn("RTP handler took too long to stop gracefully")
+		}
+	}
 
-	m.logger.WithField("stream_id", session.GetStreamID()).Info("HandleRTPSession: Handler completed, cleaning up")
+	m.logger.WithField("stream_id", streamID).Info("HandleRTPSession: Handler completed, cleaning up")
 
 	// Cleanup
 	m.RemoveStreamHandler(session.GetStreamID())

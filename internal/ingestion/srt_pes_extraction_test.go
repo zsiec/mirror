@@ -18,43 +18,43 @@ func (m *mockSRTConnectionPES) GetStreamID() string {
 	return m.streamID
 }
 
-func (m *mockSRTConnection) Close() error {
+func (m *mockSRTConnectionPES) Close() error {
 	return nil
 }
 
-func (m *mockSRTConnection) Read([]byte) (int, error) {
+func (m *mockSRTConnectionPES) Read([]byte) (int, error) {
 	return 0, nil
 }
 
-func (m *mockSRTConnection) Write([]byte) (int, error) {
+func (m *mockSRTConnectionPES) Write([]byte) (int, error) {
 	return 0, nil
 }
 
-func (m *mockSRTConnection) GetStats() *srt.ConnectionStats {
+func (m *mockSRTConnectionPES) GetStats() *srt.ConnectionStats {
 	return &srt.ConnectionStats{}
 }
 
-func (m *mockSRTConnection) IsConnected() bool {
+func (m *mockSRTConnectionPES) IsConnected() bool {
 	return true
 }
 
 // TestPESPayloadExtraction tests that we correctly extract video bitstream from PES packets
 func TestPESPayloadExtraction(t *testing.T) {
 	tests := []struct {
-		name                string
-		pesPacket           []byte
-		expectedBitstream   []byte
-		expectedValid       bool
-		description         string
+		name              string
+		pesPacket         []byte
+		expectedBitstream []byte
+		expectedValid     bool
+		description       string
 	}{
 		{
 			name: "Valid PES packet with SPS NAL unit",
 			pesPacket: []byte{
 				// PES header (9 bytes + 5 byte extension)
 				0x00, 0x00, 0x01, 0xE0, // PES start code + stream ID
-				0x00, 0x20,             // PES packet length
-				0x80, 0x80,             // PES header flags
-				0x05,                   // PES header data length (5 bytes)
+				0x00, 0x20, // PES packet length
+				0x80, 0x80, // PES header flags
+				0x05,                         // PES header data length (5 bytes)
 				0x21, 0x00, 0x57, 0x07, 0xA1, // PTS (5 bytes)
 				// Video bitstream starts here
 				0x00, 0x00, 0x00, 0x01, // Start code
@@ -64,7 +64,7 @@ func TestPESPayloadExtraction(t *testing.T) {
 			},
 			expectedBitstream: []byte{
 				0x00, 0x00, 0x00, 0x01, // Start code
-				0x67,                   // SPS NAL unit
+				0x67, // SPS NAL unit
 				0x42, 0x80, 0x28, 0x95,
 				0xA0, 0x14, 0x01, 0x6E,
 			},
@@ -76,20 +76,20 @@ func TestPESPayloadExtraction(t *testing.T) {
 			pesPacket: []byte{
 				// PES header (9 bytes + 3 byte extension)
 				0x00, 0x00, 0x01, 0xE0, // PES start code + stream ID
-				0x00, 0x30,             // PES packet length
-				0x80, 0x80,             // PES header flags
-				0x03,                   // PES header data length (3 bytes)
-				0x21, 0x00, 0x57,       // PTS partial (3 bytes)
+				0x00, 0x30, // PES packet length
+				0x80, 0x80, // PES header flags
+				0x03,             // PES header data length (3 bytes)
+				0x21, 0x00, 0x57, // PTS partial (3 bytes)
 				// Video bitstream with multiple NAL units
 				0x00, 0x00, 0x00, 0x01, // Start code 1
-				0x09, 0xF0,             // AUD NAL unit
+				0x09, 0xF0, // AUD NAL unit
 				0x00, 0x00, 0x00, 0x01, // Start code 2
 				0x41, 0x9B, 0x00, 0x22, // Slice NAL unit
 				0x80, 0x50,
 			},
 			expectedBitstream: []byte{
 				0x00, 0x00, 0x00, 0x01, // Start code 1
-				0x09, 0xF0,             // AUD NAL unit
+				0x09, 0xF0, // AUD NAL unit
 				0x00, 0x00, 0x00, 0x01, // Start code 2
 				0x41, 0x9B, 0x00, 0x22, // Slice NAL unit
 				0x80, 0x50,
@@ -130,7 +130,7 @@ func TestPESPayloadExtraction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create minimal test adapter without full SRT connection
+			// Create minimal test adapter without SRT connection (tests extract logic only)
 			adapter := &SRTConnectionAdapter{
 				mpegtsParser: mpegts.NewParser(),
 				logger:       logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())),
@@ -138,10 +138,10 @@ func TestPESPayloadExtraction(t *testing.T) {
 
 			// Create MPEG-TS packet
 			tsPkt := &mpegts.Packet{
-				PID:          256, // Video PID
-				PayloadStart: true,
+				PID:           256, // Video PID
+				PayloadStart:  true,
 				PayloadExists: true,
-				Payload:      tt.pesPacket,
+				Payload:       tt.pesPacket,
 			}
 
 			// Set video PID in parser
@@ -166,7 +166,7 @@ func TestPESPayloadExtraction(t *testing.T) {
 				}
 			}
 
-			t.Logf("✅ %s: extracted %d bytes from %d byte PES packet", 
+			t.Logf("✅ %s: extracted %d bytes from %d byte PES packet",
 				tt.description, len(result), len(tt.pesPacket))
 		})
 	}
@@ -181,10 +181,10 @@ func TestNALUnitValidation(t *testing.T) {
 		0x95, 0xA0, 0x14, 0x01, 0x6E, 0x02, 0xD1, 0x00,
 		0x00, 0x03, 0x00, 0x01, 0x00, 0x00, 0x03, 0x00,
 		0x32, 0x0F, 0x18, 0x31, 0x96,
-		
+
 		// PPS NAL unit
 		0x00, 0x00, 0x00, 0x01, 0x68, 0xCE, 0x06, 0xE2,
-		
+
 		// IDR slice
 		0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x00,
 		0x33, 0xFF,
@@ -194,9 +194,9 @@ func TestNALUnitValidation(t *testing.T) {
 	pesPacket := make([]byte, 0)
 	pesPacket = append(pesPacket, []byte{
 		0x00, 0x00, 0x01, 0xE0, // PES start code + stream ID
-		0x00, 0x00,             // PES packet length (0 = variable)
-		0x80, 0x80,             // PES header flags
-		0x05,                   // PES header data length
+		0x00, 0x00, // PES packet length (0 = variable)
+		0x80, 0x80, // PES header flags
+		0x05,                         // PES header data length
 		0x21, 0x00, 0x57, 0x07, 0xA1, // PTS
 	}...)
 	pesPacket = append(pesPacket, h264Bitstream...)
@@ -209,10 +209,10 @@ func TestNALUnitValidation(t *testing.T) {
 
 	// Create MPEG-TS packet
 	tsPkt := &mpegts.Packet{
-		PID:          256,
-		PayloadStart: true,
+		PID:           256,
+		PayloadStart:  true,
 		PayloadExists: true,
-		Payload:      pesPacket,
+		Payload:       pesPacket,
 	}
 
 	adapter.mpegtsParser.SetVideoPID(256)
@@ -274,10 +274,10 @@ func TestContinuationPackets(t *testing.T) {
 	// Test continuation packet (PayloadStart = false)
 	continuationData := []byte{0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC}
 	tsPkt := &mpegts.Packet{
-		PID:          256,
-		PayloadStart: false, // This is a continuation packet
+		PID:           256,
+		PayloadStart:  false, // This is a continuation packet
 		PayloadExists: true,
-		Payload:      continuationData,
+		Payload:       continuationData,
 	}
 
 	adapter.mpegtsParser.SetVideoPID(256)

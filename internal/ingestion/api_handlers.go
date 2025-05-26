@@ -54,10 +54,10 @@ func (h *Handlers) RegisterRoutes(router *mux.Router) {
 
 	// A/V sync endpoint
 	api.HandleFunc("/streams/{id}/sync", h.manager.HandleStreamSync).Methods("GET")
-	
+
 	// Iframe endpoint
 	api.HandleFunc("/streams/{id}/iframe", h.manager.HandleStreamIframe).Methods("GET")
-	
+
 	// Parameter set monitoring endpoint
 	api.HandleFunc("/streams/{id}/parameters", h.manager.HandleStreamParameters).Methods("GET")
 
@@ -86,12 +86,12 @@ type StreamDTO struct {
 }
 
 type StreamStatsDTO struct {
-	BytesReceived    int64                    `json:"bytes_received"`
-	PacketsReceived  int64                    `json:"packets_received"`
-	PacketsLost      int64                    `json:"packets_lost"`
-	Bitrate          int64                    `json:"bitrate"`
-	FrameBufferStats FrameBufferStatsDTO      `json:"frame_buffer_stats"`
-	ConnectionStats  *ConnectionStatsDTO      `json:"connection_stats,omitempty"`
+	BytesReceived    int64               `json:"bytes_received"`
+	PacketsReceived  int64               `json:"packets_received"`
+	PacketsLost      int64               `json:"packets_lost"`
+	Bitrate          int64               `json:"bitrate"`
+	FrameBufferStats FrameBufferStatsDTO `json:"frame_buffer_stats"`
+	ConnectionStats  *ConnectionStatsDTO `json:"connection_stats,omitempty"`
 }
 
 type ConnectionStatsDTO struct {

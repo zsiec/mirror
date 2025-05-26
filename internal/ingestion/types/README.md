@@ -416,6 +416,7 @@ clonedPacket := packet.Clone()
 - Bitwise operations for flags
 - Pre-calculated codec metadata
 - O(1) lookups for common operations
+- Optimized parameter context processing with cached requirements to avoid duplicate parsing
 
 ## Error Handling
 

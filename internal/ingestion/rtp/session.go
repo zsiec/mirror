@@ -20,6 +20,17 @@ import (
 	"github.com/zsiec/mirror/internal/metrics"
 )
 
+// CodecDetectionState represents the state of codec detection
+type CodecDetectionState int32
+
+const (
+	CodecStateUnknown    CodecDetectionState = iota
+	CodecStateDetecting  // Detection in progress
+	CodecStateDetected   // Codec detected and depacketizer created
+	CodecStateError      // Detection failed
+	CodecStateTimeout    // Detection timed out
+)
+
 type Session struct {
 	streamID        string
 	remoteAddr      *net.UDPAddr
@@ -53,8 +64,11 @@ type Session struct {
 	rtcpCallback   func(nackCount int) // Callback for RTCP feedback
 	backpressureMu sync.RWMutex
 
-	// Ensure codec update only happens once
+	// Codec detection state machine
+	codecState      CodecDetectionState
+	codecStateMu    sync.Mutex
 	codecUpdateOnce sync.Once
+	detectionCond   *sync.Cond // Condition variable for codec detection coordination
 }
 
 type SessionStats struct {
@@ -92,6 +106,7 @@ func NewSession(streamID string, remoteAddr *net.UDPAddr, ssrc uint32,
 		codecDetector: codecDetector,
 		codecFactory:  codecFactory,
 		codecType:     codec.TypeUnknown, // Will be detected from first packet or SDP
+		codecState:    CodecStateUnknown,
 		lastPacket:    time.Now(),
 		stats: &SessionStats{
 			StartTime: time.Now(),
@@ -99,6 +114,9 @@ func NewSession(streamID string, remoteAddr *net.UDPAddr, ssrc uint32,
 		ctx:    ctx,
 		cancel: cancel,
 	}
+
+	// Initialize condition variable for codec detection coordination
+	session.detectionCond = sync.NewCond(&session.codecStateMu)
 
 	// Register stream with unknown codec initially
 	stream := &registry.Stream{
@@ -191,25 +209,66 @@ func (s *Session) SetSDP(sdp string) error {
 		return fmt.Errorf("failed to detect codec from SDP: %w", err)
 	}
 
-	// Create depacketizer for detected codec
+	// Use atomic state machine to prevent races
+	s.codecStateMu.Lock()
+
+	// Check current state
+	switch s.codecState {
+	case CodecStateDetected:
+		// Already detected - verify consistency
+		s.codecStateMu.Unlock()
+		if s.codecType != codecType {
+			return fmt.Errorf("codec mismatch: SDP indicates %s but already detected %s", codecType, s.codecType)
+		}
+		return nil // Already configured
+
+	case CodecStateDetecting:
+		// Another goroutine is detecting - wait for completion
+		for s.codecState == CodecStateDetecting {
+			s.detectionCond.Wait()
+		}
+		// Check result after waiting
+		if s.codecState == CodecStateDetected && s.codecType == codecType {
+			s.codecStateMu.Unlock()
+			return nil
+		} else if s.codecState == CodecStateDetected {
+			s.codecStateMu.Unlock()
+			return fmt.Errorf("codec mismatch: SDP indicates %s but already detected %s", codecType, s.codecType)
+		}
+		// Fall through to try detection again if it failed
+
+	case CodecStateError, CodecStateTimeout:
+		// Previous detection failed - reset and try again
+		s.codecState = CodecStateUnknown
+	}
+
+	// Transition to detecting state
+	s.codecState = CodecStateDetecting
+	s.codecStateMu.Unlock()
+
+	// Create depacketizer for detected codec (outside lock)
 	depacketizer, err := s.codecFactory.Create(codecType, s.streamID)
+	
 	if err != nil {
+		s.codecStateMu.Lock()
+		s.codecState = CodecStateError
+		s.detectionCond.Broadcast()
+		s.codecStateMu.Unlock()
 		return fmt.Errorf("failed to create depacketizer for codec %s: %w", codecType, err)
 	}
 
+	// Update codec state atomically - acquire locks in proper order
 	s.mu.Lock()
-	// Only update if not already detected (avoid race with handleCodecDetection)
-	if s.codecType == codec.TypeUnknown {
-		s.codecType = codecType
-		s.depacketizer = depacketizer
-	} else if s.codecType != codecType {
-		s.mu.Unlock()
-		return fmt.Errorf("codec mismatch: SDP indicates %s but already detected %s", codecType, s.codecType)
-	}
+	s.codecType = codecType
+	s.depacketizer = depacketizer
 	s.mu.Unlock()
 
+	s.codecStateMu.Lock()
+	s.codecState = CodecStateDetected
+	s.detectionCond.Broadcast()
+	s.codecStateMu.Unlock()
+
 	// Update stream in registry (do async to avoid blocking)
-	// Use sync.Once to ensure this only happens once to prevent race conditions
 	s.codecUpdateOnce.Do(func() {
 		go func() {
 			stream, _ := s.registry.Get(s.ctx, s.streamID)
@@ -454,72 +513,150 @@ func (s *Session) ProcessRTCPPacket(data []byte) {
 	// TODO: Parse and process RTCP packet for statistics, feedback, etc.
 }
 
-// ProcessPacket processes an RTP packet received by the listener
-// handleCodecDetection attempts to detect codec and create depacketizer
+// handleCodecDetection attempts to detect codec and create depacketizer using atomic state machine
 // Returns true if depacketizer is ready, false if packet should be skipped
-// IMPORTANT: This method must be called with s.mu lock held
 func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
-	// Detect codec if not yet detected
-	if s.codecType == codec.TypeUnknown {
-		// Temporarily unlock for codec detection (may involve network I/O)
-		s.mu.Unlock()
-		detectedType, err := s.codecDetector.DetectFromRTPPacket(packet)
-		s.mu.Lock()
-
-		// Check again in case another goroutine detected it
-		if s.codecType == codec.TypeUnknown && err == nil && detectedType != codec.TypeUnknown {
-			s.codecType = detectedType
-			// Create appropriate depacketizer
-			depacketizer, err := s.codecFactory.Create(detectedType, s.streamID)
-			if err != nil {
-				s.logger.WithError(err).Errorf("Failed to create depacketizer for codec %s", detectedType)
-				// Mark stream as error state if we can't create depacketizer
-				go func() {
-					s.registry.UpdateStatus(s.ctx, s.streamID, registry.StatusError)
-				}()
-				return false
-			}
-			s.depacketizer = depacketizer
-
-			// Update stream codec in registry (do this async to avoid holding lock)
-			// Use sync.Once to ensure this only happens once to prevent race conditions
-			s.codecUpdateOnce.Do(func() {
-				go func() {
-					stream, _ := s.registry.Get(s.ctx, s.streamID)
-					if stream != nil {
-						stream.VideoCodec = detectedType.String()
-						s.registry.Update(s.ctx, stream)
-					}
-				}()
-			})
-
-			s.logger.WithField("codec", detectedType).Info("Detected video codec")
-		}
+	// Fast path: check if already detected without acquiring state lock
+	s.mu.RLock()
+	if s.depacketizer != nil {
+		s.mu.RUnlock()
+		return true
 	}
+	s.mu.RUnlock()
 
-	// Skip if depacketizer not yet initialized (codec not detected)
-	if s.depacketizer == nil {
-		// Check for codec detection timeout (10 seconds)
+	// Use atomic state machine for codec detection
+	s.codecStateMu.Lock()
+	
+	switch s.codecState {
+	case CodecStateDetected:
+		s.codecStateMu.Unlock()
+		return true
+
+	case CodecStateDetecting:
+		// Another goroutine is detecting - wait with timeout
+		done := make(chan struct{})
+		go func() {
+			for s.codecState == CodecStateDetecting {
+				s.detectionCond.Wait()
+			}
+			close(done)
+		}()
+		
+		s.codecStateMu.Unlock()
+		
+		// Wait up to 1 second for detection to complete
+		select {
+		case <-done:
+			s.codecStateMu.Lock()
+			result := s.codecState == CodecStateDetected
+			s.codecStateMu.Unlock()
+			return result
+		case <-time.After(time.Second):
+			return false // Timeout waiting for detection
+		}
+
+	case CodecStateError, CodecStateTimeout:
+		s.codecStateMu.Unlock()
+		return false
+
+	case CodecStateUnknown:
+		// Check timeout first
+		s.mu.Lock()
 		if s.firstPacketTime.IsZero() {
 			s.firstPacketTime = time.Now()
 		} else if time.Since(s.firstPacketTime) > 10*time.Second {
+			s.mu.Unlock()
+			s.codecState = CodecStateTimeout
+			s.detectionCond.Broadcast()
+			s.codecStateMu.Unlock()
+			
 			s.logger.Error("Failed to detect codec within timeout period")
 			go func() {
 				s.registry.UpdateStatus(s.ctx, s.streamID, registry.StatusError)
+				atomic.StoreInt32(&s.paused, 1)
 			}()
-			// Don't process any more packets for this session
-			atomic.StoreInt32(&s.paused, 1)
+			return false
+		}
+		s.mu.Unlock()
+
+		// Transition to detecting state
+		s.codecState = CodecStateDetecting
+		s.codecStateMu.Unlock()
+
+		// Perform detection outside of locks
+		detectedType, err := s.codecDetector.DetectFromRTPPacket(packet)
+		
+		s.codecStateMu.Lock()
+		if err != nil || detectedType == codec.TypeUnknown {
+			// Detection failed - return to unknown state
+			s.codecState = CodecStateUnknown
+			s.detectionCond.Broadcast()
+			s.codecStateMu.Unlock()
+			
+			// Log once per second to avoid spam
+			s.mu.RLock()
+			lastPacket := s.lastPacket
+			s.mu.RUnlock()
+			if time.Since(lastPacket) > time.Second {
+				s.logger.Warn("Dropping RTP packets: codec not detected yet")
+			}
 			return false
 		}
 
-		// Log once per second to avoid spam
-		if time.Since(s.lastPacket) > time.Second {
-			s.logger.Warn("Dropping RTP packets: codec not detected yet")
+		// Create depacketizer
+		depacketizer, err := s.codecFactory.Create(detectedType, s.streamID)
+		if err != nil {
+			s.codecState = CodecStateError
+			s.detectionCond.Broadcast()
+			s.codecStateMu.Unlock()
+			
+			s.logger.WithError(err).Errorf("Failed to create depacketizer for codec %s", detectedType)
+			go func() {
+				s.registry.UpdateStatus(s.ctx, s.streamID, registry.StatusError)
+			}()
+			return false
 		}
+
+		// Release codec state lock before acquiring main lock to avoid deadlock
+		s.codecStateMu.Unlock()
+
+		// Atomically update codec state
+		s.mu.Lock()
+		s.codecType = detectedType
+		s.depacketizer = depacketizer
+		s.mu.Unlock()
+
+		// Re-acquire codec state lock to update state
+		s.codecStateMu.Lock()
+		s.codecState = CodecStateDetected
+		s.detectionCond.Broadcast()
+		s.codecStateMu.Unlock()
+
+		// Update stream codec in registry (async)
+		s.codecUpdateOnce.Do(func() {
+			go func() {
+				stream, _ := s.registry.Get(s.ctx, s.streamID)
+				if stream != nil {
+					stream.VideoCodec = detectedType.String()
+					s.registry.Update(s.ctx, stream)
+				}
+			}()
+		})
+
+		s.logger.WithField("codec", detectedType).Info("Detected video codec")
+		return true
+
+	default:
+		s.codecStateMu.Unlock()
 		return false
 	}
+}
 
-	return true
+// getCodecState safely returns the current codec detection state
+func (s *Session) getCodecState() CodecDetectionState {
+	s.codecStateMu.Lock()
+	defer s.codecStateMu.Unlock()
+	return s.codecState
 }
 
 func (s *Session) ProcessPacket(packet *rtp.Packet) {
@@ -547,8 +684,17 @@ func (s *Session) ProcessPacket(packet *rtp.Packet) {
 		}
 	}
 
+	// Handle codec detection first (without holding main mutex)
+	s.logger.Debug("RTP ProcessPacket: About to handle codec detection")
+	if !s.handleCodecDetection(packet) {
+		s.logger.Debug("RTP ProcessPacket: Codec detection failed, dropping packet")
+		return
+	}
+
+	s.logger.WithField("codec_type", s.codecType).Debug("RTP ProcessPacket: Codec detection successful")
+
+	// Now acquire lock for stats and processing
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	s.logger.Debug("RTP ProcessPacket: Acquired lock, updating stats")
 
@@ -577,18 +723,20 @@ func (s *Session) ProcessPacket(packet *rtp.Packet) {
 	}
 	s.stats.LastSequence = packet.SequenceNumber
 
-	s.logger.Debug("RTP ProcessPacket: About to handle codec detection")
-
-	// Handle codec detection with depacketizer initialization
-	if !s.handleCodecDetection(packet) {
-		s.logger.Debug("RTP ProcessPacket: Codec detection failed, dropping packet")
+	// Get depacketizer and callback safely
+	depacketizer := s.depacketizer
+	nalCallback := s.nalCallback
+	if depacketizer == nil {
+		s.mu.Unlock()
+		s.logger.Debug("RTP ProcessPacket: No depacketizer available")
 		return
 	}
 
-	s.logger.WithField("codec_type", s.codecType).Debug("RTP ProcessPacket: Codec detection successful, about to depacketize")
+	// Release lock before depacketization to avoid blocking other packets
+	s.mu.Unlock()
 
-	// Depacketize RTP payload
-	nalUnits, err := s.depacketizer.Depacketize(packet)
+	// Depacketize RTP payload (outside lock)
+	nalUnits, err := depacketizer.Depacketize(packet)
 	if err != nil {
 		s.logger.WithError(err).Debug("RTP ProcessPacket: Failed to depacketize RTP payload")
 		return
@@ -596,15 +744,15 @@ func (s *Session) ProcessPacket(packet *rtp.Packet) {
 
 	s.logger.WithField("nal_units_count", len(nalUnits)).Debug("RTP ProcessPacket: Depacketization successful")
 
-	// Send NAL units to callback if set
-	if s.nalCallback != nil && len(nalUnits) > 0 {
+	// Send NAL units to callback if set (callback was captured earlier while holding lock)
+	if nalCallback != nil && len(nalUnits) > 0 {
 		s.logger.WithField("nal_units_count", len(nalUnits)).Info("RTP Session: About to call NAL callback")
-		if err := s.nalCallback(nalUnits); err != nil {
+		if err := nalCallback(nalUnits); err != nil {
 			s.logger.WithError(err).Error("RTP ProcessPacket: NAL callback failed")
 		} else {
 			s.logger.WithField("nal_units_sent", len(nalUnits)).Info("RTP ProcessPacket: NAL units sent to callback successfully")
 		}
-	} else if s.nalCallback == nil {
+	} else if nalCallback == nil {
 		s.logger.Debug("RTP ProcessPacket: No NAL callback set")
 	} else {
 		s.logger.Debug("RTP ProcessPacket: No NAL units to send")

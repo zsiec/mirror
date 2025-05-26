@@ -33,10 +33,10 @@ func TestParameterSetExtraction(t *testing.T) {
 	// Test parameter set extraction using GOP buffer's ExtractParameterSetFromNAL directly
 	logrusLogger := logrus.New()
 	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
-	
+
 	// Create parameter context
 	paramContext := types.NewParameterSetContext(types.CodecH264, "test-stream-extract")
-	
+
 	// Create GOP buffer for testing extraction
 	gopBufferConfig := gop.BufferConfig{
 		MaxGOPs:     10,
@@ -49,7 +49,7 @@ func TestParameterSetExtraction(t *testing.T) {
 	// Create test NAL unit data for SPS (H.264 SPS NAL type 7)
 	spsData := []byte{
 		0x00, 0x00, 0x00, 0x01, // Start code
-		0x67, // NAL header (type 7 = SPS)
+		0x67,             // NAL header (type 7 = SPS)
 		0x42, 0x00, 0x1F, // profile_idc=66, constraint_flags=0, level_idc=31
 		0xE9, // seq_parameter_set_id=7 (encoded as exp-golomb)
 		// Additional SPS data would go here
@@ -58,7 +58,7 @@ func TestParameterSetExtraction(t *testing.T) {
 	// Create test NAL unit data for PPS (H.264 PPS NAL type 8)
 	ppsData := []byte{
 		0x00, 0x00, 0x00, 0x01, // Start code
-		0x68, // NAL header (type 8 = PPS)
+		0x68,       // NAL header (type 8 = PPS)
 		0x8F, 0x20, // Properly encoded PPS data: pps_id=0, sps_id=0, plus additional fields
 		// Additional PPS data would go here
 	}
@@ -70,7 +70,7 @@ func TestParameterSetExtraction(t *testing.T) {
 			Type: 7,
 			Data: spsData[4:], // Skip start code
 		}
-		
+
 		extracted := gopBuffer.ExtractParameterSetFromNAL(paramContext, spsNAL, 7, 1)
 		assert.True(t, extracted, "Should successfully extract SPS")
 
@@ -87,7 +87,7 @@ func TestParameterSetExtraction(t *testing.T) {
 			Type: 8,
 			Data: ppsData[4:], // Skip start code
 		}
-		
+
 		extracted := gopBuffer.ExtractParameterSetFromNAL(paramContext, ppsNAL, 8, 1)
 		assert.True(t, extracted, "Should successfully extract PPS")
 

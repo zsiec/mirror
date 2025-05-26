@@ -95,7 +95,7 @@ continuous := wrapper.GetContinuousTime()
 
 ## Timebase Conversion
 
-Convert between different timebases:
+Convert between different timebases with dynamic frame rate detection:
 
 ```go
 converter := sync.NewTimebaseConverter(
@@ -103,11 +103,14 @@ converter := sync.NewTimebaseConverter(
     48000,  // Target: 48kHz audio
 )
 
-// Convert timestamp
+// Convert timestamp with frame rate fallback
 targetTS := converter.Convert(sourceTS)
 
-// Convert duration
+// Convert duration with precise calculations
 targetDur := converter.ConvertDuration(sourceDur)
+
+// Supports common frame rates: 29.97, 30, 25, 24, 60, 50 fps
+// Automatic detection for standard 90kHz timebase (3000 for 30fps)
 ```
 
 ## Features

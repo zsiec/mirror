@@ -581,11 +581,13 @@ Mirror is designed for high-performance video streaming:
 | Concurrent RTP Sessions | 25 |
 | Max Stream Bitrate | 50 Mbps |
 | Ingestion Latency | < 200ms |
-| Memory per Stream | ~400MB |
+| Memory per Stream | 400MB |
+| Total Memory Limit | 8GB |
 | A/V Sync Accuracy | ±100ms |
 | Frame Assembly Timeout | 200ms |
 | GOP Buffer Depth | 3 GOPs |
 | Codec Support | H.264, HEVC, AV1, JPEG-XS |
+| Test Coverage | 85%+ |
 
 ## 🔒 Security
 

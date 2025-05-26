@@ -23,7 +23,7 @@ func NewFFmpegChecker(binaryPath string) *FFmpegChecker {
 			binaryPath = path
 		}
 	}
-	
+
 	return &FFmpegChecker{
 		binaryPath: binaryPath,
 		timeout:    5 * time.Second,
@@ -83,7 +83,6 @@ func (f *FFmpegChecker) checkBinary(ctx context.Context) error {
 	return nil
 }
 
-
 // checkCodecs verifies essential video codecs are available
 func (f *FFmpegChecker) checkCodecs(ctx context.Context) error {
 	// Create a context with timeout for the command
@@ -98,7 +97,7 @@ func (f *FFmpegChecker) checkCodecs(ctx context.Context) error {
 	}
 
 	outputStr := string(output)
-	
+
 	// Check for essential video codecs
 	requiredCodecs := []string{"h264", "hevc", "av1"}
 	missingCodecs := []string{}
@@ -119,28 +118,28 @@ func (f *FFmpegChecker) checkCodecs(ctx context.Context) error {
 // GetFFmpegInfo returns detailed information about FFmpeg installation
 func (f *FFmpegChecker) GetFFmpegInfo(ctx context.Context) (map[string]interface{}, error) {
 	info := make(map[string]interface{})
-	
+
 	// Binary path
 	info["binary_path"] = f.binaryPath
-	
+
 	// FFmpeg version
 	if version, err := f.getFFmpegVersion(ctx); err == nil {
 		info["version"] = version
 	}
-	
+
 	// FFmpeg binary availability
 	info["ffmpeg_available"] = f.binaryPath != ""
-	
+
 	// Available hardware accelerators
 	if hwAccel, err := f.getHardwareAccelerators(ctx); err == nil {
 		info["hardware_accelerators"] = hwAccel
 	}
-	
+
 	// Available codecs
 	if codecs, err := f.getAvailableCodecs(ctx); err == nil {
 		info["codecs"] = codecs
 	}
-	
+
 	return info, nil
 }
 
@@ -158,7 +157,7 @@ func (f *FFmpegChecker) getFFmpegVersion(ctx context.Context) (string, error) {
 	if len(lines) > 0 {
 		return strings.TrimSpace(lines[0]), nil
 	}
-	
+
 	return "", fmt.Errorf("no version information found")
 }
 
@@ -174,7 +173,7 @@ func (f *FFmpegChecker) getHardwareAccelerators(ctx context.Context) ([]string, 
 
 	lines := strings.Split(string(output), "\n")
 	accelerators := []string{}
-	
+
 	// Skip header lines and parse accelerator names
 	for i, line := range lines {
 		if i < 2 { // Skip header
@@ -185,7 +184,7 @@ func (f *FFmpegChecker) getHardwareAccelerators(ctx context.Context) ([]string, 
 			accelerators = append(accelerators, line)
 		}
 	}
-	
+
 	return accelerators, nil
 }
 
@@ -200,8 +199,8 @@ func (f *FFmpegChecker) getAvailableCodecs(ctx context.Context) (map[string][]st
 	}
 
 	codecs := map[string][]string{
-		"video_decoders": []string{},
-		"audio_decoders": []string{},
+		"video_decoders": {},
+		"audio_decoders": {},
 	}
 
 	lines := strings.Split(string(output), "\n")
@@ -210,7 +209,7 @@ func (f *FFmpegChecker) getAvailableCodecs(ctx context.Context) (map[string][]st
 		if len(line) < 8 {
 			continue
 		}
-		
+
 		// Parse codec line format: " DEV.LS h264                 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"
 		if line[0] == ' ' && len(line) > 8 {
 			flags := line[1:7]
@@ -227,6 +226,6 @@ func (f *FFmpegChecker) getAvailableCodecs(ctx context.Context) (map[string][]st
 			}
 		}
 	}
-	
+
 	return codecs, nil
 }

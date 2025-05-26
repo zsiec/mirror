@@ -181,21 +181,7 @@ func (p *Parser) parsePacket(data []byte) (*Packet, error) {
 	// Extract payload
 	if pkt.PayloadExists && offset < PacketSize {
 		pkt.Payload = data[offset:]
-		
-		// **DEBUG: Log raw MPEG-TS payload extraction**
-		if len(pkt.Payload) > 0 && (pkt.PID == p.videoPID || p.videoPID == 0) {
-			maxBytes := 16
-			if len(pkt.Payload) < maxBytes {
-				maxBytes = len(pkt.Payload)
-			}
-			// Only log if this looks like video data (has start codes or PES headers)
-			if pkt.PayloadStart && len(pkt.Payload) >= 4 && 
-				((pkt.Payload[0] == 0x00 && pkt.Payload[1] == 0x00) || // Start code prefix
-				 (pkt.Payload[0] == 0x00 && pkt.Payload[1] == 0x00 && pkt.Payload[2] == 0x01)) { // PES start code
-				fmt.Printf("🔍 MPEGTS DEBUG: Payload extracted - PID=%d, PayloadStart=%t, Size=%d, FirstBytes=%02x\n", 
-					pkt.PID, pkt.PayloadStart, len(pkt.Payload), pkt.Payload[:maxBytes])
-			}
-		}
+
 	}
 
 	return pkt, nil
@@ -496,7 +482,7 @@ func (p *Parser) extractParameterSetsFromDescriptors(descriptors []byte, streamT
 
 		descriptorTag := descriptors[offset]
 		descriptorLength := int(descriptors[offset+1])
-		
+
 		if offset+2+descriptorLength > len(descriptors) {
 			break
 		}
@@ -541,16 +527,16 @@ func (p *Parser) extractH264ParameterSetsFromDescriptor(data []byte) [][]byte {
 
 	// Parse AVC configuration record
 	offset := 0
-	
+
 	// Skip profile, constraints, level
 	offset += 3
-	
+
 	if offset >= len(data) {
 		return parameterSets
 	}
 
 	// Length size minus 1 (usually 3, meaning 4-byte length)
-	_ = data[offset] & 0x03  // Skip length size field
+	_ = data[offset] & 0x03 // Skip length size field
 	offset++
 
 	if offset >= len(data) {
@@ -630,7 +616,7 @@ func (p *Parser) extractHEVCParameterSetsFromDescriptor(data []byte) [][]byte {
 
 	// Process parameter set arrays (VPS, SPS, PPS)
 	for i := 0; i < int(numArrays) && offset+3 <= len(data); i++ {
-		_ = data[offset] & 0x3F  // Skip NAL unit type
+		_ = data[offset] & 0x3F // Skip NAL unit type
 		offset++
 
 		numNalUnits := int(data[offset])<<8 | int(data[offset+1])
@@ -688,21 +674,11 @@ func (p *Parser) extractParameterSetsFromPES(pkt *Packet, extractor ParameterSet
 	pesPayloadStart := 9 + pesHeaderLength
 
 	if pesPayloadStart >= len(pkt.Payload) {
-		fmt.Printf("🔍 PES DEBUG: PES payload start (%d) >= total payload (%d)\n", pesPayloadStart, len(pkt.Payload))
 		return
 	}
 
 	pesPayload := pkt.Payload[pesPayloadStart:]
-	
-	// **DEBUG: Log PES payload extraction**
-	if len(pesPayload) > 0 {
-		maxBytes := 16
-		if len(pesPayload) < maxBytes {
-			maxBytes = len(pesPayload)
-		}
-		fmt.Printf("🔍 PES DEBUG: Extracted payload - PID=%d, HeaderLen=%d, PayloadSize=%d, FirstBytes=%02x\n", 
-			pkt.PID, pesHeaderLength, len(pesPayload), pesPayload[:maxBytes])
-	}
+
 	parameterSets := p.extractParameterSetsFromBitstream(pesPayload, p.videoStreamType)
 
 	if len(parameterSets) > 0 {
@@ -799,7 +775,7 @@ func (p *Parser) extractParameterSetsFromBitstream(data []byte, streamType uint8
 		if nalStartPos < 0 || (nalStartPos+2 < len(data) && data[nalStartPos+2] == 0x01) {
 			nalStartPos = nalStart - 3
 		}
-		
+
 		// Ensure we don't go negative
 		if nalStartPos < 0 {
 			nalStartPos = 0

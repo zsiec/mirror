@@ -15,7 +15,7 @@ import (
 func createRealisticGOP(id uint64, streamID string) *types.GOP {
 	baseTime := time.Now()
 	basePTS := int64(90000) // 1 second at 90kHz
-	
+
 	// Create realistic frames
 	frames := []*types.VideoFrame{
 		{
@@ -42,39 +42,39 @@ func createRealisticGOP(id uint64, streamID string) *types.GOP {
 			CaptureTime: baseTime.Add(66 * time.Millisecond),
 			PTS:         basePTS + 6000,
 			DTS:         basePTS + 3000, // B-frame reordering
-			TotalSize:   3000, // Realistic B-frame size
+			TotalSize:   3000,           // Realistic B-frame size
 			QP:          28,
 		},
 	}
-	
+
 	// Create GOP with realistic metadata
 	gop := &types.GOP{
-		ID:        id,
-		StreamID:  streamID,
-		Keyframe:  frames[0],
-		Frames:    frames,
-		StartTime: baseTime,
-		EndTime:   baseTime.Add(66 * time.Millisecond),
-		Duration:  basePTS + 6000 - basePTS, // PTS duration
-		Complete:  true,
-		Closed:    true,
-		TotalSize: 23000, // Sum of frame sizes
-		PFrameCount: 1,
-		BFrameCount: 1,
-		IFrameSize:  15000,
-		AvgFrameSize: 7666, // 23000/3
-		BitRate:     2784000, // Calculated from size and duration
+		ID:           id,
+		StreamID:     streamID,
+		Keyframe:     frames[0],
+		Frames:       frames,
+		StartTime:    baseTime,
+		EndTime:      baseTime.Add(66 * time.Millisecond),
+		Duration:     basePTS + 6000 - basePTS, // PTS duration
+		Complete:     true,
+		Closed:       true,
+		TotalSize:    23000, // Sum of frame sizes
+		PFrameCount:  1,
+		BFrameCount:  1,
+		IFrameSize:   15000,
+		AvgFrameSize: 7666,    // 23000/3
+		BitRate:      2784000, // Calculated from size and duration
 		Structure: types.GOPStructure{
 			Size:    3,
 			Pattern: "IBP",
 		},
 	}
-	
+
 	// Set GOP ID for each frame
 	for _, frame := range frames {
 		frame.GOPId = id
 	}
-	
+
 	return gop
 }
 

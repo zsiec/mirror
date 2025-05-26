@@ -174,18 +174,13 @@ func (b *Buffer) AddGOP(gop *types.GOP) {
 	elem := b.gops.PushBack(gop)
 	b.gopIndex[gop.ID] = elem
 
-	// Update frame index - create locations outside of loop to avoid races
-	frameLocations := make([]*FrameLocation, len(gop.Frames))
-	for i := range gop.Frames {
-		frameLocations[i] = &FrameLocation{
+	// Update frame index atomically - create and assign locations in single operation
+	// to prevent race conditions with frame index corruption
+	for i, frame := range gop.Frames {
+		b.frameIndex[frame.ID] = &FrameLocation{
 			GOP:      gop,
 			Position: i,
 		}
-	}
-
-	// Now update the index atomically
-	for i, frame := range gop.Frames {
-		b.frameIndex[frame.ID] = frameLocations[i]
 	}
 
 	// Extract and cache parameter sets from this GOP
@@ -407,14 +402,17 @@ func (b *Buffer) dropBFrames(gopCount int) []*types.VideoFrame {
 			frame := gop.Frames[frameIdx]
 			dropped = append(dropped, frame)
 
+			// Remove from index first to prevent corruption
+			delete(b.frameIndex, frame.ID)
+
 			// Remove from GOP
 			gop.Frames = append(gop.Frames[:frameIdx], gop.Frames[frameIdx+1:]...)
 			gop.BFrameCount--
 			// FrameCount is now len(gop.Frames) - automatically updated
 			gop.TotalSize -= int64(frame.TotalSize)
 
-			// Remove from index
-			delete(b.frameIndex, frame.ID)
+			// Update frame indices for remaining frames after removal
+			b.updateFrameIndicesAfterRemoval(gop, frameIdx)
 		}
 
 		// Update GOP duration after dropping frames
@@ -442,14 +440,17 @@ func (b *Buffer) dropPFrames(gopCount int) []*types.VideoFrame {
 				frame := gop.Frames[i]
 				dropped = append(dropped, frame)
 
+				// Remove from index first to prevent corruption
+				delete(b.frameIndex, frame.ID)
+
 				// Remove from GOP
 				gop.Frames = append(gop.Frames[:i], gop.Frames[i+1:]...)
 				gop.PFrameCount--
 				// FrameCount is now len(gop.Frames) - automatically updated
 				gop.TotalSize -= int64(frame.TotalSize)
 
-				// Remove from index
-				delete(b.frameIndex, frame.ID)
+				// Update frame indices for remaining frames after removal
+				b.updateFrameIndicesAfterRemoval(gop, i)
 			}
 		}
 
@@ -479,21 +480,30 @@ func (b *Buffer) dropOldGOPs(count int, includeKeyframes bool) []*types.VideoFra
 			dropped = append(dropped, gop.Frames...)
 			b.removeOldestGOP()
 		} else {
-			// Drop all except keyframe
+			// Drop all except keyframe - collect and remove atomically
+			var newFrames []*types.VideoFrame
 			for _, frame := range gop.Frames {
-				if !frame.IsKeyframe() {
+				if frame.IsKeyframe() {
+					newFrames = append(newFrames, frame)
+				} else {
 					dropped = append(dropped, frame)
 					delete(b.frameIndex, frame.ID)
 				}
 			}
 
-			// Update GOP to only contain keyframe
-			if gop.Keyframe != nil {
-				gop.Frames = []*types.VideoFrame{gop.Keyframe}
-				// FrameCount is now len(gop.Frames) - automatically updated
-				gop.PFrameCount = 0
-				gop.BFrameCount = 0
-				gop.TotalSize = int64(gop.Keyframe.TotalSize)
+			// Update GOP atomically
+			gop.Frames = newFrames
+			gop.PFrameCount = 0
+			gop.BFrameCount = 0
+			if len(newFrames) > 0 {
+				gop.TotalSize = int64(newFrames[0].TotalSize)
+				// Update frame index for the remaining keyframe
+				b.frameIndex[newFrames[0].ID] = &FrameLocation{
+					GOP:      gop,
+					Position: 0,
+				}
+			} else {
+				gop.TotalSize = 0
 			}
 		}
 	}
@@ -569,13 +579,22 @@ func (b *Buffer) dropAllNonKeyframes() []*types.VideoFrame {
 			}
 		}
 
-		// Update GOP
+		// Update GOP atomically
 		gop.Frames = newFrames
 		// FrameCount is now len(gop.Frames) - automatically updated
 		gop.PFrameCount = 0
 		gop.BFrameCount = 0
 		if len(newFrames) > 0 {
 			gop.TotalSize = int64(newFrames[0].TotalSize)
+			// Update frame index for remaining keyframes
+			for i, frame := range newFrames {
+				b.frameIndex[frame.ID] = &FrameLocation{
+					GOP:      gop,
+					Position: i,
+				}
+			}
+		} else {
+			gop.TotalSize = 0
 		}
 	}
 
@@ -733,10 +752,18 @@ func (b *Buffer) DropFramesFromGOP(gopID uint64, startIndex int) []*types.VideoF
 	// Remove frames from GOP
 	gop.Frames = gop.Frames[:startIndex]
 
-	// Update frame index - remove dropped frames
+	// Update frame index - remove dropped frames and update positions atomically
 	for _, frame := range droppedFrames {
 		delete(b.frameIndex, frame.ID)
 		b.currentBytes -= int64(frame.TotalSize)
+	}
+
+	// Update frame indices for remaining frames
+	for i, frame := range gop.Frames {
+		b.frameIndex[frame.ID] = &FrameLocation{
+			GOP:      gop,
+			Position: i,
+		}
 	}
 
 	// Update GOP statistics
@@ -801,6 +828,18 @@ func (b *Buffer) extractParameterSetsFromGOP(gop *types.GOP, paramContext *types
 	}
 }
 
+// updateFrameIndicesAfterRemoval updates frame indices after a frame is removed from a GOP
+// This prevents frame index corruption when frame positions change
+func (b *Buffer) updateFrameIndicesAfterRemoval(gop *types.GOP, removedIndex int) {
+	// Update positions for all frames after the removed index
+	for i := removedIndex; i < len(gop.Frames); i++ {
+		frame := gop.Frames[i]
+		if location, exists := b.frameIndex[frame.ID]; exists {
+			location.Position = i
+		}
+	}
+}
+
 // ExtractParameterSetFromNAL extracts parameter sets from a single NAL unit (unified method)
 // Made public for reuse by StreamHandler session cache
 func (b *Buffer) ExtractParameterSetFromNAL(paramContext *types.ParameterSetContext, nalUnit types.NALUnit, nalType uint8, gopID uint64) bool {
@@ -826,13 +865,13 @@ func (b *Buffer) ExtractParameterSetFromNAL(paramContext *types.ParameterSetCont
 				maxBytes = 20
 			}
 			b.logger.WithFields(map[string]interface{}{
-				"stream_id":   b.streamID,
-				"gop_id":      gopID,
-				"error":       err.Error(),
-				"nal_size":    len(spsData),
-				"raw_bytes":   fmt.Sprintf("%x", spsData[:maxBytes]),
-				"has_header":  len(spsData) > 0 && spsData[0] == 0x67,
-				"issue":       "SPS_ADDITION_FAILED",
+				"stream_id":  b.streamID,
+				"gop_id":     gopID,
+				"error":      err.Error(),
+				"nal_size":   len(spsData),
+				"raw_bytes":  fmt.Sprintf("%x", spsData[:maxBytes]),
+				"has_header": len(spsData) > 0 && spsData[0] == 0x67,
+				"issue":      "SPS_ADDITION_FAILED",
 			}).Error("💥 CRITICAL: Failed to add H.264 SPS - this will prevent iframe generation")
 			return false
 		}
@@ -898,12 +937,12 @@ func (b *Buffer) ExtractParameterSetFromNAL(paramContext *types.ParameterSetCont
 			maxBytes = 10
 		}
 		b.logger.WithFields(map[string]interface{}{
-			"stream_id":     b.streamID,
-			"gop_id":        gopID,
-			"nal_size":      len(ppsData),
-			"pps_id":        ppsID,
-			"parse_error":   parseError,
-			"raw_bytes":     fmt.Sprintf("%x", ppsData[:maxBytes]),
+			"stream_id":   b.streamID,
+			"gop_id":      gopID,
+			"nal_size":    len(ppsData),
+			"pps_id":      ppsID,
+			"parse_error": parseError,
+			"raw_bytes":   fmt.Sprintf("%x", ppsData[:maxBytes]),
 		}).Debug("🔍 Processing PPS NAL unit")
 
 		if err := paramContext.AddPPS(ppsData); err != nil {

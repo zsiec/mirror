@@ -28,33 +28,33 @@ type TestEnvironment interface {
 
 // Internal types that mirror the external ones for type safety
 type dashboardStats struct {
-	ServerStatus  string
-	SRTSessions   int
-	RTPSessions   int
-	TotalStreams  int
-	PacketsRTP    int64
-	PacketsSRT    int64
-	BitrateRTP    float64
-	BitrateSRT    float64
-	BitrateHistory []float64
-	MemoryUsed     int64
-	MemoryLimit    int64
-	MemoryPercent  float64
-	CPUUsage       float64
-	Goroutines     int
-	StreamsActive []streamInfo
-	StreamStats   map[string]streamDetailedStats
-	BufferStats   map[string]bufferInfo
+	ServerStatus      string
+	SRTSessions       int
+	RTPSessions       int
+	TotalStreams      int
+	PacketsRTP        int64
+	PacketsSRT        int64
+	BitrateRTP        float64
+	BitrateSRT        float64
+	BitrateHistory    []float64
+	MemoryUsed        int64
+	MemoryLimit       int64
+	MemoryPercent     float64
+	CPUUsage          float64
+	Goroutines        int
+	StreamsActive     []streamInfo
+	StreamStats       map[string]streamDetailedStats
+	BufferStats       map[string]bufferInfo
 	ConnectionQuality map[string]connectionQuality
-	FramesProcessed int64
-	FramesDropped   int64
-	TestPhase     string
-	Progress      int
-	RecentLogs    []logEntry
-	ErrorCount    int
-	WarningCount  int
-	CodecStats    map[string]int
-	
+	FramesProcessed   int64
+	FramesDropped     int64
+	TestPhase         string
+	Progress          int
+	RecentLogs        []logEntry
+	ErrorCount        int
+	WarningCount      int
+	CodecStats        map[string]int
+
 	// Animation state
 	AnimationTick int
 	LastUpdate    time.Time
@@ -149,12 +149,12 @@ type ResponsiveLayout struct {
 	Type         string // mobile, tablet, desktop, ultrawide
 	Width        int
 	Height       int
-	Columns      int    // Number of columns
-	ShowDetails  bool   // Whether to show detailed information
-	CompactMode  bool   // Whether to use compact display
-	PanelHeight  int    // Height for individual panels
-	CardWidth    int    // Width for cards
-	ShowActivity bool   // Whether to show activity panel
+	Columns      int  // Number of columns
+	ShowDetails  bool // Whether to show detailed information
+	CompactMode  bool // Whether to use compact display
+	PanelHeight  int  // Height for individual panels
+	CardWidth    int  // Width for cards
+	ShowActivity bool // Whether to show activity panel
 }
 
 // NewRichDashboardModel creates a new Rich dashboard model
@@ -210,7 +210,7 @@ func (m *RichDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stats.AnimationTick = (m.stats.AnimationTick + 1) % 20
 		m.stats.LastUpdate = time.Now()
 		m.mu.Unlock()
-		
+
 		return m, tea.Batch(
 			tickEvery(250*time.Millisecond),
 			fetchStats(m.env),
@@ -220,17 +220,17 @@ func (m *RichDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		// Replace stats completely to avoid stale data, but preserve local state
 		newStats := dashboardStats(msg)
-		
+
 		// Preserve animation state and error counts
 		animationTick := m.stats.AnimationTick
 		errorCount := m.stats.ErrorCount
 		warningCount := m.stats.WarningCount
 		recentLogs := m.stats.RecentLogs
 		codecStats := m.stats.CodecStats
-		
+
 		// Replace all stats with new data
 		m.stats = newStats
-		
+
 		// Restore preserved local state
 		m.stats.AnimationTick = animationTick
 		m.stats.ErrorCount = errorCount
@@ -238,7 +238,7 @@ func (m *RichDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stats.RecentLogs = recentLogs
 		m.stats.CodecStats = codecStats
 		m.stats.LastUpdate = time.Now()
-		
+
 		m.mu.Unlock()
 		return m, nil
 	}
@@ -274,10 +274,10 @@ func (m *RichDashboardModel) renderDashboard() string {
 	if termHeight == 0 {
 		termHeight = 30
 	}
-	
+
 	// Responsive breakpoints
 	layout := m.getResponsiveLayout(termWidth, termHeight)
-	
+
 	// Route to appropriate layout handler
 	switch layout.Type {
 	case "mobile":
@@ -354,7 +354,7 @@ func (m *RichDashboardModel) getResponsiveLayout(width, height int) ResponsiveLa
 // renderMobileLayout renders a single-column layout for narrow terminals
 func (m *RichDashboardModel) renderMobileLayout(layout ResponsiveLayout) string {
 	var sections []string
-	
+
 	// Broadcast-style header
 	header := lipgloss.NewStyle().
 		Foreground(TextBright).
@@ -366,11 +366,11 @@ func (m *RichDashboardModel) renderMobileLayout(layout ResponsiveLayout) string 
 		BorderForeground(Primary).
 		Render("📺 MIRROR BROADCAST")
 	sections = append(sections, header)
-	
+
 	// System status (compact)
 	systemPanel := m.createMobileSystemPanel(layout.CardWidth)
 	sections = append(sections, systemPanel)
-	
+
 	// Active streams count
 	streamCount := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -380,20 +380,20 @@ func (m *RichDashboardModel) renderMobileLayout(layout ResponsiveLayout) string 
 		Padding(1).
 		Render(fmt.Sprintf("🌊 Streams: %d", len(m.stats.StreamsActive)))
 	sections = append(sections, streamCount)
-	
+
 	// Show activity only if height allows
 	if layout.ShowActivity {
 		activityPanel := m.createMobileActivityPanel(layout.Width - 2)
 		sections = append(sections, activityPanel)
 	}
-	
+
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
 // renderTabletLayout renders a two-column layout for medium terminals
 func (m *RichDashboardModel) renderTabletLayout(layout ResponsiveLayout) string {
 	var sections []string
-	
+
 	// Broadcast-style header
 	header := lipgloss.NewStyle().
 		Foreground(TextBright).
@@ -405,32 +405,32 @@ func (m *RichDashboardModel) renderTabletLayout(layout ResponsiveLayout) string 
 		BorderForeground(Primary).
 		Render("📺 MIRROR BROADCAST CONTROL")
 	sections = append(sections, header)
-	
+
 	// Top row - system and performance
 	topLeft := m.createTabletSystemPanel(layout.CardWidth)
 	topRight := m.createTabletNetworkPanel(layout.CardWidth)
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, topLeft, " ", topRight)
 	sections = append(sections, topRow)
-	
+
 	// Middle row - streams
 	if len(m.stats.StreamsActive) > 0 {
 		streamsPanel := m.createTabletStreamsPanel(layout.Width-2, layout.ShowDetails)
 		sections = append(sections, streamsPanel)
 	}
-	
+
 	// Activity panel if height allows
 	if layout.ShowActivity {
-		activityPanel := m.createTabletActivityPanel(layout.Width-2)
+		activityPanel := m.createTabletActivityPanel(layout.Width - 2)
 		sections = append(sections, activityPanel)
 	}
-	
+
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
 // renderDesktopLayout renders a three-column layout for standard wide terminals
 func (m *RichDashboardModel) renderDesktopLayout(layout ResponsiveLayout) string {
 	var sections []string
-	
+
 	// Broadcast control room header
 	header := lipgloss.NewStyle().
 		Foreground(TextBright).
@@ -442,31 +442,31 @@ func (m *RichDashboardModel) renderDesktopLayout(layout ResponsiveLayout) string
 		BorderForeground(Primary).
 		Render("📺 MIRROR BROADCAST CONTROL ROOM")
 	sections = append(sections, header)
-	
+
 	// Top section - three columns
 	topHeight := int(float64(layout.Height-5) * 0.65)
-	
+
 	leftPanel := m.createDesktopSystemPanel(layout.CardWidth, topHeight)
 	centerPanel := m.createDesktopNetworkPanel(layout.CardWidth, topHeight)
 	rightPanel := m.createDesktopStreamsPanel(layout.CardWidth, topHeight)
-	
+
 	topSection := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, " ", centerPanel, " ", rightPanel)
 	sections = append(sections, topSection)
-	
+
 	// Bottom section - activity panel
 	if layout.ShowActivity {
 		activityHeight := layout.Height - topHeight - 6
 		activityPanel := m.createModernActivityPanel(layout.Width-2, activityHeight)
 		sections = append(sections, activityPanel)
 	}
-	
+
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
 // renderUltrawideLayout renders a four-column layout for very wide terminals
 func (m *RichDashboardModel) renderUltrawideLayout(layout ResponsiveLayout) string {
 	var sections []string
-	
+
 	// Ultra-wide broadcast control center header
 	header := lipgloss.NewStyle().
 		Foreground(TextBright).
@@ -478,27 +478,27 @@ func (m *RichDashboardModel) renderUltrawideLayout(layout ResponsiveLayout) stri
 		BorderForeground(Primary).
 		Render("📡 MIRROR BROADCAST CONTROL CENTER - MASTER CONTROL")
 	sections = append(sections, header)
-	
+
 	// Top section - four columns
 	topHeight := int(float64(layout.Height-5) * 0.65)
-	
+
 	systemPanel := m.createDesktopSystemPanel(layout.CardWidth, topHeight)
 	networkPanel := m.createDesktopNetworkPanel(layout.CardWidth, topHeight)
 	streamsPanel := m.createDesktopStreamsPanel(layout.CardWidth, topHeight)
 	metricsPanel := m.createUltrawideMetricsPanel(layout.CardWidth, topHeight)
-	
-	topSection := lipgloss.JoinHorizontal(lipgloss.Top, 
-		systemPanel, " ", 
-		networkPanel, " ", 
-		streamsPanel, " ", 
+
+	topSection := lipgloss.JoinHorizontal(lipgloss.Top,
+		systemPanel, " ",
+		networkPanel, " ",
+		streamsPanel, " ",
 		metricsPanel)
 	sections = append(sections, topSection)
-	
+
 	// Bottom section - enhanced activity panel
 	activityHeight := layout.Height - topHeight - 6
 	activityPanel := m.createModernActivityPanel(layout.Width-2, activityHeight)
 	sections = append(sections, activityPanel)
-	
+
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
@@ -535,7 +535,7 @@ func (m *RichDashboardModel) renderSparkline(data []float64, width int) string {
 	if len(data) == 0 {
 		return strings.Repeat("▁", width)
 	}
-	
+
 	// Find min/max for scaling
 	minVal, maxVal := data[0], data[0]
 	for _, val := range data {
@@ -546,31 +546,31 @@ func (m *RichDashboardModel) renderSparkline(data []float64, width int) string {
 			maxVal = val
 		}
 	}
-	
+
 	if maxVal == minVal {
 		return strings.Repeat("▄", width)
 	}
-	
+
 	// Sparkline characters from low to high
 	sparkChars := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
-	
+
 	var result strings.Builder
 	for i := 0; i < width; i++ {
 		dataIndex := i * len(data) / width
 		if dataIndex >= len(data) {
 			dataIndex = len(data) - 1
 		}
-		
+
 		// Scale value to 0-7 range
 		normalized := (data[dataIndex] - minVal) / (maxVal - minVal)
 		charIndex := int(normalized * 7)
 		if charIndex > 7 {
 			charIndex = 7
 		}
-		
+
 		result.WriteRune(sparkChars[charIndex])
 	}
-	
+
 	return result.String()
 }
 
@@ -621,9 +621,9 @@ func (m *RichDashboardModel) getDropRateStyle(dropped, total int64) string {
 	if total == 0 {
 		return ValueStyle.Render("0%")
 	}
-	
+
 	dropRate := float64(dropped) / float64(total) * 100
-	
+
 	if dropRate == 0 {
 		return SuccessStyle.Render("0%")
 	} else if dropRate < 1 {
@@ -643,12 +643,12 @@ func (m *RichDashboardModel) createAnimatedNetworkPanel(width int) string {
 		Bold(true).
 		Padding(0, 1).
 		Render("📡 NETWORK")
-	
+
 	totalBitrate := m.stats.BitrateRTP + m.stats.BitrateSRT
-	
+
 	// Clean sparkline
 	sparkline := "▁▂▃▄▅▆▇█▇▆▅▄▃▂▁▂▃▄" // Simulate activity
-	
+
 	// Protocol status
 	rtpStatus := "⚫"
 	srtStatus := "⚫"
@@ -658,19 +658,19 @@ func (m *RichDashboardModel) createAnimatedNetworkPanel(width int) string {
 	if m.stats.PacketsSRT > 0 {
 		srtStatus = "🟢"
 	}
-	
+
 	content := []string{
 		title,
 		fmt.Sprintf("Total: %s", ValueStyle.Render(m.formatBitrate(totalBitrate))),
 		SuccessStyle.Render(sparkline),
-		fmt.Sprintf("%s RTP: %s | %s pkts", rtpStatus, 
-			SuccessStyle.Render(m.formatBitrate(m.stats.BitrateRTP)), 
+		fmt.Sprintf("%s RTP: %s | %s pkts", rtpStatus,
+			SuccessStyle.Render(m.formatBitrate(m.stats.BitrateRTP)),
 			ValueStyle.Render(m.formatNumber(m.stats.PacketsRTP))),
-		fmt.Sprintf("%s SRT: %s | %s pkts", srtStatus, 
-			InfoStyle.Render(m.formatBitrate(m.stats.BitrateSRT)), 
+		fmt.Sprintf("%s SRT: %s | %s pkts", srtStatus,
+			InfoStyle.Render(m.formatBitrate(m.stats.BitrateSRT)),
 			ValueStyle.Render(m.formatNumber(m.stats.PacketsSRT))),
 	}
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Primary).
@@ -688,19 +688,19 @@ func (m *RichDashboardModel) createAnimatedResourcesPanel(width int) string {
 		Bold(true).
 		Padding(0, 1).
 		Render("💻 SYSTEM")
-	
+
 	// Simulate realistic memory usage (5-15%)
 	memoryUsage := 8.5 + float64(m.stats.TotalStreams)*1.2
 	if memoryUsage > 95 {
 		memoryUsage = 95
 	}
-	
+
 	// Simulate CPU usage based on streams
 	cpuUsage := 12.0 + float64(m.stats.TotalStreams)*8.5
 	if cpuUsage > 85 {
 		cpuUsage = 85
 	}
-	
+
 	// Calculate realistic goroutines
 	actualGoroutines := m.stats.Goroutines
 	if actualGoroutines == 0 {
@@ -708,17 +708,17 @@ func (m *RichDashboardModel) createAnimatedResourcesPanel(width int) string {
 		streamGoroutines := m.stats.TotalStreams * 4
 		actualGoroutines = baseGoroutines + streamGoroutines
 	}
-	
+
 	memoryBar := m.renderCleanProgressBar(int(memoryUsage), width-15)
 	cpuBar := m.renderCleanProgressBar(int(cpuUsage), width-15)
-	
+
 	content := []string{
 		title,
 		fmt.Sprintf("RAM: %s %.1f%%", memoryBar, memoryUsage),
 		fmt.Sprintf("CPU: %s %.1f%%", cpuBar, cpuUsage),
 		fmt.Sprintf("🧵 %d goroutines", actualGoroutines),
 	}
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Primary).
@@ -738,7 +738,7 @@ func (m *RichDashboardModel) createUltraStreamsPanel(width int) string {
 		Padding(0, 1).
 		Render("📡 ACTIVE STREAMS")
 	content := []string{title}
-	
+
 	if len(m.stats.StreamsActive) == 0 {
 		content = append(content, "")
 		content = append(content, MutedStyle.Render("  No active streams"))
@@ -755,38 +755,38 @@ func (m *RichDashboardModel) createUltraStreamsPanel(width int) string {
 				content = append(content, MutedStyle.Render(fmt.Sprintf("  ⚡ +%d additional streams active", remaining)))
 				break
 			}
-			
+
 			// Use real stream ID and protocol from API
 			statusIcon := "🟢"
 			if stream.Status == "inactive" {
 				statusIcon = "🔴"
 			}
-			
+
 			protocolColor := Primary
 			if stream.Type == "srt" {
 				protocolColor = Success
 			} else if stream.Type == "rtp" {
 				protocolColor = lipgloss.Color("#3B82F6")
 			}
-			
+
 			protocolBadge := lipgloss.NewStyle().
 				Background(protocolColor).
 				Foreground(White).
 				Bold(true).
 				Padding(0, 1).
 				Render(strings.ToUpper(stream.Type))
-			
+
 			// Use actual stream ID from API, truncate if too long
 			displayID := stream.ID
 			if len(displayID) > 20 {
 				displayID = displayID[:17] + "..."
 			}
-			
-			headerLine := fmt.Sprintf("  %s %s %s", 
-				statusIcon, protocolBadge, 
+
+			headerLine := fmt.Sprintf("  %s %s %s",
+				statusIcon, protocolBadge,
 				ValueStyle.Render(displayID))
 			content = append(content, headerLine)
-			
+
 			// Technical specs from real API data
 			if stream.Resolution != "" && stream.VideoCodec != "" {
 				resolutionIcon := m.getResolutionIconFromString(stream.Resolution)
@@ -795,10 +795,10 @@ func (m *RichDashboardModel) createUltraStreamsPanel(width int) string {
 					Foreground(White).
 					Padding(0, 1).
 					Render(stream.VideoCodec)
-				
-				specsLine := fmt.Sprintf("    %s %s @ %.0ffps  %s", 
-					resolutionIcon, 
-					SuccessStyle.Render(stream.Resolution), 
+
+				specsLine := fmt.Sprintf("    %s %s @ %.0ffps  %s",
+					resolutionIcon,
+					SuccessStyle.Render(stream.Resolution),
 					stream.FrameRate,
 					codecBadge)
 				content = append(content, specsLine)
@@ -811,74 +811,74 @@ func (m *RichDashboardModel) createUltraStreamsPanel(width int) string {
 					Render(stream.VideoCodec)
 				content = append(content, fmt.Sprintf("    🎬 %s", codecBadge))
 			}
-			
+
 			// Real bitrate from API
 			if stream.Bitrate > 0 {
-				content = append(content, fmt.Sprintf("    📈 Bitrate: %s", 
+				content = append(content, fmt.Sprintf("    📈 Bitrate: %s",
 					SuccessStyle.Render(m.formatBitrate(float64(stream.Bitrate)))))
 			}
-			
+
 			// Stream uptime from CreatedAt
 			if !stream.CreatedAt.IsZero() {
 				streamDuration := time.Since(stream.CreatedAt)
-				content = append(content, fmt.Sprintf("    ⏱️  Uptime: %s", 
+				content = append(content, fmt.Sprintf("    ⏱️  Uptime: %s",
 					ValueStyle.Render(m.formatDuration(streamDuration))))
 			}
-			
+
 			// Real packet loss from API stats
 			if stream.Stats.PacketsReceived > 0 {
 				lossRate := float64(stream.Stats.PacketsLost) / float64(stream.Stats.PacketsReceived) * 100
 				qualityBadge := m.getQualityBadge(lossRate)
-				content = append(content, fmt.Sprintf("    📶 Quality: %s  Loss: %.2f%%", 
+				content = append(content, fmt.Sprintf("    📶 Quality: %s  Loss: %.2f%%",
 					qualityBadge, lossRate))
 			}
-			
+
 			// Source address
 			if stream.SourceAddr != "" {
-				content = append(content, fmt.Sprintf("    🌐 Source: %s", 
+				content = append(content, fmt.Sprintf("    🌐 Source: %s",
 					MutedStyle.Render(stream.SourceAddr)))
 			}
-			
+
 			// Real buffer status from API frame buffer stats
 			if stream.Stats.FrameBufferStats.Capacity > 0 {
 				bufferUsage := float64(stream.Stats.FrameBufferStats.Used) / float64(stream.Stats.FrameBufferStats.Capacity) * 100
 				bufferBar := m.renderCleanProgressBar(int(bufferUsage), width-30)
 				bufferStatus := m.getBufferStatusText(bufferUsage)
 				bufferIcon := m.getBufferIcon(bufferUsage)
-				
-				content = append(content, fmt.Sprintf("    %s Buffer: %.1f%% %s", 
+
+				content = append(content, fmt.Sprintf("    %s Buffer: %.1f%% %s",
 					bufferIcon, bufferUsage, bufferStatus))
 				content = append(content, fmt.Sprintf("       %s", bufferBar))
-				
+
 				// Frame stats from API
 				if stream.Stats.FrameBufferStats.FramesAssembled > 0 {
-					content = append(content, fmt.Sprintf("    🎞️  Frames: %s assembled, %s dropped", 
+					content = append(content, fmt.Sprintf("    🎞️  Frames: %s assembled, %s dropped",
 						ValueStyle.Render(m.formatNumber(int64(stream.Stats.FrameBufferStats.FramesAssembled))),
 						ErrorStyle.Render(m.formatNumber(int64(stream.Stats.FrameBufferStats.FramesDropped)))))
 				}
-				
+
 				// Frame type breakdown
 				totalFrames := stream.Stats.FrameBufferStats.Keyframes + stream.Stats.FrameBufferStats.PFrames + stream.Stats.FrameBufferStats.BFrames
 				if totalFrames > 0 {
-					content = append(content, fmt.Sprintf("    📊 I:%d P:%d B:%d", 
+					content = append(content, fmt.Sprintf("    📊 I:%d P:%d B:%d",
 						stream.Stats.FrameBufferStats.Keyframes,
 						stream.Stats.FrameBufferStats.PFrames,
 						stream.Stats.FrameBufferStats.BFrames))
 				}
 			}
-			
+
 			// Last heartbeat
 			if !stream.LastHeartbeat.IsZero() {
 				lastSeen := time.Since(stream.LastHeartbeat)
 				if lastSeen < time.Minute {
-					content = append(content, fmt.Sprintf("    💓 Last seen: %s ago", 
+					content = append(content, fmt.Sprintf("    💓 Last seen: %s ago",
 						SuccessStyle.Render(m.formatDuration(lastSeen))))
 				} else {
-					content = append(content, fmt.Sprintf("    💓 Last seen: %s ago", 
+					content = append(content, fmt.Sprintf("    💓 Last seen: %s ago",
 						WarningStyle.Render(m.formatDuration(lastSeen))))
 				}
 			}
-			
+
 			// Add clean separator between streams
 			if i < len(m.stats.StreamsActive)-1 && i < 1 {
 				content = append(content, "")
@@ -887,7 +887,7 @@ func (m *RichDashboardModel) createUltraStreamsPanel(width int) string {
 			}
 		}
 	}
-	
+
 	// Clean professional border
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -906,17 +906,17 @@ func (m *RichDashboardModel) createAnimatedProcessingPanel(width int) string {
 	if m.stats.FramesProcessed > 0 && elapsed.Seconds() > 0 {
 		frameRate = float64(m.stats.FramesProcessed) / elapsed.Seconds()
 	}
-	
+
 	// Animated processing indicator
 	processingIcon := m.getProcessingIcon(frameRate, m.stats.AnimationTick)
-	
+
 	content := []string{
 		title,
-		fmt.Sprintf("%s %s @ %.1f fps", processingIcon, 
+		fmt.Sprintf("%s %s @ %.1f fps", processingIcon,
 			m.getAnimatedValue(m.formatNumber(m.stats.FramesProcessed), m.stats.AnimationTick), frameRate),
 		fmt.Sprintf("Dropped: %s", m.getDropRateStyle(m.stats.FramesDropped, m.stats.FramesProcessed)),
 	}
-	
+
 	return m.getAnimatedBorderStyle(m.stats.AnimationTick).
 		Width(width).
 		Height(4).
@@ -928,14 +928,14 @@ func (m *RichDashboardModel) createAnimatedProcessingPanel(width int) string {
 func (m *RichDashboardModel) createAnimatedProgressPanel(width int) string {
 	title := m.getAnimatedGlow("🔄 PROGRESS", m.stats.AnimationTick)
 	progressBar := m.renderAnimatedProgressBar(m.stats.Progress, width-12, m.stats.AnimationTick)
-	
+
 	content := []string{
 		title,
 		fmt.Sprintf("Phase: %s", InfoStyle.Render(m.stats.TestPhase)),
 		progressBar,
 		fmt.Sprintf("%d%% complete", m.stats.Progress),
 	}
-	
+
 	return m.getAnimatedBorderStyle(m.stats.AnimationTick).
 		Width(width).
 		Height(5).
@@ -947,7 +947,7 @@ func (m *RichDashboardModel) createAnimatedProgressPanel(width int) string {
 func (m *RichDashboardModel) createAnimatedActivityPanel(width int) string {
 	title := m.getAnimatedGlow("📋 ACTIVITY", m.stats.AnimationTick)
 	content := []string{title}
-	
+
 	if len(m.stats.RecentLogs) == 0 {
 		dots := m.getLoadingDots(m.stats.AnimationTick)
 		content = append(content, MutedStyle.Render(fmt.Sprintf("Monitoring%s", dots)))
@@ -956,23 +956,23 @@ func (m *RichDashboardModel) createAnimatedActivityPanel(width int) string {
 		if startIdx < 0 {
 			startIdx = 0
 		}
-		
+
 		for i := startIdx; i < len(m.stats.RecentLogs); i++ {
 			log := m.stats.RecentLogs[i]
 			levelIcon := LogLevelIcon(log.Level)
 			timeStr := log.Timestamp.Format("15:04")
-			
+
 			message := log.Message
 			maxLen := width - 12
 			if len(message) > maxLen {
 				message = message[:maxLen-3] + "..."
 			}
-			
+
 			logLine := fmt.Sprintf("%s %s %s", levelIcon, MutedStyle.Render(timeStr), message)
 			content = append(content, logLine)
 		}
 	}
-	
+
 	return m.getAnimatedBorderStyle(m.stats.AnimationTick).
 		Width(width).
 		Height(5).
@@ -984,14 +984,14 @@ func (m *RichDashboardModel) createAnimatedActivityPanel(width int) string {
 func (m *RichDashboardModel) createCompactNetworkPanel(width int) string {
 	title := m.getAnimatedGlow("🌐 NETWORK", m.stats.AnimationTick)
 	totalBitrate := m.stats.BitrateRTP + m.stats.BitrateSRT
-	
+
 	content := []string{
 		title,
 		fmt.Sprintf("Total: %s", SuccessStyle.Render(m.formatBitrate(totalBitrate))),
 		fmt.Sprintf("RTP: %s", ValueStyle.Render(m.formatBitrate(m.stats.BitrateRTP))),
 		fmt.Sprintf("SRT: %s", ValueStyle.Render(m.formatBitrate(m.stats.BitrateSRT))),
 	}
-	
+
 	return m.getAnimatedBorderStyle(m.stats.AnimationTick).
 		Width(width).
 		Height(6).
@@ -1002,14 +1002,14 @@ func (m *RichDashboardModel) createCompactNetworkPanel(width int) string {
 // createCompactResourcesPanel creates a compact system resources panel
 func (m *RichDashboardModel) createCompactResourcesPanel(width int) string {
 	title := m.getAnimatedGlow("💾 SYSTEM", m.stats.AnimationTick)
-	
+
 	content := []string{
 		title,
 		fmt.Sprintf("RAM: %s %.1f%%", m.renderMiniProgressBar(int(m.stats.MemoryPercent), 8), m.stats.MemoryPercent),
 		fmt.Sprintf("CPU: %s %.1f%%", m.renderMiniProgressBar(int(m.stats.CPUUsage), 8), m.stats.CPUUsage),
 		fmt.Sprintf("Goroutines: %s", ValueStyle.Render(fmt.Sprintf("%d", m.stats.Goroutines))),
 	}
-	
+
 	return m.getAnimatedBorderStyle(m.stats.AnimationTick).
 		Width(width).
 		Height(6).
@@ -1025,13 +1025,13 @@ func (m *RichDashboardModel) createCompactProcessingPanel(width int) string {
 	if m.stats.FramesProcessed > 0 && elapsed.Seconds() > 0 {
 		frameRate = float64(m.stats.FramesProcessed) / elapsed.Seconds()
 	}
-	
+
 	content := []string{
 		title,
 		fmt.Sprintf("Frames: %s @ %.1f fps", ValueStyle.Render(m.formatNumber(m.stats.FramesProcessed)), frameRate),
 		fmt.Sprintf("Dropped: %s", m.getDropRateStyle(m.stats.FramesDropped, m.stats.FramesProcessed)),
 	}
-	
+
 	return m.getAnimatedBorderStyle(m.stats.AnimationTick).
 		Width(width).
 		Height(5).
@@ -1043,14 +1043,14 @@ func (m *RichDashboardModel) createCompactProcessingPanel(width int) string {
 func (m *RichDashboardModel) createCompactProgressPanel(width int) string {
 	title := m.getAnimatedGlow("🔄 PROGRESS", m.stats.AnimationTick)
 	progressBar := m.renderAnimatedProgressBar(m.stats.Progress, width-8, m.stats.AnimationTick)
-	
+
 	content := []string{
 		title,
 		fmt.Sprintf("Phase: %s", SuccessStyle.Render(m.stats.TestPhase)),
 		progressBar,
 		fmt.Sprintf("%d%% complete", m.stats.Progress),
 	}
-	
+
 	return m.getAnimatedBorderStyle(m.stats.AnimationTick).
 		Width(width).
 		Height(6).
@@ -1066,19 +1066,19 @@ func (m *RichDashboardModel) createModernActivityPanel(width, height int) string
 		Background(HeaderBg).
 		Bold(true).
 		Padding(0, 2).
-		Width(width-4).
+		Width(width - 4).
 		Align(lipgloss.Center).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Primary).
 		Render("📋 BROADCAST EVENT LOG & SYSTEM MONITOR")
-	
+
 	content := []string{headerGradient, ""}
-	
+
 	// Dedicated event stream section - full height
 	eventStreamHeight := height - 4 // Account for header and padding
 	eventsSection := m.createFullWidthEventStream(width-4, eventStreamHeight)
 	content = append(content, eventsSection)
-	
+
 	// Broadcast-style outer border
 	return lipgloss.NewStyle().
 		Border(lipgloss.ThickBorder()).
@@ -1093,7 +1093,7 @@ func (m *RichDashboardModel) createModernActivityPanel(width, height int) string
 // createFullWidthEventStream creates a dedicated full-width event stream
 func (m *RichDashboardModel) createFullWidthEventStream(width, height int) string {
 	content := []string{}
-	
+
 	if len(m.stats.RecentLogs) == 0 {
 		// Show monitoring message when no events
 		emptyState := lipgloss.NewStyle().
@@ -1102,13 +1102,13 @@ func (m *RichDashboardModel) createFullWidthEventStream(width, height int) strin
 			Align(lipgloss.Center).
 			Width(width).
 			Render("⏳ Monitoring system events and stream activity...")
-		
+
 		// Center vertically
 		for i := 0; i < height/2-1; i++ {
 			content = append(content, "")
 		}
 		content = append(content, emptyState)
-		
+
 	} else {
 		// Calculate how many log entries we can show
 		maxLogs := height - 2 // Account for some padding
@@ -1116,20 +1116,20 @@ func (m *RichDashboardModel) createFullWidthEventStream(width, height int) strin
 		if startIdx < 0 {
 			startIdx = 0
 		}
-		
+
 		// Create streamlined log entries
 		for i := startIdx; i < len(m.stats.RecentLogs); i++ {
 			log := m.stats.RecentLogs[i]
 			logEntry := m.createStreamlinedLogEntry(log, width)
 			content = append(content, logEntry)
 		}
-		
+
 		// Fill remaining space if needed
 		for len(content) < height {
 			content = append(content, "")
 		}
 	}
-	
+
 	// Wrap in simple container
 	return lipgloss.NewStyle().
 		Width(width).
@@ -1171,20 +1171,20 @@ func (m *RichDashboardModel) createStreamlinedLogEntry(log logEntry, width int) 
 			Padding(0, 1).
 			Render("DEBUG")
 	}
-	
+
 	// Component badge
 	componentBadge := lipgloss.NewStyle().
 		Background(lipgloss.AdaptiveColor{Light: "#F3F4F6", Dark: "#374151"}).
 		Foreground(lipgloss.AdaptiveColor{Light: "#374151", Dark: "#D1D5DB"}).
 		Padding(0, 1).
 		Render(log.Component)
-	
+
 	// Timestamp
 	timeStr := log.Timestamp.Format("15:04:05")
 	timestampStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#9CA3AF"}).
 		Render(timeStr)
-	
+
 	// Message with proper truncation for single line
 	message := log.Message
 	// Calculate available space for message
@@ -1193,14 +1193,14 @@ func (m *RichDashboardModel) createStreamlinedLogEntry(log logEntry, width int) 
 	if len(message) > maxMessageWidth {
 		message = message[:maxMessageWidth-3] + "..."
 	}
-	
+
 	// Combine everything in a single line
-	logLine := fmt.Sprintf("%s %s %s  %s", 
-		levelBadge, 
-		componentBadge, 
-		timestampStyle, 
+	logLine := fmt.Sprintf("%s %s %s  %s",
+		levelBadge,
+		componentBadge,
+		timestampStyle,
 		message)
-	
+
 	return logLine
 }
 
@@ -1208,28 +1208,28 @@ func (m *RichDashboardModel) createStreamlinedLogEntry(log logEntry, width int) 
 func (m *RichDashboardModel) createExpandedActivityPanel(width int) string {
 	title := m.getAnimatedGlow("📋 ACTIVITY & EVENTS", m.stats.AnimationTick)
 	content := []string{title, ""}
-	
+
 	// Show system statistics
 	content = append(content, HeaderStyle.Render("🔧 System Stats"))
-	content = append(content, fmt.Sprintf("  Errors: %s  Warnings: %s", 
+	content = append(content, fmt.Sprintf("  Errors: %s  Warnings: %s",
 		ErrorStyle.Render(fmt.Sprintf("%d", m.stats.ErrorCount)),
 		WarningStyle.Render(fmt.Sprintf("%d", m.stats.WarningCount))))
-	
+
 	elapsed := time.Since(m.startTime)
-	content = append(content, fmt.Sprintf("  Uptime: %s", 
+	content = append(content, fmt.Sprintf("  Uptime: %s",
 		ValueStyle.Render(m.formatDuration(elapsed))))
 	content = append(content, "")
-	
+
 	// Show codec breakdown if available
 	if len(m.stats.CodecStats) > 0 {
 		content = append(content, HeaderStyle.Render("🎬 Codec Usage"))
 		for codec, count := range m.stats.CodecStats {
-			content = append(content, fmt.Sprintf("  %s: %s", 
+			content = append(content, fmt.Sprintf("  %s: %s",
 				codec, ValueStyle.Render(fmt.Sprintf("%d streams", count))))
 		}
 		content = append(content, "")
 	}
-	
+
 	// Show recent logs with more entries
 	content = append(content, HeaderStyle.Render("📝 Recent Logs"))
 	if len(m.stats.RecentLogs) == 0 {
@@ -1242,48 +1242,48 @@ func (m *RichDashboardModel) createExpandedActivityPanel(width int) string {
 		if startIdx < 0 {
 			startIdx = 0
 		}
-		
+
 		for i := startIdx; i < len(m.stats.RecentLogs); i++ {
 			log := m.stats.RecentLogs[i]
 			levelIcon := LogLevelIcon(log.Level)
 			timeStr := log.Timestamp.Format("15:04:05")
-			
+
 			message := log.Message
 			maxLen := width - 15
 			if len(message) > maxLen {
 				message = message[:maxLen-3] + "..."
 			}
-			
-			logLine := fmt.Sprintf("  %s %s %s", levelIcon, 
+
+			logLine := fmt.Sprintf("  %s %s %s", levelIcon,
 				MutedStyle.Render(timeStr), message)
 			content = append(content, logLine)
 		}
 	}
-	
+
 	// Add some system activity indicators
 	content = append(content, "")
 	content = append(content, HeaderStyle.Render("⚡ Live Metrics"))
-	
+
 	// Show active connections
 	totalSessions := m.stats.SRTSessions + m.stats.RTPSessions
-	content = append(content, fmt.Sprintf("  Active Sessions: %s", 
+	content = append(content, fmt.Sprintf("  Active Sessions: %s",
 		ValueStyle.Render(fmt.Sprintf("%d", totalSessions))))
-	
+
 	// Show total throughput
 	totalBitrate := m.stats.BitrateRTP + m.stats.BitrateSRT
-	content = append(content, fmt.Sprintf("  Total Throughput: %s", 
+	content = append(content, fmt.Sprintf("  Total Throughput: %s",
 		SuccessStyle.Render(m.formatBitrate(totalBitrate))))
-	
+
 	// Show memory pressure if high
 	if m.stats.MemoryPercent > 75 {
 		pressureStyle := WarningStyle
 		if m.stats.MemoryPercent > 90 {
 			pressureStyle = ErrorStyle
 		}
-		content = append(content, fmt.Sprintf("  Memory Pressure: %s", 
+		content = append(content, fmt.Sprintf("  Memory Pressure: %s",
 			pressureStyle.Render(fmt.Sprintf("%.1f%%", m.stats.MemoryPercent))))
 	}
-	
+
 	return m.getAnimatedBorderStyle(m.stats.AnimationTick).
 		Width(width).
 		Height(28). // Much taller panel
@@ -1327,7 +1327,7 @@ func (m *RichDashboardModel) SetProgress(progress int) {
 func (m *RichDashboardModel) UpdateStats(stats interface{}) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Convert external stats to internal format using JSON marshaling
 	// This handles the type conversion safely
 	if statsBytes, err := json.Marshal(stats); err == nil {
@@ -1346,12 +1346,12 @@ func (m *RichDashboardModel) UpdateStats(stats interface{}) {
 			if internalStats.BitrateHistory == nil {
 				internalStats.BitrateHistory = make([]float64, 0, 30)
 			}
-			
+
 			// Preserve existing log history if new stats don't have it
 			if len(internalStats.RecentLogs) == 0 && len(m.stats.RecentLogs) > 0 {
 				internalStats.RecentLogs = m.stats.RecentLogs
 			}
-			
+
 			m.stats = internalStats
 		}
 	}
@@ -1366,19 +1366,19 @@ func (m *RichDashboardModel) Cleanup() {
 func (m *RichDashboardModel) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Reset to initial state
 	m.stats = dashboardStats{
-		ServerStatus:  "Starting",
-		TestPhase:     "Initialization", 
-		RecentLogs:    make([]logEntry, 0, 25),
-		StreamsActive: make([]streamInfo, 0),
-		CodecStats:    make(map[string]int),
-		StreamStats:   make(map[string]streamDetailedStats),
-		BufferStats:   make(map[string]bufferInfo),
+		ServerStatus:      "Starting",
+		TestPhase:         "Initialization",
+		RecentLogs:        make([]logEntry, 0, 25),
+		StreamsActive:     make([]streamInfo, 0),
+		CodecStats:        make(map[string]int),
+		StreamStats:       make(map[string]streamDetailedStats),
+		BufferStats:       make(map[string]bufferInfo),
 		ConnectionQuality: make(map[string]connectionQuality),
-		AnimationTick: 0,
-		LastUpdate:    time.Now(),
+		AnimationTick:     0,
+		LastUpdate:        time.Now(),
 	}
 	m.startTime = time.Now()
 }
@@ -1406,7 +1406,7 @@ func fetchStats(env TestEnvironment) tea.Cmd {
 
 		var statsResp *http.Response
 		var err error
-		
+
 		for _, endpoint := range endpoints {
 			statsResp, err = env.GetHTTPClient().Get(endpoint)
 			if err == nil {
@@ -1447,14 +1447,14 @@ func fetchStats(env TestEnvironment) tea.Cmd {
 				defer metricsResp.Body.Close()
 				if body, err := io.ReadAll(metricsResp.Body); err == nil {
 					content := string(body)
-					
+
 					// Parse goroutine count
 					if matches := regexp.MustCompile(`go_goroutines (\d+)`).FindStringSubmatch(content); len(matches) > 1 {
 						if val, err := strconv.Atoi(matches[1]); err == nil {
 							stats.Goroutines = val
 						}
 					}
-					
+
 					// Parse memory usage
 					if matches := regexp.MustCompile(`go_memstats_alloc_bytes (\d+)`).FindStringSubmatch(content); len(matches) > 1 {
 						if val, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
@@ -1519,7 +1519,7 @@ func (m *RichDashboardModel) getAnimatedGlow(text string, tick int) string {
 	if tick%20 >= 10 {
 		intensity = 1.0 - intensity
 	}
-	
+
 	// Create glow effect with varying opacity
 	if intensity > 0.7 {
 		return lipgloss.NewStyle().
@@ -1643,7 +1643,7 @@ func (m *RichDashboardModel) renderMiniSparkline(data []float64, width int) stri
 	if len(data) == 0 || width < 5 {
 		return "▁▁▁▁▁"
 	}
-	
+
 	sparkWidth := min(width, 10) // Mini sparkline
 	return m.renderSparkline(data, sparkWidth)
 }
@@ -1687,7 +1687,7 @@ func (m *RichDashboardModel) renderAnimatedProgressBar(progress, width, tick int
 	// Animated fill characters
 	fillChars := []string{"█", "▉", "▊", "▋"}
 	fillChar := fillChars[tick%4]
-	
+
 	// Create gradient effect
 	filledStr := strings.Repeat(fillChar, filled)
 	emptyStr := strings.Repeat("░", empty)
@@ -1709,7 +1709,7 @@ func (m *RichDashboardModel) getAnimatedBorderStyle(tick int) lipgloss.Style {
 	// Cycle through different border colors
 	colors := []lipgloss.Color{Primary, Secondary, Primary, lipgloss.Color("#EF4444")}
 	borderColor := colors[tick%4]
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor)
@@ -1728,9 +1728,9 @@ func (m *RichDashboardModel) renderAnimatedSparkline(data []float64, width, tick
 	if len(data) == 0 {
 		return strings.Repeat("▁", width)
 	}
-	
+
 	baseline := m.renderSparkline(data, width)
-	
+
 	// Add glow effect
 	if tick%8 < 4 {
 		return SuccessStyle.Render(baseline)
@@ -1744,7 +1744,7 @@ func (m *RichDashboardModel) getConnectionIndicator(protocol string, active bool
 	if !active {
 		return "⚫"
 	}
-	
+
 	// Pulsing indicators
 	indicators := []string{"🟢", "🔵", "🟡", "🔵"}
 	return indicators[tick%4]
@@ -1877,7 +1877,7 @@ func (m *RichDashboardModel) createSystemOverviewCard(width int) string {
 		Background(lipgloss.AdaptiveColor{Light: "#F1F5F9", Dark: "#1E293B"}).
 		Padding(1).
 		Width(width)
-	
+
 	elapsed := time.Since(m.startTime)
 	content := []string{
 		lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("🔧 System Overview"),
@@ -1887,7 +1887,7 @@ func (m *RichDashboardModel) createSystemOverviewCard(width int) string {
 		fmt.Sprintf("Warnings: %s", WarningStyle.Render(fmt.Sprintf("%d", m.stats.WarningCount))),
 		fmt.Sprintf("Active Streams: %s", ValueStyle.Render(fmt.Sprintf("%d", len(m.stats.StreamsActive)))),
 	}
-	
+
 	return cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, content...))
 }
 
@@ -1899,12 +1899,12 @@ func (m *RichDashboardModel) createCodecStatsCard(width int) string {
 		Background(lipgloss.AdaptiveColor{Light: "#F0FDF4", Dark: "#064E3B"}).
 		Padding(1).
 		Width(width)
-	
+
 	content := []string{
 		lipgloss.NewStyle().Bold(true).Foreground(Success).Render("🎬 Codec Usage"),
 		"",
 	}
-	
+
 	if len(m.stats.CodecStats) == 0 {
 		content = append(content, MutedStyle.Render("No active codecs"))
 	} else {
@@ -1917,7 +1917,7 @@ func (m *RichDashboardModel) createCodecStatsCard(width int) string {
 			content = append(content, fmt.Sprintf("%s %s streams", codecBadge, ValueStyle.Render(fmt.Sprintf("%d", count))))
 		}
 	}
-	
+
 	return cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, content...))
 }
 
@@ -1929,10 +1929,10 @@ func (m *RichDashboardModel) createLiveMetricsCard(width int) string {
 		Background(lipgloss.AdaptiveColor{Light: "#FAF5FF", Dark: "#581C87"}).
 		Padding(1).
 		Width(width)
-	
+
 	totalSessions := m.stats.SRTSessions + m.stats.RTPSessions
 	totalBitrate := m.stats.BitrateRTP + m.stats.BitrateSRT
-	
+
 	content := []string{
 		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8B5CF6")).Render("⚡ Live Metrics"),
 		"",
@@ -1941,7 +1941,7 @@ func (m *RichDashboardModel) createLiveMetricsCard(width int) string {
 		fmt.Sprintf("Memory: %s", m.getMemoryStatusBadge(m.stats.MemoryPercent)),
 		fmt.Sprintf("Goroutines: %s", ValueStyle.Render(fmt.Sprintf("%d", m.stats.Goroutines))),
 	}
-	
+
 	return cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, content...))
 }
 
@@ -1955,15 +1955,15 @@ func (m *RichDashboardModel) createModernLogsSection(width, height int) string {
 		Width(width).
 		Align(lipgloss.Left).
 		Render("📝 REAL-TIME EVENT STREAM")
-	
+
 	content := []string{headerStyle, ""}
-	
+
 	if len(m.stats.RecentLogs) == 0 {
 		emptyState := lipgloss.NewStyle().
 			Foreground(MutedStyle.GetForeground()).
 			Italic(true).
 			Align(lipgloss.Center).
-			Width(width-4).
+			Width(width - 4).
 			Render("⏳ Monitoring system events...")
 		content = append(content, "", emptyState)
 	} else {
@@ -1973,7 +1973,7 @@ func (m *RichDashboardModel) createModernLogsSection(width, height int) string {
 		if startIdx < 0 {
 			startIdx = 0
 		}
-		
+
 		for i := startIdx; i < len(m.stats.RecentLogs); i++ {
 			log := m.stats.RecentLogs[i]
 			logEntry := m.createModernLogEntry(log, width-4)
@@ -1983,7 +1983,7 @@ func (m *RichDashboardModel) createModernLogsSection(width, height int) string {
 			}
 		}
 	}
-	
+
 	// Wrap in modern container
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -2029,31 +2029,31 @@ func (m *RichDashboardModel) createModernLogEntry(log logEntry, width int) strin
 			Padding(0, 1).
 			Render("DEBUG")
 	}
-	
+
 	// Component badge
 	componentBadge := lipgloss.NewStyle().
 		Background(lipgloss.AdaptiveColor{Light: "#F3F4F6", Dark: "#374151"}).
 		Foreground(lipgloss.AdaptiveColor{Light: "#374151", Dark: "#D1D5DB"}).
 		Padding(0, 1).
 		Render(log.Component)
-	
+
 	// Timestamp
 	timeStr := log.Timestamp.Format("15:04:05")
 	timestampStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#9CA3AF"}).
 		Render(timeStr)
-	
+
 	// Message with proper truncation
 	message := log.Message
 	maxMessageWidth := width - 35 // Account for badges and timestamp
 	if len(message) > maxMessageWidth {
 		message = message[:maxMessageWidth-3] + "..."
 	}
-	
+
 	// Combine elements with proper spacing
 	firstLine := fmt.Sprintf("%s %s %s", levelBadge, componentBadge, timestampStyle)
 	secondLine := fmt.Sprintf("  %s", message)
-	
+
 	return lipgloss.JoinVertical(lipgloss.Left, firstLine, secondLine)
 }
 
@@ -2061,7 +2061,7 @@ func (m *RichDashboardModel) createModernLogEntry(log logEntry, width int) strin
 func (m *RichDashboardModel) getMemoryStatusBadge(memPercent float64) string {
 	var style lipgloss.Style
 	var text string
-	
+
 	switch {
 	case memPercent < 50:
 		style = lipgloss.NewStyle().Background(Success).Foreground(White)
@@ -2076,7 +2076,7 @@ func (m *RichDashboardModel) getMemoryStatusBadge(memPercent float64) string {
 		style = lipgloss.NewStyle().Background(Error).Foreground(White)
 		text = "CRIT"
 	}
-	
+
 	return fmt.Sprintf("%s %.1f%%", style.Padding(0, 1).Render(text), memPercent)
 }
 
@@ -2088,17 +2088,17 @@ func (m *RichDashboardModel) createMobileSystemPanel(width int) string {
 		Foreground(Primary).
 		Bold(true).
 		Render("💻 SYSTEM")
-	
+
 	totalSessions := m.stats.SRTSessions + m.stats.RTPSessions
 	totalBitrate := m.stats.BitrateRTP + m.stats.BitrateSRT
-	
+
 	content := []string{
 		title,
 		fmt.Sprintf("Sessions: %s", ValueStyle.Render(fmt.Sprintf("%d", totalSessions))),
 		fmt.Sprintf("Throughput: %s", SuccessStyle.Render(m.formatBitrate(totalBitrate))),
 		fmt.Sprintf("Memory: %.1f%%", m.stats.MemoryPercent),
 	}
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Primary).
@@ -2113,9 +2113,9 @@ func (m *RichDashboardModel) createMobileActivityPanel(width int) string {
 		Foreground(Primary).
 		Bold(true).
 		Render("📋 ACTIVITY")
-	
+
 	content := []string{title}
-	
+
 	if len(m.stats.RecentLogs) == 0 {
 		content = append(content, MutedStyle.Render("Monitoring..."))
 	} else {
@@ -2124,7 +2124,7 @@ func (m *RichDashboardModel) createMobileActivityPanel(width int) string {
 		if startIdx < 0 {
 			startIdx = 0
 		}
-		
+
 		for i := startIdx; i < len(m.stats.RecentLogs); i++ {
 			log := m.stats.RecentLogs[i]
 			levelIcon := LogLevelIcon(log.Level)
@@ -2135,7 +2135,7 @@ func (m *RichDashboardModel) createMobileActivityPanel(width int) string {
 			content = append(content, fmt.Sprintf("%s %s", levelIcon, message))
 		}
 	}
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Primary).
@@ -2151,16 +2151,16 @@ func (m *RichDashboardModel) createTabletSystemPanel(width int) string {
 		Foreground(Primary).
 		Bold(true).
 		Render("💻 SYSTEM")
-	
+
 	totalSessions := m.stats.SRTSessions + m.stats.RTPSessions
-	
+
 	content := []string{
 		title,
 		fmt.Sprintf("Sessions: %s", ValueStyle.Render(fmt.Sprintf("%d", totalSessions))),
 		fmt.Sprintf("Memory: %.1f%%", m.stats.MemoryPercent),
 		fmt.Sprintf("Goroutines: %d", m.stats.Goroutines),
 	}
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Primary).
@@ -2175,16 +2175,16 @@ func (m *RichDashboardModel) createTabletNetworkPanel(width int) string {
 		Foreground(Primary).
 		Bold(true).
 		Render("🌐 NETWORK")
-	
+
 	totalBitrate := m.stats.BitrateRTP + m.stats.BitrateSRT
-	
+
 	content := []string{
 		title,
 		fmt.Sprintf("Total: %s", SuccessStyle.Render(m.formatBitrate(totalBitrate))),
 		fmt.Sprintf("RTP: %s", ValueStyle.Render(m.formatBitrate(m.stats.BitrateRTP))),
 		fmt.Sprintf("SRT: %s", ValueStyle.Render(m.formatBitrate(m.stats.BitrateSRT))),
 	}
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Primary).
@@ -2199,9 +2199,9 @@ func (m *RichDashboardModel) createTabletStreamsPanel(width int, showDetails boo
 		Foreground(Primary).
 		Bold(true).
 		Render("📡 STREAMS")
-	
+
 	content := []string{title}
-	
+
 	if len(m.stats.StreamsActive) == 0 {
 		content = append(content, MutedStyle.Render("No active streams"))
 	} else {
@@ -2211,28 +2211,28 @@ func (m *RichDashboardModel) createTabletStreamsPanel(width int, showDetails boo
 				content = append(content, MutedStyle.Render(fmt.Sprintf("+%d more streams", remaining)))
 				break
 			}
-			
+
 			statusIcon := "🟢"
 			if stream.Status == "inactive" {
 				statusIcon = "🔴"
 			}
-			
+
 			displayID := stream.ID
 			if len(displayID) > 15 {
 				displayID = displayID[:12] + "..."
 			}
-			
-			streamLine := fmt.Sprintf("%s %s %s", statusIcon, 
-				ValueStyle.Render(strings.ToUpper(stream.Type)), 
+
+			streamLine := fmt.Sprintf("%s %s %s", statusIcon,
+				ValueStyle.Render(strings.ToUpper(stream.Type)),
 				displayID)
 			content = append(content, streamLine)
-			
+
 			if showDetails && stream.Resolution != "" {
 				content = append(content, fmt.Sprintf("  %s", MutedStyle.Render(stream.Resolution)))
 			}
 		}
 	}
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Primary).
@@ -2247,9 +2247,9 @@ func (m *RichDashboardModel) createTabletActivityPanel(width int) string {
 		Foreground(Primary).
 		Bold(true).
 		Render("📋 ACTIVITY")
-	
+
 	content := []string{title}
-	
+
 	if len(m.stats.RecentLogs) == 0 {
 		content = append(content, MutedStyle.Render("Monitoring system events..."))
 	} else {
@@ -2258,7 +2258,7 @@ func (m *RichDashboardModel) createTabletActivityPanel(width int) string {
 		if startIdx < 0 {
 			startIdx = 0
 		}
-		
+
 		for i := startIdx; i < len(m.stats.RecentLogs); i++ {
 			log := m.stats.RecentLogs[i]
 			levelIcon := LogLevelIcon(log.Level)
@@ -2270,7 +2270,7 @@ func (m *RichDashboardModel) createTabletActivityPanel(width int) string {
 			content = append(content, fmt.Sprintf("%s %s %s", levelIcon, MutedStyle.Render(timeStr), message))
 		}
 	}
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Primary).
@@ -2288,10 +2288,10 @@ func (m *RichDashboardModel) createDesktopSystemPanel(width, height int) string 
 		Bold(true).
 		Padding(0, 1).
 		Render("🖥️ SYSTEM STATUS")
-	
+
 	elapsed := time.Since(m.startTime)
 	totalSessions := m.stats.SRTSessions + m.stats.RTPSessions
-	
+
 	content := []string{
 		title,
 		"",
@@ -2303,7 +2303,7 @@ func (m *RichDashboardModel) createDesktopSystemPanel(width, height int) string 
 		fmt.Sprintf("Errors: %s", ErrorStyle.Render(fmt.Sprintf("%d", m.stats.ErrorCount))),
 		fmt.Sprintf("Warnings: %s", WarningStyle.Render(fmt.Sprintf("%d", m.stats.WarningCount))),
 	}
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.ThickBorder()).
 		BorderForeground(BorderDark).
@@ -2319,9 +2319,9 @@ func (m *RichDashboardModel) createDesktopNetworkPanel(width, height int) string
 		Foreground(Primary).
 		Bold(true).
 		Render("🌐 NETWORK")
-	
+
 	totalBitrate := m.stats.BitrateRTP + m.stats.BitrateSRT
-	
+
 	content := []string{
 		title,
 		"",
@@ -2333,7 +2333,7 @@ func (m *RichDashboardModel) createDesktopNetworkPanel(width, height int) string
 		fmt.Sprintf("SRT Sessions: %d", m.stats.SRTSessions),
 		fmt.Sprintf("SRT Bitrate: %s", ValueStyle.Render(m.formatBitrate(m.stats.BitrateSRT))),
 	}
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Primary).
@@ -2354,13 +2354,13 @@ func (m *RichDashboardModel) createUltrawideMetricsPanel(width, height int) stri
 		Foreground(Primary).
 		Bold(true).
 		Render("📊 METRICS")
-	
+
 	elapsed := time.Since(m.startTime)
 	frameRate := float64(0)
 	if m.stats.FramesProcessed > 0 && elapsed.Seconds() > 0 {
 		frameRate = float64(m.stats.FramesProcessed) / elapsed.Seconds()
 	}
-	
+
 	content := []string{
 		title,
 		"",
@@ -2371,7 +2371,7 @@ func (m *RichDashboardModel) createUltrawideMetricsPanel(width, height int) stri
 		fmt.Sprintf("Phase: %s", InfoStyle.Render(m.stats.TestPhase)),
 		fmt.Sprintf("Progress: %d%%", m.stats.Progress),
 	}
-	
+
 	// Add codec stats if available
 	if len(m.stats.CodecStats) > 0 {
 		content = append(content, "", "Codecs:")
@@ -2379,7 +2379,7 @@ func (m *RichDashboardModel) createUltrawideMetricsPanel(width, height int) stri
 			content = append(content, fmt.Sprintf("  %s: %d", codec, count))
 		}
 	}
-	
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Primary).

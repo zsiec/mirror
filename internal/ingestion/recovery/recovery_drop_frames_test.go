@@ -61,7 +61,7 @@ func TestHandler_DropCorruptedFrames_Persistence(t *testing.T) {
 
 	// Create a GOP with some frames, one of which is corrupted
 	testGOP := &types.GOP{
-		ID:     1,
+		ID:       1,
 		Complete: true,
 		Keyframe: &types.VideoFrame{
 			ID:          1,
@@ -204,12 +204,12 @@ func TestHandler_DropCorruptedFrames_MultipleGOPs(t *testing.T) {
 		}
 
 		gop := &types.GOP{
-			ID:         gopID,
-			Complete:   true,
-			Keyframe:   frames[0],
-			Frames:     frames,
-			StreamID:   "test-stream",
-			TotalSize:  1500,
+			ID:        gopID,
+			Complete:  true,
+			Keyframe:  frames[0],
+			Frames:    frames,
+			StreamID:  "test-stream",
+			TotalSize: 1500,
 		}
 
 		if i == 2 {

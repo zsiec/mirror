@@ -76,7 +76,7 @@ const (
 
 ## B-frame Reordering
 
-Handle display order vs decode order:
+Handle display order vs decode order with intelligent optimization:
 
 ```go
 reorderer := frame.NewBFrameReorderer(frame.ReorderConfig{
@@ -102,8 +102,8 @@ for {
 - **Packet reassembly** with timeout handling
 - **Frame boundary detection** for all supported codecs
 - **Keyframe identification** for GOP boundaries
-- **B-frame reordering** for proper display
-- **Timestamp management** with PTS/DTS handling
+- **B-frame reordering** with intelligent P-frame early output and DTS gap analysis
+- **Timestamp management** with PTS/DTS handling and wraparound detection
 
 ## Related Documentation
 

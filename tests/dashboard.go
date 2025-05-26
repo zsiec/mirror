@@ -27,60 +27,60 @@ type Dashboard struct {
 	startTime  time.Time
 	isRunning  bool
 	ffmpegMode bool
-	output     *os.File                 // Output file for dashboard display
+	output     *os.File               // Output file for dashboard display
 	richModel  *ui.RichDashboardModel // Rich Bubble Tea model
-	richProg   *tea.Program          // Bubble Tea program
+	richProg   *tea.Program           // Bubble Tea program
 }
 
 // DashboardStats holds comprehensive statistics for display
 type DashboardStats struct {
 	// Core Status
-	ServerStatus  string
-	SRTSessions   int
-	RTPSessions   int
-	TotalStreams  int
-	TestPhase     string
-	Progress      int // 0-100
-	
+	ServerStatus string
+	SRTSessions  int
+	RTPSessions  int
+	TotalStreams int
+	TestPhase    string
+	Progress     int // 0-100
+
 	// Network Metrics
-	PacketsRTP    int64
-	PacketsSRT    int64
-	BitrateRTP    float64
-	BitrateSRT    float64
+	PacketsRTP     int64
+	PacketsSRT     int64
+	BitrateRTP     float64
+	BitrateSRT     float64
 	BitrateHistory []float64 // For sparklines
-	PacketLossRTP float64
-	PacketLossSRT float64
-	JitterRTP     float64
-	LatencyRTP    float64
-	
+	PacketLossRTP  float64
+	PacketLossSRT  float64
+	JitterRTP      float64
+	LatencyRTP     float64
+
 	// Memory & Resources
-	MemoryUsed     int64
-	MemoryLimit    int64
-	MemoryPercent  float64
-	BufferUsage    float64
-	CPUUsage       float64
-	Goroutines     int
-	
+	MemoryUsed    int64
+	MemoryLimit   int64
+	MemoryPercent float64
+	BufferUsage   float64
+	CPUUsage      float64
+	Goroutines    int
+
 	// Stream Details
 	StreamsActive []StreamInfo
 	StreamStats   map[string]StreamDetailedStats
-	
+
 	// Video Processing
 	FramesProcessed int64
 	FramesDropped   int64
 	GOPsProcessed   int64
 	CodecStats      map[string]int
-	
+
 	// Buffer Status
 	BufferStats map[string]BufferInfo
-	
+
 	// Connection Quality
 	ConnectionQuality map[string]ConnectionQuality
-	
+
 	// Activity & Logs
-	RecentLogs    []LogEntry
-	ErrorCount    int
-	WarningCount  int
+	RecentLogs   []LogEntry
+	ErrorCount   int
+	WarningCount int
 }
 
 // LogEntry represents a log entry for display
@@ -147,7 +147,7 @@ type BufferInfo struct {
 
 // ConnectionQuality represents connection health
 type ConnectionQuality struct {
-	SignalStrength string  // "Excellent", "Good", "Fair", "Poor"
+	SignalStrength string // "Excellent", "Good", "Fair", "Poor"
 	PacketLoss     float64
 	RTT            float64
 	Bandwidth      float64
@@ -157,7 +157,7 @@ type ConnectionQuality struct {
 // NewDashboard creates a new dashboard instance
 func NewDashboard(env *TestEnvironment, ffmpegMode bool, output *os.File) *Dashboard {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	d := &Dashboard{
 		env:        env,
 		ctx:        ctx,
@@ -171,11 +171,11 @@ func NewDashboard(env *TestEnvironment, ffmpegMode bool, output *os.File) *Dashb
 			RecentLogs:   make([]LogEntry, 0, 10), // Keep last 10 log entries
 		},
 	}
-	
+
 	// Initialize Rich dashboard (without alt screen so output stays visible)
 	d.richModel = ui.NewRichDashboardModel(d, ffmpegMode)
 	d.richProg = tea.NewProgram(d.richModel)
-	
+
 	return d
 }
 
@@ -201,7 +201,7 @@ func (d *Dashboard) AddLogEntry(level, component, message string) {
 	if len(d.stats.RecentLogs) > 10 {
 		d.stats.RecentLogs = d.stats.RecentLogs[1:]
 	}
-	
+
 	// Forward to Rich dashboard
 	if d.richModel != nil {
 		d.richModel.AddLogEntry(level, component, message)
@@ -212,7 +212,7 @@ func (d *Dashboard) AddLogEntry(level, component, message string) {
 func (d *Dashboard) Start() {
 	d.mu.Lock()
 	d.isRunning = true
-	
+
 	// Reset state for clean start
 	d.stats = DashboardStats{
 		ServerStatus: "Starting",
@@ -224,7 +224,7 @@ func (d *Dashboard) Start() {
 
 	// Clear Redis state to prevent persistence between runs
 	d.env.ClearRedisState()
-	
+
 	// Give the server a moment to detect Redis changes
 	time.Sleep(250 * time.Millisecond)
 
@@ -235,7 +235,7 @@ func (d *Dashboard) Start() {
 
 	// Start stats collection
 	go d.collectStats()
-	
+
 	// Start the Rich dashboard display updates
 	go d.updateRichDisplay()
 }
@@ -280,7 +280,7 @@ func (d *Dashboard) fetchAndUpdateStats() {
 	// Try HTTPS first to avoid TLS handshake errors
 	endpoints := []string{
 		"https://127.0.0.1:8080/api/v1/stats",
-		"https://localhost:8080/api/v1/stats", 
+		"https://localhost:8080/api/v1/stats",
 		"http://127.0.0.1:8080/api/v1/stats",
 		"http://localhost:8080/api/v1/stats",
 	}
@@ -344,7 +344,7 @@ func (d *Dashboard) tryFetchStats(endpoint string) bool {
 
 	// Try to fetch stream details
 	d.tryFetchStreamDetails(strings.Replace(endpoint, "/stats", "/streams", 1))
-	
+
 	return true
 }
 
@@ -381,10 +381,10 @@ func (d *Dashboard) tryFetchStreamDetails(endpoint string) {
 	d.stats.BitrateSRT = 0
 	d.stats.FramesProcessed = 0
 	d.stats.FramesDropped = 0
-	
+
 	// Clear codec stats to prevent stale data
 	d.stats.CodecStats = make(map[string]int)
-	
+
 	// Reset error/warning counts when no streams (indicates fresh start)
 	if len(response.Streams) == 0 {
 		d.stats.ErrorCount = 0
@@ -393,7 +393,7 @@ func (d *Dashboard) tryFetchStreamDetails(endpoint string) {
 		d.stats.BufferStats = make(map[string]BufferInfo)
 		d.stats.ConnectionQuality = make(map[string]ConnectionQuality)
 	}
-	
+
 	// Aggregate stats from current streams
 	for _, stream := range response.Streams {
 		if stream.Type == "rtp" {
@@ -401,11 +401,11 @@ func (d *Dashboard) tryFetchStreamDetails(endpoint string) {
 		} else if stream.Type == "srt" {
 			d.stats.BitrateSRT += float64(stream.Bitrate)
 		}
-		
+
 		// Aggregate frame statistics from stream buffer stats
 		d.stats.FramesProcessed += int64(stream.Stats.FrameBufferStats.FramesAssembled)
 		d.stats.FramesDropped += int64(stream.Stats.FrameBufferStats.FramesDropped)
-		
+
 		// Track codec usage
 		if stream.VideoCodec != "" {
 			d.stats.CodecStats[stream.VideoCodec]++
@@ -454,13 +454,13 @@ func (d *Dashboard) fetchDetailedStreamStats() {
 					Jitter:          stats.Jitter,
 					LastUpdate:      time.Now(),
 				}
-				
+
 				// Update bitrate history
 				if len(detailed.BitrateHistory) >= 30 {
 					detailed.BitrateHistory = detailed.BitrateHistory[1:]
 				}
 				detailed.BitrateHistory = append(detailed.BitrateHistory, stats.Bitrate)
-				
+
 				d.stats.StreamStats[streamID] = detailed
 				d.mu.Unlock()
 			}
@@ -508,7 +508,7 @@ func (d *Dashboard) fetchBufferStatus() {
 
 // fetchMemoryMetrics collects system memory and resource metrics
 func (d *Dashboard) fetchMemoryMetrics() {
-	// Get memory stats from metrics endpoint 
+	// Get memory stats from metrics endpoint
 	resp, err := d.env.HTTPClientPlain.Get("http://127.0.0.1:9091/metrics")
 	if err != nil {
 		return
@@ -524,14 +524,14 @@ func (d *Dashboard) fetchMemoryMetrics() {
 	defer d.mu.Unlock()
 
 	content := string(body)
-	
+
 	// Parse key metrics from Prometheus format
 	if matches := regexp.MustCompile(`go_memstats_alloc_bytes (\d+)`).FindStringSubmatch(content); len(matches) > 1 {
 		if val, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
 			d.stats.MemoryUsed = val
 		}
 	}
-	
+
 	if matches := regexp.MustCompile(`go_goroutines (\d+)`).FindStringSubmatch(content); len(matches) > 1 {
 		if val, err := strconv.Atoi(matches[1]); err == nil {
 			d.stats.Goroutines = val
@@ -569,7 +569,7 @@ func (d *Dashboard) fetchConnectionQuality() {
 
 			if json.NewDecoder(resp.Body).Decode(&sync) == nil {
 				d.mu.Lock()
-				
+
 				// Determine signal strength based on packet loss and RTT
 				var signalStrength string
 				if sync.PacketLoss < 0.1 && sync.RTT < 50 {
@@ -624,7 +624,7 @@ func (d *Dashboard) updateBitrateHistory() {
 func (d *Dashboard) Stop() {
 	d.mu.Lock()
 	d.isRunning = false
-	
+
 	// Clear all state to prevent persistence between runs
 	d.stats = DashboardStats{
 		ServerStatus: "Stopped",
@@ -650,7 +650,7 @@ func (d *Dashboard) SetPhase(phase string) {
 	d.mu.Lock()
 	d.stats.TestPhase = phase
 	d.mu.Unlock()
-	
+
 	// Forward to Rich dashboard
 	if d.richModel != nil {
 		d.richModel.SetPhase(phase)
@@ -662,7 +662,7 @@ func (d *Dashboard) SetProgress(progress int) {
 	d.mu.Lock()
 	d.stats.Progress = progress
 	d.mu.Unlock()
-	
+
 	// Forward to Rich dashboard
 	if d.richModel != nil {
 		d.richModel.SetProgress(progress)
@@ -683,10 +683,10 @@ func (d *Dashboard) updateRichDisplay() {
 			if d.isRunning && d.richModel != nil {
 				// Update the model with current dashboard stats
 				d.richModel.UpdateStats(d.stats)
-				
+
 				// Clear screen and move cursor to top
 				fmt.Fprint(d.output, "\033[2J\033[H")
-				
+
 				// Render the Rich dashboard view
 				dashboardOutput := d.richModel.View()
 				fmt.Fprint(d.output, dashboardOutput)
@@ -700,25 +700,25 @@ func (d *Dashboard) updateRichDisplay() {
 func (d *Dashboard) generateActivityLogs() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	// Only generate logs if we don't have many recent ones
 	if len(d.stats.RecentLogs) > 20 {
 		return
 	}
-	
+
 	// Generate log entries based on current system activity
-	
+
 	// Stream-related logs
 	for _, stream := range d.stats.StreamsActive {
 		if len(d.stats.RecentLogs) >= 25 {
 			break
 		}
-		
+
 		// Skip if stream ID is empty (safety check)
 		if stream.ID == "" {
 			continue
 		}
-		
+
 		// Connection events
 		if !stream.LastHeartbeat.IsZero() && time.Since(stream.LastHeartbeat) < time.Minute {
 			streamIDShort := stream.ID
@@ -727,7 +727,7 @@ func (d *Dashboard) generateActivityLogs() {
 			}
 			d.addLog("info", "ingestion", fmt.Sprintf("Stream %s heartbeat received", streamIDShort))
 		}
-		
+
 		// Frame processing events
 		if stream.Stats.FrameBufferStats.FramesAssembled > 0 && stream.VideoCodec != "" {
 			sourceAddr := stream.SourceAddr
@@ -736,7 +736,7 @@ func (d *Dashboard) generateActivityLogs() {
 			}
 			d.addLog("debug", "codec", fmt.Sprintf("%s frame assembled from %s", stream.VideoCodec, sourceAddr))
 		}
-		
+
 		// Buffer status events
 		if stream.Stats.FrameBufferStats.Capacity > 0 {
 			bufferUsage := float64(stream.Stats.FrameBufferStats.Used) / float64(stream.Stats.FrameBufferStats.Capacity) * 100
@@ -748,7 +748,7 @@ func (d *Dashboard) generateActivityLogs() {
 				d.addLog("warning", "buffer", fmt.Sprintf("High buffer usage %.1f%% on stream %s", bufferUsage, streamIDShort))
 			}
 		}
-		
+
 		// Quality events
 		if stream.Stats.PacketsReceived > 0 {
 			lossRate := float64(stream.Stats.PacketsLost) / float64(stream.Stats.PacketsReceived) * 100
@@ -757,17 +757,17 @@ func (d *Dashboard) generateActivityLogs() {
 			}
 		}
 	}
-	
+
 	// System-level logs
 	if d.stats.MemoryPercent > 85 {
 		d.addLog("warning", "system", fmt.Sprintf("High memory usage: %.1f%%", d.stats.MemoryPercent))
 	}
-	
+
 	// Processing logs
 	if d.stats.FramesProcessed > 0 {
 		d.addLog("info", "processing", fmt.Sprintf("Total frames processed: %d", d.stats.FramesProcessed))
 	}
-	
+
 	// Keep only the most recent 25 log entries
 	if len(d.stats.RecentLogs) > 25 {
 		d.stats.RecentLogs = d.stats.RecentLogs[len(d.stats.RecentLogs)-25:]
@@ -783,7 +783,7 @@ func (d *Dashboard) addLog(level, component, message string) {
 		Component: component,
 	}
 	d.stats.RecentLogs = append(d.stats.RecentLogs, entry)
-	
+
 	// Track error/warning counts
 	if level == "error" {
 		d.stats.ErrorCount++
