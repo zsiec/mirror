@@ -29,7 +29,7 @@
 
 ## 🎯 Overview
 
-Mirror is a cutting-edge video streaming platform designed to handle the demands of modern video delivery at scale. Built from the ground up with performance and reliability in mind, Mirror leverages the latest technologies including **HTTP/3 (QUIC)**, **hardware-accelerated transcoding**, and **intelligent stream management** to deliver exceptional video experiences.
+Mirror is a video streaming platform designed with live broadcast in mind. Built from the ground up with performance and reliability in mind, Mirror leverages the latest technologies including **HTTP/3 (QUIC)**, **hardware-accelerated transcoding**, and **intelligent stream management** to deliver exceptional video experiences.
 
 ### Key Capabilities
 
