@@ -173,6 +173,11 @@ func (s *Server) setupRoutes() {
 		s.setupDebugEndpoints()
 	}
 
+	// Register any additional routes
+	for _, registerFunc := range s.additionalRoutes {
+		registerFunc(s.router)
+	}
+
 	// 404 handler
 	s.router.NotFoundHandler = http.HandlerFunc(s.errorHandler.HandleNotFound)
 	s.router.MethodNotAllowedHandler = http.HandlerFunc(s.errorHandler.HandleMethodNotAllowed)
