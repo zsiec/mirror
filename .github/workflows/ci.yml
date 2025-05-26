@@ -85,15 +85,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Cache SRT installation
-        id: cache-srt
-        uses: actions/cache@v4
-        with:
-          path: /usr/local
-          key: srt-${{ env.SRT_VERSION }}-ubuntu-latest
-
       - name: Install SRT and FFmpeg dependencies
-        if: steps.cache-srt.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -174,15 +166,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Cache SRT installation (build)
-        id: cache-srt-build
-        uses: actions/cache@v4
-        with:
-          path: /usr/local
-          key: srt-${{ env.SRT_VERSION }}-ubuntu-latest
-
       - name: Install SRT and FFmpeg dependencies for build
-        if: steps.cache-srt-build.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
