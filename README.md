@@ -7,9 +7,9 @@
   
   [![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?style=for-the-badge&logo=go)](https://go.dev/)
   [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
-  [![Build Status](https://img.shields.io/github/actions/workflow/status/yourusername/mirror/ci.yml?branch=main&style=for-the-badge)](https://github.com/yourusername/mirror/actions)
-  [![Coverage](https://img.shields.io/badge/Coverage-85%25-brightgreen?style=for-the-badge)](https://github.com/yourusername/mirror)
-  [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/r/yourusername/mirror)
+  [![Build Status](https://img.shields.io/github/actions/workflow/status/zsiec/mirror/ci.yml?branch=main&style=for-the-badge)](https://github.com/zsiec/mirror/actions)
+  [![Coverage](https://img.shields.io/badge/Coverage-85%25-brightgreen?style=for-the-badge)](https://github.com/zsiec/mirror)
+  [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/r/zsiec/mirror)
   
   <p align="center">
     <a href="#-features">Features</a> •
