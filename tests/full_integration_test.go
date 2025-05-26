@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -73,7 +74,7 @@ func TestFullIntegrationTest(t *testing.T) {
 
 	// Set up simulated log entries for dashboard
 	logCapturer := NewLogCapturer(dashboard)
-	go logCapturer.StartSimulated() // Use simulated logs for dashboard
+	go logCapturer.Start() // Capture real server stdout logs for dashboard
 	defer logCapturer.Stop()
 
 	// Keep output suppressed throughout the test - dashboard is our only interface
@@ -959,18 +960,26 @@ type LogCapturer struct {
 	writer         *os.File
 	done           chan struct{}
 	logPattern     *regexp.Regexp
+	lastLogTime    time.Time
+	logCount       int
+	rateLimitMap   map[string]time.Time // For sampling similar logs
+	mu             sync.Mutex           // Protect rate limiting state
 }
 
 // NewLogCapturer creates a new log capturer
 func NewLogCapturer(dashboard *Dashboard) *LogCapturer {
-	// Pattern to match log lines with level and component
-	// Example: level=info component=server msg="Server starting..."
-	logPattern := regexp.MustCompile(`level=([a-z]+)\s+.*?component=([a-zA-Z_]+)\s+.*?msg="([^"]+)"`)
+	// Pattern to match Mirror server log lines (logrus format)
+	// Examples: 
+	// time="..." level=info msg="Server starting..." stream_id=test
+	// time="..." level=error msg="Failed to connect" component=srt
+	logPattern := regexp.MustCompile(`level=([a-z]+).*?msg="([^"]+)"`)
 
 	return &LogCapturer{
-		dashboard:  dashboard,
-		done:       make(chan struct{}),
-		logPattern: logPattern,
+		dashboard:    dashboard,
+		done:         make(chan struct{}),
+		logPattern:   logPattern,
+		rateLimitMap: make(map[string]time.Time),
+		lastLogTime:  time.Now(),
 	}
 }
 
@@ -1009,61 +1018,10 @@ func (lc *LogCapturer) StartSimulated() {
 	lc.simulateRealisticLogs()
 }
 
-// simulateRealisticLogs creates realistic log entries based on test phases
+// simulateRealisticLogs - DISABLED: Now using real server stdout capture
 func (lc *LogCapturer) simulateRealisticLogs() {
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		lc.dashboard.AddLogEntry("info", "server", "HTTP/3 server starting on port 8443")
-
-		time.Sleep(800 * time.Millisecond)
-		lc.dashboard.AddLogEntry("info", "ingestion", "SRT listener started on port 30000")
-
-		time.Sleep(300 * time.Millisecond)
-		lc.dashboard.AddLogEntry("info", "ingestion", "RTP listener started on port 5004")
-
-		time.Sleep(1200 * time.Millisecond)
-		lc.dashboard.AddLogEntry("info", "health", "Health checks initialized")
-
-		time.Sleep(2000 * time.Millisecond)
-		lc.dashboard.AddLogEntry("info", "rtp", "New RTP session created")
-
-		time.Sleep(1500 * time.Millisecond)
-		lc.dashboard.AddLogEntry("info", "srt", "FFmpeg SRT connection established")
-
-		time.Sleep(500 * time.Millisecond)
-		lc.dashboard.AddLogEntry("info", "codec", "H.264 codec detected")
-
-		time.Sleep(1000 * time.Millisecond)
-		lc.dashboard.AddLogEntry("info", "streams", "Stream processing started")
-
-		// Continue with periodic updates
-		ticker := time.NewTicker(3 * time.Second)
-		defer ticker.Stop()
-
-		messages := []struct {
-			level     string
-			component string
-			message   string
-		}{
-			{"info", "rtp", "NAL units processed successfully"},
-			{"info", "srt", "SRT data received and processed"},
-			{"info", "api", "API requests handled"},
-			{"debug", "sync", "A/V synchronization active"},
-			{"info", "metrics", "Performance metrics updated"},
-		}
-
-		msgIndex := 0
-		for {
-			select {
-			case <-lc.done:
-				return
-			case <-ticker.C:
-				msg := messages[msgIndex%len(messages)]
-				lc.dashboard.AddLogEntry(msg.level, msg.component, msg.message)
-				msgIndex++
-			}
-		}
-	}()
+	// Real logs are now captured from server stdout via readLogs()
+	// No more synthetic log generation needed
 }
 
 // Stop stops capturing logs and restores stdout
@@ -1085,38 +1043,62 @@ func (lc *LogCapturer) Stop() {
 	}
 }
 
-// readLogs reads log lines from the pipe and feeds them to the dashboard
+// readLogs reads log lines from the pipe and feeds them to the dashboard in real-time
 func (lc *LogCapturer) readLogs() {
 	scanner := bufio.NewScanner(lc.reader)
+	
+	// Use a channel for immediate streaming
+	lineChan := make(chan string, 100) // Buffer for burst logs
+	
+	// Goroutine to continuously read from scanner
+	go func() {
+		defer close(lineChan)
+		for scanner.Scan() {
+			select {
+			case lineChan <- scanner.Text():
+			case <-lc.done:
+				return
+			}
+		}
+	}()
 
+	// Process lines immediately as they arrive
 	for {
 		select {
 		case <-lc.done:
 			return
-		default:
-			if scanner.Scan() {
-				line := scanner.Text()
-
-				// COMPLETELY SUPPRESS all log output - only feed to dashboard
-				// NO echoing back to stdout whatsoever
-				lc.parseLogs(line)
-			} else {
-				// If no data available, yield to avoid busy waiting
-				time.Sleep(1 * time.Millisecond)
+		case line, ok := <-lineChan:
+			if !ok {
+				return // Channel closed
 			}
+			// REAL-TIME: Process immediately with no delays
+			lc.parseLogs(line)
 		}
 	}
 }
 
 // parseLogs parses log lines and extracts relevant information for the dashboard
 func (lc *LogCapturer) parseLogs(line string) {
-	// Try to parse structured logs
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	
+	// Apply intelligent sampling to prevent overwhelming the display
+	if !lc.shouldProcessLog(line) {
+		return
+	}
+	
+	lc.logCount++
+	lc.lastLogTime = time.Now()
+	
+	// Try to parse structured logs from Mirror server
 	matches := lc.logPattern.FindStringSubmatch(line)
-	if len(matches) >= 4 {
+	if len(matches) >= 3 {
 		level := matches[1]
-		component := matches[2]
-		message := matches[3]
-
+		message := matches[2]
+		
+		// Extract component from the message or fields
+		component := lc.extractComponent(line, message)
+		
 		lc.dashboard.AddLogEntry(level, component, message)
 		return
 	}
@@ -1138,6 +1120,118 @@ func (lc *LogCapturer) parseLogs(line string) {
 		// Only add non-empty lines
 		lc.dashboard.AddLogEntry("info", "system", lc.truncateMessage(line))
 	}
+}
+
+// extractComponent tries to determine the component from log context
+func (lc *LogCapturer) extractComponent(line, message string) string {
+	// Look for common component indicators in the log line
+	if strings.Contains(line, `stream_id=`) {
+		return "ingestion"
+	}
+	if strings.Contains(line, `component=`) {
+		// Extract component field
+		re := regexp.MustCompile(`component=([a-zA-Z_]+)`)
+		if matches := re.FindStringSubmatch(line); len(matches) > 1 {
+			return matches[1]
+		}
+	}
+	
+	// Infer from message content
+	msgLower := strings.ToLower(message)
+	if strings.Contains(msgLower, "srt") {
+		return "srt"
+	}
+	if strings.Contains(msgLower, "rtp") {
+		return "rtp"
+	}
+	if strings.Contains(msgLower, "server") || strings.Contains(msgLower, "http") {
+		return "server"
+	}
+	if strings.Contains(msgLower, "frame") || strings.Contains(msgLower, "codec") {
+		return "codec"
+	}
+	if strings.Contains(msgLower, "sync") {
+		return "sync"
+	}
+	if strings.Contains(msgLower, "buffer") {
+		return "buffer"
+	}
+	if strings.Contains(msgLower, "memory") || strings.Contains(msgLower, "goroutine") {
+		return "memory"
+	}
+	if strings.Contains(msgLower, "health") {
+		return "health"
+	}
+	if strings.Contains(msgLower, "metric") {
+		return "metrics"
+	}
+	
+	return "system"
+}
+
+// shouldProcessLog implements intelligent sampling to prevent log spam
+func (lc *LogCapturer) shouldProcessLog(line string) bool {
+	now := time.Now()
+	
+	// Always show important logs (errors, critical info)
+	if strings.Contains(line, "level=error") || 
+	   strings.Contains(line, "level=fatal") ||
+	   strings.Contains(line, "level=panic") {
+		return true
+	}
+	
+	// Always show stream connection/disconnection events
+	if strings.Contains(line, "connected") || 
+	   strings.Contains(line, "disconnected") ||
+	   strings.Contains(line, "stream") {
+		return true
+	}
+	
+	// Create a fingerprint for similar log messages
+	fingerprint := lc.createLogFingerprint(line)
+	
+	// Rate limit similar logs to once every 500ms (less aggressive)
+	if lastSeen, exists := lc.rateLimitMap[fingerprint]; exists {
+		if now.Sub(lastSeen) < 500*time.Millisecond {
+			return false // Skip this log, too recent
+		}
+	}
+	
+	// Update last seen time for this fingerprint
+	lc.rateLimitMap[fingerprint] = now
+	
+	// Clean up old entries to prevent memory leak
+	if len(lc.rateLimitMap) > 100 {
+		cutoff := now.Add(-5 * time.Minute)
+		for key, timestamp := range lc.rateLimitMap {
+			if timestamp.Before(cutoff) {
+				delete(lc.rateLimitMap, key)
+			}
+		}
+	}
+	
+	// Apply global rate limiting - max 5 logs per second (less aggressive)
+	if lc.logCount > 0 && now.Sub(lc.lastLogTime) < 200*time.Millisecond {
+		return false
+	}
+	
+	return true
+}
+
+// createLogFingerprint creates a signature for similar log messages
+func (lc *LogCapturer) createLogFingerprint(line string) string {
+	// Remove timestamps and variable data to group similar messages
+	line = regexp.MustCompile(`time="[^"]*"`).ReplaceAllString(line, "")
+	line = regexp.MustCompile(`\d+\.\d+\.\d+\.\d+`).ReplaceAllString(line, "IP") // Replace IPs
+	line = regexp.MustCompile(`\d{4,}`).ReplaceAllString(line, "NUM")           // Replace large numbers
+	line = regexp.MustCompile(`[0-9a-f]{8,}`).ReplaceAllString(line, "ID")      // Replace IDs/hashes
+	
+	// Take first 50 chars as fingerprint
+	if len(line) > 50 {
+		line = line[:50]
+	}
+	
+	return line
 }
 
 // truncateMessage truncates long messages for dashboard display

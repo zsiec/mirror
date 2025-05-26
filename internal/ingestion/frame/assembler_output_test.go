@@ -279,11 +279,11 @@ func TestFrameAssemblerContextCancellation(t *testing.T) {
 	assembler := NewAssembler("test-stream", types.CodecH264, 1)
 	require.NotNil(t, assembler)
 	
-	assembler.SetFrameTimeout(500 * time.Millisecond) // Long timeout
+	assembler.SetFrameTimeout(1 * time.Second) // Long timeout
 	err := assembler.Start()
 	require.NoError(t, err)
 
-	// Fill the buffer
+	// Add one packet first
 	pkt := types.TimestampedPacket{
 		Data:        []byte{0x00, 0x00, 0x00, 0x01, 0x65}, // IDR
 		PTS:         1000,
@@ -294,25 +294,16 @@ func TestFrameAssemblerContextCancellation(t *testing.T) {
 	err = assembler.AddPacket(pkt)
 	require.NoError(t, err)
 
-	// Start a goroutine to stop the assembler after a short delay
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		assembler.Stop()
-	}()
-
-	// Try to add another frame - should be cancelled when context is cancelled
-	start := time.Now()
+	// Stop the assembler
+	err = assembler.Stop()
+	assert.NoError(t, err)
+	
+	// Now try to add another packet - should return context canceled
 	pkt.PTS = 2000
 	pkt.DTS = 2000
 	err = assembler.AddPacket(pkt)
-	elapsed := time.Since(start)
-
-	// Should complete quickly due to context cancellation, not timeout
-	assert.Less(t, elapsed, 200*time.Millisecond)
-	
-	if err != nil {
-		assert.Contains(t, []error{context.Canceled, ErrOutputBlocked}, err)
-	}
+	assert.Error(t, err)
+	assert.Equal(t, context.Canceled, err)
 
 	stats := assembler.GetStats()
 	t.Logf("Final stats: Assembled=%d, Dropped=%d", stats.FramesAssembled, stats.FramesDropped)

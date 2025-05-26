@@ -168,13 +168,16 @@ func NewDashboard(env *TestEnvironment, ffmpegMode bool, output *os.File) *Dashb
 		stats: DashboardStats{
 			ServerStatus: "Starting",
 			TestPhase:    "Initialization",
-			RecentLogs:   make([]LogEntry, 0, 10), // Keep last 10 log entries
+			RecentLogs:   make([]LogEntry, 0, 50), // Keep last 50 log entries
 		},
 	}
 
-	// Initialize Rich dashboard (without alt screen so output stays visible)
+	// Initialize Rich dashboard with stable terminal settings
 	d.richModel = ui.NewRichDashboardModel(d, ffmpegMode)
-	d.richProg = tea.NewProgram(d.richModel)
+	d.richProg = tea.NewProgram(d.richModel,
+		tea.WithAltScreen(),       // Use alternate screen to prevent scrolling
+		tea.WithMouseCellMotion(), // Enable mouse support
+	)
 
 	return d
 }
@@ -196,9 +199,9 @@ func (d *Dashboard) AddLogEntry(level, component, message string) {
 		Component: component,
 	}
 
-	// Add to recent logs (keep last 10)
+	// Add to recent logs (keep last 50)
 	d.stats.RecentLogs = append(d.stats.RecentLogs, entry)
-	if len(d.stats.RecentLogs) > 10 {
+	if len(d.stats.RecentLogs) > 50 {
 		d.stats.RecentLogs = d.stats.RecentLogs[1:]
 	}
 
@@ -217,7 +220,7 @@ func (d *Dashboard) Start() {
 	d.stats = DashboardStats{
 		ServerStatus: "Starting",
 		TestPhase:    "Initialization",
-		RecentLogs:   make([]LogEntry, 0, 10),
+		RecentLogs:   make([]LogEntry, 0, 50),
 	}
 	d.startTime = time.Now()
 	d.mu.Unlock()
@@ -629,7 +632,7 @@ func (d *Dashboard) Stop() {
 	d.stats = DashboardStats{
 		ServerStatus: "Stopped",
 		TestPhase:    "Cleanup",
-		RecentLogs:   make([]LogEntry, 0, 10),
+		RecentLogs:   make([]LogEntry, 0, 50),
 	}
 	d.mu.Unlock()
 
@@ -671,7 +674,7 @@ func (d *Dashboard) SetProgress(progress int) {
 
 // updateRichDisplay continuously updates the Rich dashboard display
 func (d *Dashboard) updateRichDisplay() {
-	ticker := time.NewTicker(250 * time.Millisecond)
+	ticker := time.NewTicker(250 * time.Millisecond) // Balanced update rate for stability
 	defer ticker.Stop()
 
 	for {
@@ -710,7 +713,7 @@ func (d *Dashboard) generateActivityLogs() {
 
 	// Stream-related logs
 	for _, stream := range d.stats.StreamsActive {
-		if len(d.stats.RecentLogs) >= 25 {
+		if len(d.stats.RecentLogs) >= 50 {
 			break
 		}
 
@@ -768,9 +771,9 @@ func (d *Dashboard) generateActivityLogs() {
 		d.addLog("info", "processing", fmt.Sprintf("Total frames processed: %d", d.stats.FramesProcessed))
 	}
 
-	// Keep only the most recent 25 log entries
-	if len(d.stats.RecentLogs) > 25 {
-		d.stats.RecentLogs = d.stats.RecentLogs[len(d.stats.RecentLogs)-25:]
+	// Keep only the most recent 50 log entries
+	if len(d.stats.RecentLogs) > 50 {
+		d.stats.RecentLogs = d.stats.RecentLogs[len(d.stats.RecentLogs)-50:]
 	}
 }
 

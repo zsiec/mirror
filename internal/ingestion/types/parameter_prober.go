@@ -84,12 +84,12 @@ func (p *ParameterSetProber) AddFrame(frame *VideoFrame) {
 		}
 	}
 
-	// Opportunistically extract parameter sets
-	p.opportunisticExtraction(frame)
+	// Opportunistically extract parameter sets (already holding lock)
+	p.opportunisticExtractionLocked(frame)
 }
 
-// opportunisticExtraction extracts parameter sets when they appear
-func (p *ParameterSetProber) opportunisticExtraction(frame *VideoFrame) {
+// opportunisticExtractionLocked extracts parameter sets when they appear (caller must hold lock)
+func (p *ParameterSetProber) opportunisticExtractionLocked(frame *VideoFrame) {
 	for _, nalUnit := range frame.NALUnits {
 		if len(nalUnit.Data) == 0 {
 			continue
@@ -151,8 +151,8 @@ func (p *ParameterSetProber) opportunisticExtraction(frame *VideoFrame) {
 // ProbeForParameterSets attempts to find missing parameter sets
 func (p *ParameterSetProber) ProbeForParameterSets(request *ProbeRequest) *ProbeResult {
 	startTime := time.Now()
-	p.mu.RLock()
-	defer p.mu.RUnlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	p.probeAttempts++
 

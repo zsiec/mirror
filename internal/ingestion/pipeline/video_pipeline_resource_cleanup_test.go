@@ -81,7 +81,9 @@ func TestVideoPipelineShutdownTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	// Fill input with many packets rapidly
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		for i := 0; i < 50; i++ {
 			packet := createH264Packet(uint64(i*3000), types.PacketTypeVideo)
 			select {
@@ -100,6 +102,8 @@ func TestVideoPipelineShutdownTimeout(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Less(t, duration, 6*time.Second, "Stop should complete within timeout period")
 
+	// Wait for the sending goroutine to finish before closing the channel
+	<-done
 	close(input)
 }
 

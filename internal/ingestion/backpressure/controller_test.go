@@ -481,7 +481,7 @@ func TestController_RaceConditionFixed(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < numOperations; j++ {
 				// This should not race with UpdatePressure after the fix
-				smoothed := controller.getSmoothedPressureUnsafe()
+				smoothed := controller.GetSmoothedPressure()
 				
 				// Validate the result is reasonable
 				if smoothed < 0.0 || smoothed > 1.0 {
@@ -552,13 +552,11 @@ func TestController_PressureHistoryConsistency(t *testing.T) {
 				assert.GreaterOrEqual(t, smoothed, 0.0)
 				assert.LessOrEqual(t, smoothed, 1.0)
 				
-				// Also test the unsafe version indirectly through adjustRate
+				// Also test current pressure
 				current := controller.GetPressure()
-				smoothedUnsafe := controller.getSmoothedPressureUnsafe()
 				
-				// Both should be valid values
+				// Should be valid values
 				assert.GreaterOrEqual(t, current, 0.0)
-				assert.GreaterOrEqual(t, smoothedUnsafe, 0.0)
 				
 				time.Sleep(time.Microsecond)
 			}

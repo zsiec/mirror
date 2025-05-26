@@ -100,18 +100,30 @@ func (a *Assembler) Stop() error {
 		close(a.output)
 	})
 
-	a.logger.WithFields(map[string]interface{}{
+	// Get stats with proper locking
+	a.mu.Lock()
+	stats := map[string]interface{}{
 		"frames_assembled": a.framesAssembled,
 		"frames_dropped":   a.framesDropped,
 		"packets_received": a.packetsReceived,
 		"packets_dropped":  a.packetsDropped,
-	}).Info("Frame assembler stopped")
+	}
+	a.mu.Unlock()
+	
+	a.logger.WithFields(stats).Info("Frame assembler stopped")
 
 	return nil
 }
 
 // AddPacket adds a packet to the assembler
 func (a *Assembler) AddPacket(pkt types.TimestampedPacket) error {
+	// Check if context is cancelled first (before acquiring lock)
+	select {
+	case <-a.ctx.Done():
+		return a.ctx.Err()
+	default:
+	}
+	
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
