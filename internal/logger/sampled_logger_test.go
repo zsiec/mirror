@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 // MockLogger for testing
 type MockLogger struct {
+	mu    sync.RWMutex
 	calls []MockLogCall
 }
 
@@ -38,50 +40,76 @@ func (m *MockLogger) WithError(err error) Logger {
 }
 
 func (m *MockLogger) Debug(args ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, MockLogCall{Level: logrus.DebugLevel, Args: args})
 }
 
 func (m *MockLogger) Info(args ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, MockLogCall{Level: logrus.InfoLevel, Args: args})
 }
 
 func (m *MockLogger) Warn(args ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, MockLogCall{Level: logrus.WarnLevel, Args: args})
 }
 
 func (m *MockLogger) Error(args ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, MockLogCall{Level: logrus.ErrorLevel, Args: args})
 }
 
 func (m *MockLogger) Log(level logrus.Level, args ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, MockLogCall{Level: level, Args: args})
 }
 
 func (m *MockLogger) Debugf(format string, args ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, MockLogCall{Level: logrus.DebugLevel, Args: args, Format: format})
 }
 
 func (m *MockLogger) Infof(format string, args ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, MockLogCall{Level: logrus.InfoLevel, Args: args, Format: format})
 }
 
 func (m *MockLogger) Warnf(format string, args ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, MockLogCall{Level: logrus.WarnLevel, Args: args, Format: format})
 }
 
 func (m *MockLogger) Errorf(format string, args ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, MockLogCall{Level: logrus.ErrorLevel, Args: args, Format: format})
 }
 
 func (m *MockLogger) Fatal(args ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, MockLogCall{Level: logrus.FatalLevel, Args: args})
 }
 
 func (m *MockLogger) GetCalls() []MockLogCall {
-	return m.calls
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	callsCopy := make([]MockLogCall, len(m.calls))
+	copy(callsCopy, m.calls)
+	return callsCopy
 }
 
 func (m *MockLogger) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = make([]MockLogCall, 0)
 }
 
