@@ -58,8 +58,8 @@ Mirror is a video streaming platform designed for live broadcast usecases. Built
 ### 📦 **Modern Distribution**
 - **Low-Latency HLS (LL-HLS)**: Sub-2 second glass-to-glass latency
 - **HTTP/3 delivery**: QUIC protocol for improved performance
+- **HTTP 1/2 fallback**: HTTP 1/2 fallback for easy debugging
 - **CDN-ready**: Seamless integration with CloudFront, Fastly, etc.
-- **Multi-viewer support**: Up to 6 concurrent streams per viewer
 
 ### 🛡️ **Enterprise Ready**
 - **High availability**: Redis-backed session management
