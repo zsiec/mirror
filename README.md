@@ -629,7 +629,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- [[Haivision/srtgo](https://github.com/Haivision/srtgo) - SRT protocol implementation
+- [Haivision/srtgo](https://github.com/Haivision/srtgo) - SRT protocol implementation
 - [pion/rtp](https://github.com/pion/rtp) - RTP protocol support
 - [quic-go/quic-go](https://github.com/quic-go/quic-go) - HTTP/3 implementation
 - [go-astiav](https://github.com/asticode/go-astiav) - FFmpeg bindings
