@@ -59,10 +59,7 @@ func (g *GOP) AddFrame(frame *VideoFrame) {
 	frame.GOPId = g.ID
 	frame.GOPPosition = len(g.Frames) - 1
 
-	// Update statistics
 	g.TotalSize += int64(frame.TotalSize)
-
-	// Update timing
 	if len(g.Frames) == 1 {
 		g.StartPTS = frame.PTS
 		g.StartTime = frame.CaptureTime
@@ -74,7 +71,6 @@ func (g *GOP) AddFrame(frame *VideoFrame) {
 	g.EndPTS = frame.PTS
 	g.EndTime = frame.CompleteTime
 
-	// Count frame types
 	switch frame.Type {
 	case FrameTypeP:
 		g.PFrameCount++
@@ -82,7 +78,6 @@ func (g *GOP) AddFrame(frame *VideoFrame) {
 		g.BFrameCount++
 	}
 
-	// Check for corruption
 	if frame.IsCorrupted() {
 		g.CorruptedFrames++
 	}
@@ -94,10 +89,8 @@ func (g *GOP) CalculateStats() {
 		return
 	}
 
-	// Calculate average frame size
 	g.AvgFrameSize = g.TotalSize / int64(len(g.Frames))
 
-	// Calculate duration including the last frame's duration
 	g.Duration = g.EndPTS - g.StartPTS
 	if len(g.Frames) > 0 {
 		lastFrame := g.Frames[len(g.Frames)-1]
@@ -106,14 +99,11 @@ func (g *GOP) CalculateStats() {
 		}
 	}
 
-	// Calculate bitrate
 	if g.Duration > 0 {
-		// Convert to bits per second (assuming 90kHz clock)
 		durationSeconds := float64(g.Duration) / 90000.0
 		g.BitRate = int64(float64(g.TotalSize*8) / durationSeconds)
 	}
 
-	// Calculate average QP
 	totalQP := 0
 	qpCount := 0
 	for _, frame := range g.Frames {
@@ -126,7 +116,6 @@ func (g *GOP) CalculateStats() {
 		g.AvgQP = float64(totalQP) / float64(qpCount)
 	}
 
-	// Update structure
 	g.Structure.Size = len(g.Frames)
 	g.Structure.Pattern = g.generatePattern()
 }
@@ -140,8 +129,9 @@ func (g *GOP) generatePattern() string {
 	return pattern
 }
 
-// IsComplete checks if GOP is complete
+// IsComplete checks if GOP is complete using sophisticated validation
 func (g *GOP) IsComplete() bool {
+	// Must be explicitly marked as complete
 	if !g.Complete {
 		return false
 	}
@@ -172,7 +162,6 @@ func (g *GOP) CanDrop() bool {
 	}
 
 	// Check if any frame is referenced by frames outside this GOP
-	// This would indicate an open GOP that shouldn't be dropped
 	if g.Structure.OpenGOP {
 		return false
 	}
@@ -218,6 +207,43 @@ func (g *GOP) HasCompleteReferences() bool {
 
 	g.Closed = true
 	return true
+}
+
+// CanDropFrame returns true if a frame at given position can be dropped
+func (g *GOP) CanDropFrame(position int) bool {
+	if position < 0 || position >= len(g.Frames) {
+		return false
+	}
+
+	frame := g.Frames[position]
+
+	// Never drop keyframes
+	if frame.IsKeyframe() {
+		return false
+	}
+
+	// B frames can always be dropped
+	if frame.Type == FrameTypeB {
+		return true
+	}
+
+	// P frames can be dropped if no B frames depend on them
+	if frame.Type == FrameTypeP {
+		// Check if any B frames after this P frame might depend on it
+		for i := position + 1; i < len(g.Frames); i++ {
+			if g.Frames[i].Type == FrameTypeB {
+				// Conservative: assume B frame depends on previous P frame
+				return false
+			}
+			if g.Frames[i].Type == FrameTypeP || g.Frames[i].IsKeyframe() {
+				// Reached next reference frame, safe to drop
+				break
+			}
+		}
+		return true
+	}
+
+	return false
 }
 
 // UpdateDuration recalculates the GOP duration based on remaining frames

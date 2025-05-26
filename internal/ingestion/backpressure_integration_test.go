@@ -140,7 +140,8 @@ func TestBackpressure_DirectBufferPressure(t *testing.T) {
 
 	// Create StreamHandler using the mock connection directly
 	// The handler will detect it's not a known adapter type and use basic handling
-	handler := NewStreamHandler(context.Background(), streamID, mockConn, queue, memCtrl, logrus.New())
+	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+	handler := NewStreamHandler(context.Background(), streamID, mockConn, queue, memCtrl, testLogger)
 
 	// Test applying backpressure
 	initialBW := mockConn.GetMaxBW()
@@ -194,7 +195,8 @@ func TestBackpressure_QueuePressure(t *testing.T) {
 	// Create RTP adapter to wrap the connection
 	// Note: RTP adapter expects an rtp.Session, but we have a mock
 	// For testing, we'll use the mock directly as it implements StreamConnection
-	handler := NewStreamHandler(context.Background(), streamID, rtpConn, queue, mgr.memoryController, mgr.logger)
+	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+	handler := NewStreamHandler(context.Background(), streamID, rtpConn, queue, mgr.memoryController, testLogger)
 
 	// Simulate high pressure and verify RTCP is sent
 	handler.applyBackpressure()
@@ -279,6 +281,7 @@ func createTestManager(cfg *config.IngestionConfig) (*Manager, error) {
 	// Create logger
 	log := logrus.New()
 	log.SetLevel(logrus.DebugLevel)
+	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(log))
 
 	// Create memory controller with realistic memory for testing
 	// For 10Mbps streams with 30s buffer: 10*30/8 = 37.5MB per stream
@@ -295,7 +298,7 @@ func createTestManager(cfg *config.IngestionConfig) (*Manager, error) {
 		registry:         reg,
 		memoryController: memController,
 		streamHandlers:   make(map[string]*StreamHandler),
-		logger:           logger.Logger(log),
+		logger:           testLogger,
 		started:          true,
 	}, nil
 }

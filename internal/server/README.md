@@ -781,6 +781,116 @@ func (s *Server) handleHLSSegment(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+## HTTP/1.1 and HTTP/2 Fallback Support
+
+The server supports running HTTP/1.1 and HTTP/2 alongside HTTP/3 for debugging and compatibility:
+
+### Configuration
+
+```yaml
+server:
+  # HTTP/3 (QUIC) - Primary protocol
+  http3_port: 8443              # UDP port
+  
+  # HTTP/1.1 and HTTP/2 - Fallback for debugging
+  http_port: 8443               # TCP port (same number, different protocol)
+  enable_http: true             # Enable fallback server
+  enable_http2: true            # Support HTTP/2 over TLS
+  debug_endpoints: true         # Enable /debug/pprof/* endpoints
+```
+
+### How It Works
+
+The server can listen on the same port number for both HTTP/3 and HTTP/1.1/2 because they use different transport protocols:
+- **HTTP/3**: Uses UDP (QUIC protocol)
+- **HTTP/1.1/2**: Uses TCP (traditional protocols)
+
+Clients automatically choose the appropriate protocol:
+```bash
+# Modern browsers and clients that support HTTP/3
+curl --http3 https://localhost:8443/health
+
+# Clients that only support HTTP/2
+curl --http2 https://localhost:8443/health
+
+# Legacy clients or debugging tools
+curl --http1.1 https://localhost:8443/health
+```
+
+### Debug Endpoints
+
+When `debug_endpoints: true`, the following endpoints are available:
+
+```bash
+# pprof profiling endpoints
+/debug/pprof/              # Index of available profiles
+/debug/pprof/profile       # CPU profile
+/debug/pprof/heap          # Heap memory profile
+/debug/pprof/goroutine     # Goroutine stack traces
+/debug/pprof/allocs        # Memory allocations
+/debug/pprof/block         # Blocking profile
+/debug/pprof/mutex         # Mutex contention
+/debug/pprof/trace         # Execution trace
+
+# Server info endpoint
+/debug/info                # Protocol and port information
+```
+
+### Usage Examples
+
+```bash
+# Test protocol negotiation
+./scripts/test-protocols.sh
+
+# CPU profiling
+go tool pprof -http=:8081 https://localhost:8443/debug/pprof/profile?seconds=30
+
+# Memory profiling
+go tool pprof https://localhost:8443/debug/pprof/heap
+
+# Live goroutine inspection
+curl -s https://localhost:8443/debug/pprof/goroutine?debug=2 | less
+
+# Server protocol info
+curl -s https://localhost:8443/debug/info | jq .
+```
+
+### Security Considerations
+
+1. **Production Deployment**: Disable HTTP/1.1/2 fallback and debug endpoints:
+   ```yaml
+   server:
+     enable_http: false
+     debug_endpoints: false
+   ```
+
+2. **Access Control**: If debug endpoints must be enabled in production:
+   ```go
+   // Add authentication middleware for debug routes
+   debugRouter := s.router.PathPrefix("/debug").Subrouter()
+   debugRouter.Use(s.debugAuthMiddleware)
+   ```
+
+3. **Network Isolation**: Use firewall rules to restrict access to debug endpoints
+
+### Troubleshooting
+
+1. **Port Already in Use**:
+   - HTTP/3 (UDP) and HTTP/1.1/2 (TCP) can share the same port number
+   - If you get "address already in use", check for conflicting TCP services
+
+2. **Protocol Not Working**:
+   ```bash
+   # Check if both servers are running
+   netstat -an | grep 8443
+   # Should show both udp and tcp listeners
+   ```
+
+3. **Client Compatibility**:
+   - Not all clients support HTTP/3
+   - Use `--http2` or `--http1.1` flags to force specific protocols
+   - Check client capabilities with `curl --version`
+
 ## Related Documentation
 
 - [Main README](../../README.md) - Project overview

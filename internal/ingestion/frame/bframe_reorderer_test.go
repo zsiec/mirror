@@ -16,7 +16,7 @@ import (
 func testLogger() logger.Logger {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel) // Only show errors in tests
-	return log
+	return logger.NewLogrusAdapter(logrus.NewEntry(log))
 }
 
 func TestNewBFrameReorderer(t *testing.T) {

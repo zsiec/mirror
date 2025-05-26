@@ -91,7 +91,7 @@ func (c *Controller) RequestMemory(streamID string, size int64) error {
 			// Try to evict enough memory
 			evicted := c.evictMemory(size)
 			if evicted > 0 {
-				// Retry after eviction
+				// Retry after eviction - global usage was already rolled back at line 69
 				newUsage = c.usage.Add(size)
 				if newUsage <= c.maxMemory {
 					goto checkStreamLimit
@@ -108,7 +108,9 @@ checkStreamLimit:
 	usage := c.getOrCreateStreamUsage(streamID)
 
 	if usage.Add(size) > c.perStreamLimit {
+		// Rollback the stream usage increment
 		usage.Add(-size)
+		// Rollback the global usage increment (global was successfully added when we reached checkStreamLimit)
 		c.usage.Add(-size)
 		return ErrStreamMemoryLimit
 	}
@@ -141,11 +143,23 @@ func (c *Controller) getOrCreateStreamUsage(streamID string) *atomic.Int64 {
 
 // ReleaseMemory releases memory for a stream
 func (c *Controller) ReleaseMemory(streamID string, size int64) {
-	c.usage.Add(-size)
-
+	// Only release memory if the stream exists in our tracking
 	if streamUsage, ok := c.streamUsage.Load(streamID); ok {
 		usage := streamUsage.(*atomic.Int64)
-		usage.Add(-size)
+		// Ensure we don't go negative on stream usage
+		oldUsage := usage.Load()
+		if oldUsage >= size {
+			usage.Add(-size)
+			c.usage.Add(-size)
+		} else {
+			// Release only what was actually allocated for this stream
+			usage.Store(0)
+			c.usage.Add(-oldUsage)
+		}
+	} else {
+		// Stream not found - this is a programming error but handle gracefully
+		// Don't modify global usage if we can't find the stream
+		return
 	}
 
 	c.releaseCount.Add(1)

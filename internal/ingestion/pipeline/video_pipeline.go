@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,9 +36,10 @@ type VideoPipeline struct {
 	errors           atomic.Uint64
 	framesReordered  atomic.Uint64
 
-	logger    logger.Logger
-	wg        sync.WaitGroup
-	closeOnce sync.Once
+	logger        logger.Logger
+	sampledLogger *logger.SampledLogger
+	wg            sync.WaitGroup
+	closeOnce     sync.Once
 }
 
 // Config holds pipeline configuration
@@ -71,7 +73,11 @@ func NewVideoPipeline(ctx context.Context, cfg Config, input <-chan types.Timest
 	ctx, cancel := context.WithCancel(ctx)
 
 	// Create logger
-	log := logger.FromContext(ctx).WithField("stream_id", cfg.StreamID)
+	logEntry := logger.FromContext(ctx).WithField("stream_id", cfg.StreamID)
+	baseLogger := logger.NewLogrusAdapter(logEntry)
+
+	// Create sampled logger for high-frequency video processing events
+	sampledLogger := logger.NewVideoLogger(baseLogger)
 
 	// Create frame assembler
 	assembler := frame.NewAssembler(cfg.StreamID, cfg.Codec, cfg.FrameBufferSize)
@@ -81,11 +87,11 @@ func NewVideoPipeline(ctx context.Context, cfg Config, input <-chan types.Timest
 		assembler.SetFrameTimeout(time.Duration(cfg.FrameAssemblyTimeout) * time.Millisecond)
 	}
 
-	// Create B-frame reorderer
+	// Create B-frame reorderer with sampled logger
 	reorderer := frame.NewBFrameReorderer(
 		cfg.MaxBFrameReorderDepth,
 		time.Duration(cfg.MaxReorderDelay)*time.Millisecond,
-		log,
+		sampledLogger,
 	)
 
 	pipeline := &VideoPipeline{
@@ -97,7 +103,8 @@ func NewVideoPipeline(ctx context.Context, cfg Config, input <-chan types.Timest
 		output:          make(chan *types.VideoFrame, cfg.FrameBufferSize),
 		ctx:             ctx,
 		cancel:          cancel,
-		logger:          log,
+		logger:          baseLogger,
+		sampledLogger:   sampledLogger,
 	}
 
 	return pipeline, nil
@@ -110,11 +117,17 @@ func (p *VideoPipeline) Start() error {
 		return fmt.Errorf("failed to start frame assembler: %w", err)
 	}
 
+	p.logger.WithFields(map[string]interface{}{
+		"input_channel_nil": p.input == nil,
+		"context_done":      p.ctx.Err() != nil,
+	}).Info("Starting pipeline workers")
+
 	// Start pipeline workers
-	p.wg.Add(3)
+	p.wg.Add(4)
 	go p.processPackets()
 	go p.processFrames()
 	go p.processReorderedFrames()
+	go p.drainFramesToDevNull() // Temporary drain until transcoder is implemented
 
 	p.logger.Info("Video pipeline started")
 	return nil
@@ -122,24 +135,41 @@ func (p *VideoPipeline) Start() error {
 
 // Stop stops the pipeline
 func (p *VideoPipeline) Stop() error {
-	// Cancel context to signal all goroutines to stop
+	p.logger.Debug("Stopping video pipeline")
+
 	p.cancel()
+	p.logger.Debug("Context cancelled, waiting for goroutines to finish")
 
-	// Wait for all goroutines to finish
-	p.wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		p.wg.Wait()
+		close(done)
+	}()
 
-	// Stop frame assembler
-	if err := p.frameAssembler.Stop(); err != nil {
-		p.logger.WithError(err).Error("Failed to stop frame assembler")
+	select {
+	case <-done:
+		p.logger.Debug("All goroutines finished gracefully")
+	case <-time.After(5 * time.Second):
+		p.logger.Warn("Timeout waiting for goroutines to finish, proceeding with cleanup")
 	}
 
-	// Close output channel safely with sync.Once
+	if p.frameAssembler != nil {
+		if err := p.frameAssembler.Stop(); err != nil {
+			p.logger.WithError(err).Error("Failed to stop frame assembler")
+		} else {
+			p.logger.Debug("Frame assembler stopped successfully")
+		}
+	}
+
 	p.closeOnce.Do(func() {
 		close(p.output)
+		p.logger.Debug("Output channel closed")
 	})
 
-	// Get final stats
-	reordererStats := p.bframeReorderer.GetStats()
+	var reordererStats frame.BFrameReordererStats
+	if p.bframeReorderer != nil {
+		reordererStats = p.bframeReorderer.GetStats()
+	}
 
 	p.logger.WithFields(map[string]interface{}{
 		"packets_processed": p.packetsProcessed.Load(),
@@ -154,25 +184,90 @@ func (p *VideoPipeline) Stop() error {
 
 // processPackets reads packets and sends them to the frame assembler
 func (p *VideoPipeline) processPackets() {
-	defer p.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			p.errors.Add(1)
+			p.logger.WithField("panic", r).Error("Panic in processPackets goroutine, recovering")
+		}
+		p.wg.Done()
+	}()
+
+	// Validate input channel and context before processing
+	if p.input == nil {
+		p.logger.Error("Input channel is nil, processPackets cannot start")
+		p.errors.Add(1)
+		return
+	}
+	if p.frameAssembler == nil {
+		p.logger.Error("Frame assembler is nil, processPackets cannot start")
+		p.errors.Add(1)
+		return
+	}
+
+	p.logger.WithFields(map[string]interface{}{
+		"input_channel_nil": p.input == nil,
+		"context_err":       p.ctx.Err(),
+	}).Info("processPackets goroutine started")
 
 	for {
 		select {
 		case <-p.ctx.Done():
+			p.logger.Debug("processPackets: context cancelled, exiting gracefully")
 			return
 
 		case pkt, ok := <-p.input:
 			if !ok {
-				p.logger.Debug("Input channel closed")
+				p.logger.Info("Input channel closed, processPackets exiting")
 				return
 			}
 
-			// Process packet
+			p.logger.WithFields(map[string]interface{}{
+				"stream_id":   p.streamID,
+				"packet_type": pkt.Type.String(),
+				"data_len":    len(pkt.Data),
+				"pts":         pkt.PTS,
+				"dts":         pkt.DTS,
+			}).Info("🎬 DEBUG: Video pipeline received packet")
+
+			// Validate packet data before processing
+			if len(pkt.Data) == 0 {
+				p.errors.Add(1)
+				p.sampledLogger.ErrorWithCategory(logger.CategoryPacketProcessing, "Received empty packet data", map[string]interface{}{
+					"pts": pkt.PTS,
+					"dts": pkt.DTS,
+				})
+				continue
+			}
+
+			// Process packet with error recovery
 			if err := p.frameAssembler.AddPacket(pkt); err != nil {
 				p.errors.Add(1)
-				if err != frame.ErrNoFrameContext {
-					p.logger.WithError(err).Debug("Failed to add packet to assembler")
+				p.sampledLogger.ErrorWithCategory(logger.CategoryPacketProcessing, "Frame assembler rejected packet", map[string]interface{}{
+					"error": err.Error(),
+					"pts":   pkt.PTS,
+					"dts":   pkt.DTS,
+					"data_len": len(pkt.Data),
+				})
+				p.logger.WithFields(map[string]interface{}{
+					"stream_id": p.streamID,
+					"error":     err.Error(),
+					"data_len":  len(pkt.Data),
+				}).Info("❌ DEBUG: Frame assembler rejected packet")
+				
+				// Check if error indicates critical failure requiring pipeline restart
+				if p.isCriticalError(err) {
+					p.logger.WithError(err).Error("Critical error in frame assembler, stopping pipeline")
+					p.cancel() // Trigger shutdown
+					return
 				}
+			} else {
+				p.sampledLogger.DebugWithCategory(logger.CategoryPacketProcessing, "Packet processed successfully", map[string]interface{}{
+					"pts": pkt.PTS,
+				})
+				p.logger.WithFields(map[string]interface{}{
+					"stream_id": p.streamID,
+					"data_len":  len(pkt.Data),
+				}).Info("✅ DEBUG: Frame assembler processed packet successfully")
 			}
 
 			p.packetsProcessed.Add(1)
@@ -182,37 +277,116 @@ func (p *VideoPipeline) processPackets() {
 
 // processFrames reads assembled frames and sends them to the B-frame reorderer
 func (p *VideoPipeline) processFrames() {
-	defer p.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			p.errors.Add(1)
+			p.logger.WithField("panic", r).Error("Panic in processFrames goroutine, recovering")
+		}
+		p.wg.Done()
+	}()
+
+	// Validate components before processing
+	if p.frameAssembler == nil {
+		p.logger.Error("Frame assembler is nil, processFrames cannot start")
+		p.errors.Add(1)
+		return
+	}
+	if p.bframeReorderer == nil {
+		p.logger.Error("B-frame reorderer is nil, processFrames cannot start")
+		p.errors.Add(1)
+		return
+	}
 
 	frameOutput := p.frameAssembler.GetOutput()
+	if frameOutput == nil {
+		p.logger.Error("Frame assembler output channel is nil, processFrames cannot start")
+		p.errors.Add(1)
+		return
+	}
+	// Process frames from assembler output
 
 	for {
 		select {
 		case <-p.ctx.Done():
+			p.logger.Debug("processFrames: context cancelled, exiting gracefully")
 			return
 
 		case frame, ok := <-frameOutput:
 			if !ok {
-				p.logger.Debug("Frame assembler output closed")
+				p.logger.Debug("Frame assembler output closed, processFrames exiting")
 				return
 			}
 
-			// Send frame to B-frame reorderer
-			reorderedFrames, err := p.bframeReorderer.AddFrame(frame)
-			if err != nil {
+			// Validate frame before processing
+			if frame == nil {
 				p.errors.Add(1)
-				p.logger.WithError(err).Debug("Failed to add frame to reorderer")
+				p.logger.Error("Received nil frame from assembler")
+				continue
+			}
+			if len(frame.NALUnits) == 0 && frame.Type != types.FrameTypeSEI {
+				p.errors.Add(1)
+				p.logger.WithField("frame_id", frame.ID).Error("Received frame with no NAL units")
 				continue
 			}
 
-			// Output any frames that are ready
-			for _, reorderedFrame := range reorderedFrames {
+			p.logger.WithFields(map[string]interface{}{
+				"stream_id":  p.streamID,
+				"frame_id":   frame.ID,
+				"frame_type": frame.Type.String(),
+				"frame_size": frame.TotalSize,
+				"pts":        frame.PTS,
+				"dts":        frame.DTS,
+				"nal_units":  len(frame.NALUnits),
+			}).Info("🎬 DEBUG: Video pipeline assembled frame")
+
+			// Check if this is a metadata frame (SPS, PPS, SEI) that should bypass reordering
+			if frame.Type == types.FrameTypeSPS || frame.Type == types.FrameTypePPS || frame.Type == types.FrameTypeSEI {
+				// Send metadata frames directly to output
 				select {
 				case <-p.ctx.Done():
 					return
-				case p.output <- reorderedFrame:
+				case p.output <- frame:
 					p.framesOutput.Add(1)
-					p.framesReordered.Add(1)
+					p.sampledLogger.DebugWithCategory(logger.CategoryFrameProcessing, "Metadata frame sent to output", map[string]interface{}{
+						"frame_id":   frame.ID,
+						"frame_type": frame.Type.String(),
+					})
+				}
+			} else {
+				// Send actual video frames to B-frame reorderer
+				reorderedFrames, err := p.bframeReorderer.AddFrame(frame)
+				if err != nil {
+					p.errors.Add(1)
+					p.sampledLogger.ErrorWithCategory(logger.CategoryFrameReordering, "Failed to add frame to reorderer", map[string]interface{}{
+						"frame_id": frame.ID,
+						"error":    err.Error(),
+					})
+					continue
+				}
+
+				p.sampledLogger.DebugWithCategory(logger.CategoryFrameReordering, "B-frame reorderer output", map[string]interface{}{
+					"input_frame_id":     frame.ID,
+					"output_frame_count": len(reorderedFrames),
+				})
+
+				// Output any frames that are ready
+				for i, reorderedFrame := range reorderedFrames {
+					p.sampledLogger.DebugWithCategory(logger.CategoryFrameProcessing, "Sending reordered frame to output", map[string]interface{}{
+						"frame_id":     reorderedFrame.ID,
+						"frame_index":  i + 1,
+						"total_frames": len(reorderedFrames),
+					})
+					select {
+					case <-p.ctx.Done():
+						p.sampledLogger.InfoWithCategory(logger.CategoryFrameProcessing, "Context cancelled during frame output", nil)
+						return
+					case p.output <- reorderedFrame:
+						p.framesOutput.Add(1)
+						p.framesReordered.Add(1)
+						p.sampledLogger.DebugWithCategory(logger.CategoryFrameProcessing, "Successfully sent reordered frame", map[string]interface{}{
+							"frame_id": reorderedFrame.ID,
+						})
+					}
 				}
 			}
 		}
@@ -226,16 +400,76 @@ func (p *VideoPipeline) processReorderedFrames() {
 	// Wait for context cancellation
 	<-p.ctx.Done()
 
-	// Flush any remaining frames from the reorderer
+	p.logger.Debug("processReorderedFrames: flushing remaining frames")
+
 	remainingFrames := p.bframeReorderer.Flush()
-	for _, frame := range remainingFrames {
+	p.logger.WithField("frames_to_flush", len(remainingFrames)).Debug("Flushing remaining frames from reorderer")
+
+	for i, frame := range remainingFrames {
 		select {
 		case p.output <- frame:
 			p.framesOutput.Add(1)
 			p.framesReordered.Add(1)
-		default:
-			// If output channel is full, drop the frame
-			p.logger.Debug("Dropping frame during shutdown flush")
+			p.logger.WithFields(map[string]interface{}{
+				"frame_index": i + 1,
+				"total_frames": len(remainingFrames),
+				"frame_id": frame.ID,
+			}).Debug("Successfully flushed frame during shutdown")
+		case <-time.After(100 * time.Millisecond):
+			p.logger.WithFields(map[string]interface{}{
+				"frame_id": frame.ID,
+				"frames_dropped": len(remainingFrames) - i,
+			}).Warn("Timeout flushing frame during shutdown, dropping remaining frames")
+			return // Exit early to prevent hanging
+		}
+	}
+
+	p.logger.WithField("frames_flushed", len(remainingFrames)).Debug("All remaining frames flushed successfully")
+}
+
+// drainFramesToDevNull consumes frames from output channel and discards them
+func (p *VideoPipeline) drainFramesToDevNull() {
+	defer p.wg.Done()
+
+	p.logger.Info("Started frame drain worker (temporary until transcoder implementation)")
+
+	frameCount := uint64(0)
+	for {
+		select {
+		case <-p.ctx.Done():
+			p.logger.WithFields(map[string]interface{}{
+				"frames_drained": frameCount,
+			}).Info("Frame drain worker stopped")
+			return
+		case frame, ok := <-p.output:
+			if !ok {
+				p.logger.WithFields(map[string]interface{}{
+					"frames_drained": frameCount,
+				}).Info("Output channel closed, drain worker exiting")
+				return
+			}
+
+			frameCount++
+
+			// Log periodically to show progress
+			if frameCount%100 == 0 {
+				p.logger.WithFields(map[string]interface{}{
+					"frames_drained": frameCount,
+					"frame_id":       frame.ID,
+					"frame_size":     frame.TotalSize,
+					"frame_type":     frame.Type.String(),
+					"is_keyframe":    frame.IsKeyframe(),
+				}).Info("Frame drain progress (every 100 frames)")
+			} else {
+				p.logger.WithFields(map[string]interface{}{
+					"frame_id":    frame.ID,
+					"frame_size":  frame.TotalSize,
+					"frame_type":  frame.Type.String(),
+					"is_keyframe": frame.IsKeyframe(),
+				}).Debug("Frame drained to /dev/null")
+			}
+
+			// Frame is now "consumed" and will be garbage collected
 		}
 	}
 }
@@ -247,8 +481,19 @@ func (p *VideoPipeline) GetOutput() <-chan *types.VideoFrame {
 
 // GetStats returns pipeline statistics
 func (p *VideoPipeline) GetStats() PipelineStats {
-	assemblerStats := p.frameAssembler.GetStats()
-	reordererStats := p.bframeReorderer.GetStats()
+	if p == nil {
+		return PipelineStats{}
+	}
+
+	var assemblerStats frame.AssemblerStats
+	var reordererStats frame.BFrameReordererStats
+
+	if p.frameAssembler != nil {
+		assemblerStats = p.frameAssembler.GetStats()
+	}
+	if p.bframeReorderer != nil {
+		reordererStats = p.bframeReorderer.GetStats()
+	}
 
 	return PipelineStats{
 		PacketsProcessed: p.packetsProcessed.Load(),
@@ -268,4 +513,32 @@ type PipelineStats struct {
 	Errors           uint64
 	AssemblerStats   frame.AssemblerStats
 	ReordererStats   frame.BFrameReordererStats
+}
+
+// isCriticalError determines if an error is critical and should stop the pipeline
+func (p *VideoPipeline) isCriticalError(err error) bool {
+	if err == nil {
+		return false
+	}
+	
+	errStr := err.Error()
+	
+	// Check for critical error patterns
+	criticalPatterns := []string{
+		"out of memory",
+		"memory allocation failed", 
+		"context deadline exceeded",
+		"panic",
+		"buffer overflow",
+		"corrupted",
+		"invalid state",
+	}
+	
+	for _, pattern := range criticalPatterns {
+		if strings.Contains(strings.ToLower(errStr), pattern) {
+			return true
+		}
+	}
+	
+	return false
 }

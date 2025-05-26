@@ -30,7 +30,19 @@ func NewRedisRegistry(client *redis.Client, logger *logrus.Logger) *RedisRegistr
 
 // Register adds a new stream to the registry
 func (r *RedisRegistry) Register(ctx context.Context, stream *Stream) error {
-	stream.CreatedAt = time.Now()
+	// Check if stream already exists to preserve CreatedAt timestamp
+	key := r.prefix + stream.ID
+	existingData, err := r.client.Get(ctx, key).Bytes()
+	if err == nil {
+		// Stream exists, preserve CreatedAt but update LastHeartbeat
+		var existingStream Stream
+		if err := json.Unmarshal(existingData, &existingStream); err == nil {
+			stream.CreatedAt = existingStream.CreatedAt // Preserve original creation time
+		}
+	} else {
+		// New stream, set CreatedAt
+		stream.CreatedAt = time.Now()
+	}
 	stream.LastHeartbeat = time.Now()
 
 	data, err := json.Marshal(stream)
@@ -38,29 +50,39 @@ func (r *RedisRegistry) Register(ctx context.Context, stream *Stream) error {
 		return fmt.Errorf("failed to marshal stream: %w", err)
 	}
 
-	key := r.prefix + stream.ID
+	// Check if this is a new stream or update
+	if existingData == nil {
+		// New stream - use SetNX to prevent race conditions
+		ok, err := r.client.SetNX(ctx, key, data, r.ttl).Result()
+		if err != nil {
+			return fmt.Errorf("failed to register stream: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("stream %s already exists", stream.ID)
+		}
 
-	// Use SET with NX to prevent overwriting existing streams
-	ok, err := r.client.SetNX(ctx, key, data, r.ttl).Result()
-	if err != nil {
-		return fmt.Errorf("failed to register stream: %w", err)
-	}
-	if !ok {
-		return fmt.Errorf("stream %s already exists", stream.ID)
-	}
+		// Add to active streams set
+		if err := r.client.SAdd(ctx, r.prefix+"active", stream.ID).Err(); err != nil {
+			// Rollback the registration
+			r.client.Del(ctx, key)
+			return fmt.Errorf("failed to add to active set: %w", err)
+		}
 
-	// Add to active streams set
-	if err := r.client.SAdd(ctx, r.prefix+"active", stream.ID).Err(); err != nil {
-		// Rollback the registration
-		r.client.Del(ctx, key)
-		return fmt.Errorf("failed to add to active set: %w", err)
-	}
+		r.logger.WithFields(logrus.Fields{
+			"stream_id": stream.ID,
+			"type":      stream.Type,
+			"source":    stream.SourceAddr,
+		}).Info("Stream registered")
+	} else {
+		// Existing stream - just update with new TTL
+		if err := r.client.Set(ctx, key, data, r.ttl).Err(); err != nil {
+			return fmt.Errorf("failed to update stream: %w", err)
+		}
 
-	r.logger.WithFields(logrus.Fields{
-		"stream_id": stream.ID,
-		"type":      stream.Type,
-		"source":    stream.SourceAddr,
-	}).Info("Stream registered")
+		r.logger.WithFields(logrus.Fields{
+			"stream_id": stream.ID,
+		}).Debug("Stream updated")
+	}
 
 	return nil
 }
@@ -254,10 +276,10 @@ func (r *RedisRegistry) UpdateHeartbeat(ctx context.Context, streamID string) er
 		return fmt.Errorf("failed to unmarshal stream: %w", err)
 	}
 
-	// Update heartbeat
-	stream.LastHeartbeat = time.Now()
+	// Update heartbeat using the stream's thread-safe method
+	stream.UpdateHeartbeat()
 
-	updatedData, err := json.Marshal(stream)
+	updatedData, err := json.Marshal(&stream)
 	if err != nil {
 		return fmt.Errorf("failed to marshal stream: %w", err)
 	}
@@ -288,11 +310,11 @@ func (r *RedisRegistry) UpdateStatus(ctx context.Context, streamID string, statu
 		return fmt.Errorf("failed to unmarshal stream: %w", err)
 	}
 
-	// Update status
-	stream.Status = status
-	stream.LastHeartbeat = time.Now()
+	// Update status using thread-safe methods
+	stream.SetStatus(status)
+	stream.UpdateHeartbeat()
 
-	updatedData, err := json.Marshal(stream)
+	updatedData, err := json.Marshal(&stream)
 	if err != nil {
 		return fmt.Errorf("failed to marshal stream: %w", err)
 	}
@@ -328,14 +350,11 @@ func (r *RedisRegistry) UpdateStats(ctx context.Context, streamID string, stats 
 		return fmt.Errorf("failed to unmarshal stream: %w", err)
 	}
 
-	// Update stats
-	stream.BytesReceived = stats.BytesReceived
-	stream.PacketsReceived = stats.PacketsReceived
-	stream.PacketsLost = stats.PacketsLost
-	stream.Bitrate = stats.Bitrate
-	stream.LastHeartbeat = time.Now()
+	// Update stats using thread-safe methods
+	stream.UpdateStats(stats)
+	stream.UpdateHeartbeat()
 
-	updatedData, err := json.Marshal(stream)
+	updatedData, err := json.Marshal(&stream)
 	if err != nil {
 		return fmt.Errorf("failed to marshal stream: %w", err)
 	}

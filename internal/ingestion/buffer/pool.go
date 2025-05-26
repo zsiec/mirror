@@ -37,7 +37,17 @@ func NewBufferPool(bufferSize, poolSize int, logger *logrus.Logger) *BufferPool 
 
 // Get returns a buffer for the given stream ID
 func (bp *BufferPool) Get(streamID string) *RingBuffer {
-	// Check if buffer already exists
+	// Fast path: check if buffer already exists
+	if buf, ok := bp.buffers.Load(streamID); ok {
+		return buf.(*RingBuffer)
+	}
+
+	// Slow path: need to create or get a buffer
+	// Use mutex to prevent multiple goroutines from creating buffers for the same stream
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+
+	// Double-check after acquiring lock (another goroutine might have created it)
 	if buf, ok := bp.buffers.Load(streamID); ok {
 		return buf.(*RingBuffer)
 	}
@@ -53,32 +63,27 @@ func (bp *BufferPool) Get(streamID string) *RingBuffer {
 		buffer = NewRingBuffer(streamID, bp.bufferSize)
 	}
 
-	// Store and return
-	actual, _ := bp.buffers.LoadOrStore(streamID, buffer)
-	actualBuffer := actual.(*RingBuffer)
-
-	// If we lost the race, return the buffer to the pool
-	if actualBuffer != buffer {
-		select {
-		case bp.freeList <- buffer:
-		default:
-			// Pool is full, let GC handle it
-		}
-	}
+	// Store the buffer - no race condition now due to mutex
+	bp.buffers.Store(streamID, buffer)
 
 	bp.logger.WithField("stream_id", streamID).Debug("Buffer allocated")
-	return actualBuffer
+	return buffer
 }
 
 // Put returns a buffer to the pool (called when stream ends)
 func (bp *BufferPool) Put(streamID string, buffer *RingBuffer) {
+	// Remove from active buffers map
 	bp.buffers.Delete(streamID)
 
 	if buffer != nil {
+		// Close and reset the buffer to clean state
 		buffer.Close()
 		buffer.Reset()
 
-		// Try to return to free list
+		// Clear the stream ID to prepare for reuse
+		buffer.streamID = ""
+
+		// Try to return to free list with timeout to prevent blocking
 		select {
 		case bp.freeList <- buffer:
 			bp.logger.WithField("stream_id", streamID).Debug("Buffer returned to pool")
@@ -93,7 +98,9 @@ func (bp *BufferPool) Put(streamID string, buffer *RingBuffer) {
 func (bp *BufferPool) Remove(streamID string) {
 	if buf, ok := bp.buffers.LoadAndDelete(streamID); ok {
 		buffer := buf.(*RingBuffer)
-		buffer.Close()
+		if buffer != nil {
+			buffer.Close()
+		}
 		bp.logger.WithField("stream_id", streamID).Debug("Buffer removed")
 	}
 }

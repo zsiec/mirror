@@ -11,6 +11,12 @@ server:
   max_incoming_streams: 1000
   max_incoming_uni_streams: 500
   max_idle_timeout: 60s
+  # HTTP/1.1 and HTTP/2 fallback enabled for development
+  http_port: 8080         # TCP port for HTTP/1.1 and HTTP/2 (different from HTTP/3 UDP port)
+  enable_http: true       # Enable for easier debugging
+  enable_http2: true      # Support HTTP/2
+  https_redirect: false   # No redirect in development
+  debug_endpoints: true   # Enable pprof and debug endpoints
 
 redis:
   addresses:
@@ -41,7 +47,9 @@ ingestion:
   queue_dir: "./data/queue"  # Local directory for development
   srt:
     enabled: true
+    port: 30000              # SRT port for development
     max_bandwidth: 52428800  # 50 Mbps
+    input_bandwidth: 50000000 # 50 Mbps (must be <= max_bandwidth)
     encryption:
       enabled: false  # Enable for testing encryption
       passphrase: ""  # Set via MIRROR_INGESTION_SRT_ENCRYPTION_PASSPHRASE
@@ -49,7 +57,11 @@ ingestion:
       pbkdf_iterations: 0  # 0 for auto
   rtp:
     enabled: true
+    port: 15004              # RTP port for development (avoiding Docker conflict)
+    rtcp_port: 15005         # RTCP port for development
     max_bandwidth: 52428800  # 50 Mbps
+  buffer:
+    pool_size: 60              # Must be >= SRT max_connections (30) + RTP max_sessions (30)
   codecs:
     supported: ["HEVC", "H264", "AV1", "JPEGXS"]
     preferred: "HEVC"
@@ -68,3 +80,20 @@ ingestion:
   memory:
     max_total: 8589934592      # 8GB for development (matching production for testing)
     max_per_stream: 419430400  # 400MB per stream for development
+  ffmpeg:
+    enabled: true
+    binary_path: ""            # Auto-detect system FFmpeg
+    log_level: "warning"       # FFmpeg log level (quiet, panic, fatal, error, warning, info, verbose, debug, trace)
+    thread_count: 0            # 0 = auto-detect CPU count
+    hardware_acceleration:
+      enabled: true
+      preferred_decoders: ["h264_videotoolbox", "hevc_videotoolbox", "av1"]  # macOS VideoToolbox
+      fallback_software: true
+    decoder:
+      buffer_size: 4           # Number of frames to buffer during decoding
+      pixel_format: "yuv420p"  # Output pixel format for decoded frames
+      thread_type: "frame"     # Threading type (frame, slice, auto)
+    jpeg:
+      quality: 85              # JPEG quality for iframe export (1-100)
+      optimize: true           # Optimize JPEG encoding
+      progressive: false       # Progressive JPEG encoding

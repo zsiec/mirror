@@ -7,13 +7,15 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/zsiec/mirror/internal/ingestion/types"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 func TestP1_6_DriftCalculationFixed(t *testing.T) {
 	// Test that drift calculation properly combines PTS drift and wall clock drift
 	// instead of averaging them
-	log := logrus.New()
-	log.SetLevel(logrus.DebugLevel)
+	baseLog := logrus.New()
+	baseLog.SetLevel(logrus.DebugLevel)
+	log := logger.NewLogrusAdapter(logrus.NewEntry(baseLog))
 	config := DefaultSyncConfig()
 
 	// Create track sync managers

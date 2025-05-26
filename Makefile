@@ -1,4 +1,4 @@
-.PHONY: build test clean run docker help fmt lint generate-certs deps dev setup
+.PHONY: build test clean run docker help fmt lint generate-certs deps dev setup docker-run docker-compose docker-compose-logs docker-compose-down docker-compose-restart docker-compose-monitoring docker-clean srt-check srt-setup test-coverage ffmpeg-check ffmpeg-setup deps-check b r l
 
 # Variables
 BINARY_NAME=mirror
@@ -8,6 +8,34 @@ MAIN_PACKAGE=./cmd/mirror
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 GIT_COMMIT=$(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
+
+# SRT Environment Setup
+# Check if SRT is available and set up environment automatically
+SRT_AVAILABLE := $(shell pkg-config --exists srt 2>/dev/null && echo "yes" || echo "no")
+ifeq ($(SRT_AVAILABLE),yes)
+    CGO_CFLAGS := $(shell pkg-config --cflags srt)
+    CGO_LDFLAGS := $(shell pkg-config --libs srt) -Wl,-w
+    SRT_ENV := CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)"
+    SRT_STATUS := ✅ Available
+else
+    SRT_ENV := 
+    SRT_STATUS := ❌ Not found
+endif
+
+# FFmpeg Availability Check (for SRT integration testing)
+FFMPEG_AVAILABLE := $(shell command -v ffmpeg >/dev/null 2>&1 && echo "yes" || echo "no")
+ifeq ($(FFMPEG_AVAILABLE),yes)
+    FFMPEG_STATUS := ✅ Available
+    FFMPEG_SRT_SUPPORT := $(shell ffmpeg -protocols 2>/dev/null | grep -q "srt" && echo "yes" || echo "no")
+    ifeq ($(FFMPEG_SRT_SUPPORT),yes)
+        FFMPEG_SRT_STATUS := ✅ SRT support available
+    else
+        FFMPEG_SRT_STATUS := ⚠️ SRT support not compiled
+    endif
+else
+    FFMPEG_STATUS := ❌ Not found
+    FFMPEG_SRT_STATUS := ❌ Not available
+endif
 
 # Build flags
 LDFLAGS=-ldflags "\
@@ -20,38 +48,97 @@ default: build
 
 ## help: Show this help message
 help:
-	@echo 'Usage:'
+	@echo 'Mirror Video Streaming Platform - Build Commands'
+	@echo ''
+	@echo 'Quick Start:'
+	@echo '  make setup          # Complete project setup (includes SRT)'
+	@echo '  make test           # Run all tests'
+	@echo '  make docker-compose # Start with Docker'
+	@echo ''
+	@echo 'Comprehensive Testing:'
+	@echo '  make test-full-integration  # Run complete system test with RTP/SRT streams'
+	@echo ''
+	@echo 'Available Commands:'
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' | sed -e 's/^/ /'
+	@echo ''
+	@echo 'Dependencies:'
+	@echo '  SRT Library: $(SRT_STATUS)'
+	@echo '  FFmpeg: $(FFMPEG_STATUS)'
+	@echo '  FFmpeg SRT: $(FFMPEG_SRT_STATUS)'
+	@echo ''
+	@echo 'Dependency Management:'
+	@echo '  make deps-check        # Check all dependencies'
+	@echo '  make srt-setup         # Install SRT library'
+	@echo '  make ffmpeg-setup      # Install FFmpeg'
+ifeq ($(SRT_AVAILABLE),no)
+	@echo ''
+	@echo '⚠️  SRT library is required - run "make srt-setup" to install'
+endif
+ifeq ($(FFMPEG_AVAILABLE),no)
+	@echo '⚠️  FFmpeg is required for SRT integration testing'
+	@echo '   Install: brew install ffmpeg (macOS) or apt install ffmpeg (Ubuntu)'
+endif
 
 ## build: Build the binary
-build:
+build: deps-check
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	@go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PACKAGE)
+	@$(SRT_ENV) go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PACKAGE)
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
 
 ## test: Run unit tests
-test:
+test: srt-check
 	@echo "Running tests..."
-	@go test -v -cover $(shell go list ./... | grep -v "mirror/tests")
+	@$(SRT_ENV) go test -v -cover $(shell go list ./... | grep -v "mirror/tests")
 
 ## test-race: Run tests with race detector
-test-race:
+test-race: srt-check
 	@echo "Running tests with race detector..."
-	@go test -v -race -cover $(shell go list ./... | grep -v "mirror/tests")
+	@$(SRT_ENV) go test -v -race -cover $(shell go list ./... | grep -v "mirror/tests")
 
 ## test-integration: Run integration tests
 test-integration:
 	@echo "Running integration tests..."
-	@go test -v -race -tags=integration ./...
+	@go test -v -count=1 -race -tags=integration ./...
+
+## test-full-integration: Run comprehensive full system integration test with Rich dashboard
+test-full-integration: srt-check
+	@echo "🚀 Running Full Mirror Integration Test with Rich Dashboard..."
+	@echo "✨ Features beautiful terminal UI with real-time stats and progress tracking"
+	@echo ""
+	@echo "📋 Test validates:"
+	@echo "   - Server startup and health checks"
+	@echo "   - RTP stream ingestion and processing"
+	@echo "   - SRT stream testing (real FFmpeg streams when available, simulated otherwise)"
+	@echo "   - API endpoint functionality"
+	@echo "   - Real-time metrics collection"
+	@echo "   - Stream statistics and logging"
+	@echo ""
+	@echo "🎨 Rich Dashboard features:"
+	@echo "   - Beautiful terminal interface with colors and animations"
+	@echo "   - Real-time stream statistics and metrics"
+	@echo "   - Live progress tracking and phase updates"
+	@echo "   - Activity logs with syntax highlighting"
+	@echo "   - Controls: Press 'q' to quit, 'r' to refresh"
+	@echo ""
+	@echo "🔍 Auto-detecting capabilities:"
+	@echo "   - SRT Library: $(SRT_STATUS)"
+	@echo "   - FFmpeg: $(FFMPEG_STATUS)"
+	@echo "   - FFmpeg SRT: $(FFMPEG_SRT_STATUS)"
+	@echo ""
+	@FORCE_COLOR=1 CLICOLOR_FORCE=1 $(SRT_ENV) go test -v -timeout=10m -count=1 -run TestFullIntegrationTest ./tests/
+	@echo ""
+	@echo "✅ Full integration test complete!"
+
+
 
 ## test-all: Run all tests (unit + integration)
 test-all: test test-integration
 
 ## test-coverage: Run tests with coverage report
-test-coverage:
+test-coverage: srt-check
 	@echo "Running tests with coverage..."
-	@go test -v -race -coverprofile=coverage.out ./...
+	@$(SRT_ENV) go test -v -race -coverprofile=coverage.out ./...
 	@go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
@@ -81,10 +168,48 @@ docker:
 	@echo "Building Docker image..."
 	@docker build -f docker/Dockerfile -t mirror:latest .
 
+## docker-run: Run the Docker container with all ports
+docker-run:
+	@echo "Running Docker container..."
+	@docker run -d \
+		-p 8443:8443/udp \
+		-p 9090:9090 \
+		-p 30000:30000/udp \
+		-p 5004:5004/udp \
+		-v $$(pwd)/configs:/app/configs:ro \
+		-v $$(pwd)/certs:/app/certs:ro \
+		-v /tmp/mirror:/tmp/mirror \
+		--name mirror \
+		mirror:latest
+
 ## docker-compose: Run with docker-compose
 docker-compose:
 	@echo "Starting services with docker-compose..."
-	@docker-compose -f docker/docker-compose.yml up
+	@docker-compose -f docker/docker-compose.yml up -d
+
+## docker-compose-logs: Show docker-compose logs
+docker-compose-logs:
+	@docker-compose -f docker/docker-compose.yml logs -f
+
+## docker-compose-down: Stop docker-compose services
+docker-compose-down:
+	@echo "Stopping services..."
+	@docker-compose -f docker/docker-compose.yml down
+
+## docker-compose-restart: Restart docker-compose services
+docker-compose-restart: docker-compose-down docker-compose
+
+## docker-compose-monitoring: Run with monitoring stack (Prometheus + Grafana)
+docker-compose-monitoring:
+	@echo "Starting services with monitoring..."
+	@docker-compose -f docker/docker-compose.yml --profile monitoring up -d
+
+## docker-clean: Remove Docker containers and images
+docker-clean:
+	@echo "Cleaning Docker resources..."
+	@docker-compose -f docker/docker-compose.yml down -v
+	@docker rm -f mirror 2>/dev/null || true
+	@docker rmi mirror:latest 2>/dev/null || true
 
 ## fmt: Format Go code
 fmt:
@@ -103,9 +228,9 @@ lint:
 	fi
 
 ## vet: Run go vet
-vet:
+vet: srt-check
 	@echo "Running go vet..."
-	@go vet ./...
+	@$(SRT_ENV) go vet ./...
 
 ## generate-certs: Generate self-signed certificates for development
 generate-certs:
@@ -129,8 +254,97 @@ deps:
 	@go mod download
 	@go mod tidy
 
+## srt-check: Check SRT library availability
+srt-check:
+	@echo "SRT Library Status: $(SRT_STATUS)"
+ifeq ($(SRT_AVAILABLE),no)
+	@echo ""
+	@echo "⚠️  SRT library is required for video streaming functionality"
+	@echo "Install SRT library with: make srt-setup"
+	@echo "Or install manually:"
+	@echo "  macOS: brew install srt"
+	@echo "  Ubuntu/Debian: sudo apt-get install libsrt-openssl-dev"
+	@echo ""
+	@exit 1
+endif
+
+## srt-setup: Install SRT library automatically
+srt-setup:
+	@echo "Installing SRT library..."
+ifeq ($(shell uname),Darwin)
+	@echo "Detected macOS - using Homebrew"
+	@if ! command -v brew >/dev/null 2>&1; then \
+		echo "❌ Homebrew not found. Install from: https://brew.sh/"; \
+		exit 1; \
+	fi
+	@if ! command -v pkg-config >/dev/null 2>&1; then \
+		echo "Installing pkg-config..."; \
+		brew install pkg-config; \
+	fi
+	@echo "Installing SRT library..."
+	@brew install srt
+	@echo "✅ SRT installation complete"
+else ifeq ($(shell test -f /etc/debian_version && echo debian),debian)
+	@echo "Detected Debian/Ubuntu - using apt"
+	@sudo apt-get update
+	@sudo apt-get install -y pkg-config libsrt-openssl-dev
+	@echo "✅ SRT installation complete"
+else
+	@echo "❌ Automatic installation not supported for your OS"
+	@echo "Please install SRT manually:"
+	@echo "  From source: https://github.com/Haivision/srt"
+	@echo "  Or check your package manager for 'srt' or 'libsrt-dev'"
+	@exit 1
+endif
+	@echo ""
+	@echo "Verifying installation..."
+	@if pkg-config --exists srt; then \
+		echo "✅ SRT verification successful"; \
+		echo "Version: $$(pkg-config --modversion srt)"; \
+	else \
+		echo "❌ SRT verification failed"; \
+		exit 1; \
+	fi
+
+## deps-check: Check all dependencies (SRT + FFmpeg)
+deps-check: srt-check ffmpeg-check
+
+## ffmpeg-setup: Install FFmpeg automatically
+ffmpeg-setup:
+	@echo "Installing FFmpeg..."
+ifeq ($(shell uname),Darwin)
+	@echo "Detected macOS - using Homebrew"
+	@if ! command -v brew >/dev/null 2>&1; then \
+		echo "❌ Homebrew not found. Install from: https://brew.sh/"; \
+		exit 1; \
+	fi
+	@echo "Installing FFmpeg..."
+	@brew install ffmpeg
+	@echo "✅ FFmpeg installation complete"
+else ifeq ($(shell test -f /etc/debian_version && echo debian),debian)
+	@echo "Detected Debian/Ubuntu - using apt"
+	@sudo apt-get update
+	@sudo apt-get install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libavdevice-dev libswresample-dev
+	@echo "✅ FFmpeg installation complete"
+else
+	@echo "❌ Automatic installation not supported for your OS"
+	@echo "Please install FFmpeg manually:"
+	@echo "  From source: https://ffmpeg.org/download.html"
+	@echo "  Or check your package manager for 'ffmpeg' package"
+	@exit 1
+endif
+	@echo ""
+	@echo "Verifying installation..."
+	@if command -v ffmpeg >/dev/null 2>&1; then \
+		echo "✅ FFmpeg verification successful"; \
+		echo "Version: $$(ffmpeg -version | head -1)"; \
+	else \
+		echo "❌ FFmpeg verification failed"; \
+		exit 1; \
+	fi
+
 ## setup: Initial project setup
-setup: deps generate-certs
+setup: deps srt-setup ffmpeg-setup generate-certs
 	@echo "Setting up project..."
 	@mkdir -p $(BUILD_DIR)
 	@mkdir -p logs
@@ -138,14 +352,14 @@ setup: deps generate-certs
 	@echo "Setup complete!"
 	@echo ""
 	@echo "Next steps:"
-	@echo "  1. Start Redis: docker run -d -p 6379:6379 redis:alpine"
-	@echo "  2. Update .env with your configuration"
-	@echo "  3. Run: make run"
+	@echo "  1. Start services: make docker-compose"
+	@echo "  2. View logs: make docker-compose-logs"
+	@echo "  3. Or run locally: make run (requires Redis)"
 
 ## bench: Run benchmarks
-bench:
+bench: srt-check
 	@echo "Running benchmarks..."
-	@go test -bench=. -benchmem ./...
+	@$(SRT_ENV) go test -bench=. -benchmem ./...
 
 ## check: Run all checks (fmt, vet, lint, test)
 check: fmt vet lint test
@@ -156,6 +370,42 @@ install: build
 	@echo "Installing $(BINARY_NAME)..."
 	@go install $(LDFLAGS) $(MAIN_PACKAGE)
 
+## ffmpeg-check: Check FFmpeg availability and SRT support
+ffmpeg-check:
+	@echo "FFmpeg Status: $(FFMPEG_STATUS)"
+	@echo "FFmpeg SRT Support: $(FFMPEG_SRT_STATUS)"
+ifeq ($(FFMPEG_AVAILABLE),no)
+	@echo ""
+	@echo "⚠️  FFmpeg is required for SRT integration testing"
+	@echo "Install FFmpeg:"
+	@echo "  macOS: brew install ffmpeg"
+	@echo "  Ubuntu/Debian: sudo apt install ffmpeg"
+	@echo "  Other: https://ffmpeg.org/download.html"
+	@echo ""
+	@exit 1
+endif
+ifeq ($(FFMPEG_SRT_SUPPORT),no)
+	@echo ""
+	@echo "⚠️  FFmpeg found but SRT support not compiled"
+	@echo "Install FFmpeg with SRT support:"
+	@echo "  macOS: brew install ffmpeg --with-srt (if available)"
+	@echo "  Or compile from source with --enable-libsrt"
+	@echo "  Check available protocols: ffmpeg -protocols | grep srt"
+	@echo ""
+	@exit 1
+endif
+	@echo "✅ FFmpeg with SRT support is available"
+
 ## version: Show version information
 version:
 	@$(BUILD_DIR)/$(BINARY_NAME) -version 2>/dev/null || echo "Please run 'make build' first"
+
+# Short aliases for common commands
+## b: Alias for 'docker' - Build Docker image
+b: docker
+
+## r: Alias for 'docker-compose' - Run with docker-compose
+r: docker-compose
+
+## l: Alias for 'docker-compose-logs' - Show docker-compose logs
+l: docker-compose-logs

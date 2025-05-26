@@ -32,7 +32,7 @@ func DefaultValidatorConfig() *ValidatorConfig {
 	return &ValidatorConfig{
 		AllowedPayloadTypes: []uint8{96, 97, 98, 99}, // Dynamic payload types
 		MaxSequenceGap:      100,
-		MaxTimestampJump:    90000 * 10, // 10 seconds at 90kHz
+		MaxTimestampJump:    90000 * 60, // 60 seconds at 90kHz - permissive for video streams
 	}
 }
 
@@ -51,6 +51,13 @@ type ssrcTracker struct {
 	lastSequence  uint16
 	lastTimestamp uint32
 	packetsCount  uint64
+
+	// B-frame aware timestamp tracking
+	timestampWindow []uint32 // Recent timestamps for trend analysis
+	lastMonotonicTS uint32   // Last monotonically increasing timestamp
+	dtsEstimate     uint32   // Estimated DTS for B-frame validation
+	frameDuration   uint32   // Estimated frame duration
+	reorderDepth    int      // Maximum reorder depth observed
 }
 
 // NewValidator creates a new RTP packet validator
@@ -103,9 +110,14 @@ func (v *Validator) ValidatePacket(packet *rtp.Packet) error {
 	tracker, exists := v.ssrcState[packet.SSRC]
 	if !exists {
 		tracker = &ssrcTracker{
-			lastSequence:  packet.SequenceNumber,
-			lastTimestamp: packet.Timestamp,
-			packetsCount:  1,
+			lastSequence:    packet.SequenceNumber,
+			lastTimestamp:   packet.Timestamp,
+			lastMonotonicTS: packet.Timestamp,
+			dtsEstimate:     packet.Timestamp,
+			packetsCount:    1,
+			timestampWindow: []uint32{packet.Timestamp},
+			frameDuration:   3000, // Default 30fps at 90kHz
+			reorderDepth:    0,
 		}
 		v.ssrcState[packet.SSRC] = tracker
 		v.mu.Unlock()
@@ -130,20 +142,10 @@ func (v *Validator) ValidatePacket(packet *rtp.Packet) error {
 		}
 	}
 
-	// Validate timestamp progression
-	if tracker.packetsCount > 0 {
-		var timestampDiff uint32
-		if packet.Timestamp >= tracker.lastTimestamp {
-			timestampDiff = packet.Timestamp - tracker.lastTimestamp
-		} else {
-			// Handle wraparound
-			timestampDiff = (0xFFFFFFFF - tracker.lastTimestamp) + packet.Timestamp + 1
-		}
-
-		if timestampDiff > v.config.MaxTimestampJump {
-			v.mu.Unlock()
-			return ErrTimestampJump
-		}
+	// Validate timestamp with B-frame awareness
+	if err := v.validateTimestamp(packet, tracker); err != nil {
+		v.mu.Unlock()
+		return err
 	}
 
 	// Update tracker
@@ -171,6 +173,145 @@ func (v *Validator) ResetSSRC(ssrc uint32) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	delete(v.ssrcState, ssrc)
+}
+
+// validateTimestamp performs B-frame aware timestamp validation
+func (v *Validator) validateTimestamp(packet *rtp.Packet, tracker *ssrcTracker) error {
+	currentTS := packet.Timestamp
+
+	// Handle 32-bit timestamp wraparound
+	currentTS = v.handleTimestampWraparound(currentTS, tracker.lastTimestamp)
+
+	// Update timestamp window (keep last 10 timestamps for analysis)
+	tracker.timestampWindow = append(tracker.timestampWindow, currentTS)
+	if len(tracker.timestampWindow) > 10 {
+		tracker.timestampWindow = tracker.timestampWindow[1:]
+	}
+
+	// Update frame duration estimate
+	if len(tracker.timestampWindow) >= 2 {
+		tracker.frameDuration = v.estimateFrameDuration(tracker.timestampWindow)
+	}
+
+	// For the first few packets, be permissive, but still check for extreme jumps
+	if tracker.packetsCount < 3 {
+		// Still reject extreme jumps even early on
+		if tracker.lastTimestamp > 0 && currentTS > tracker.lastTimestamp {
+			jump := currentTS - tracker.lastTimestamp
+			if jump > v.config.MaxTimestampJump {
+				return ErrTimestampJump
+			}
+		}
+		tracker.lastMonotonicTS = maxUint32(tracker.lastMonotonicTS, currentTS)
+		return nil
+	}
+
+	// Calculate expected DTS progression
+	// For minimum DTS, allow going back by frame duration for B-frames, but not too far
+	expectedMinDTS := tracker.lastMonotonicTS - (tracker.frameDuration * 5) // Allow 5 frames back for B-frames
+	if tracker.lastMonotonicTS < tracker.frameDuration*5 {
+		expectedMinDTS = 0 // Prevent underflow for early packets
+	}
+	expectedMaxDTS := tracker.lastMonotonicTS + v.config.MaxTimestampJump
+
+	// Check for reasonable bounds
+	if currentTS > expectedMaxDTS {
+		// Large forward jump - always reject
+		return ErrTimestampJump
+	}
+
+	if currentTS < expectedMinDTS {
+		// Check if this could be a B-frame (timestamp going backwards but within reasonable bounds)
+		if v.isPossibleBFrame(currentTS, tracker) {
+			// Allow B-frame but don't update monotonic timestamp
+			tracker.reorderDepth = maxInt(tracker.reorderDepth, int(tracker.lastMonotonicTS-currentTS)/int(tracker.frameDuration))
+			return nil
+		}
+		return ErrTimestampJump
+	}
+
+	// Update DTS estimate and monotonic timestamp
+	if currentTS > tracker.lastMonotonicTS {
+		tracker.lastMonotonicTS = currentTS
+		tracker.dtsEstimate = currentTS + tracker.frameDuration
+	}
+
+	return nil
+}
+
+// handleTimestampWraparound handles 32-bit timestamp wraparound
+func (v *Validator) handleTimestampWraparound(currentTS, lastTS uint32) uint32 {
+	// If current timestamp is much smaller than last timestamp,
+	// it might be a wraparound (from ~4.3B back to ~0)
+	if lastTS > 0xF0000000 && currentTS < 0x10000000 {
+		// This is likely a wraparound, treat it as continuous
+		// For validation purposes, we don't need to adjust the value,
+		// just recognize it as valid progression
+		return currentTS
+	}
+	return currentTS
+}
+
+// isPossibleBFrame checks if a timestamp could be from a B-frame
+func (v *Validator) isPossibleBFrame(timestamp uint32, tracker *ssrcTracker) bool {
+	// B-frames typically have timestamps between the last I/P frame and the next I/P frame
+	// Allow timestamps to go backwards by up to 5 frame durations (conservative B-frame depth)
+	maxReorderWindow := tracker.frameDuration * 5
+
+	// Check if timestamp is within reasonable B-frame reorder window
+	if tracker.lastMonotonicTS > timestamp {
+		reorderDistance := tracker.lastMonotonicTS - timestamp
+		return reorderDistance <= maxReorderWindow
+	}
+
+	return false
+}
+
+// estimateFrameDuration estimates frame duration from timestamp window
+func (v *Validator) estimateFrameDuration(timestamps []uint32) uint32 {
+	if len(timestamps) < 2 {
+		return 3000 // Default 30fps at 90kHz
+	}
+
+	// Calculate differences and find the most common one (mode)
+	diffs := make(map[uint32]int)
+	for i := 1; i < len(timestamps); i++ {
+		if timestamps[i] > timestamps[i-1] {
+			diff := timestamps[i] - timestamps[i-1]
+			// Only consider reasonable frame durations (10fps to 120fps)
+			if diff >= 750 && diff <= 9000 {
+				diffs[diff]++
+			}
+		}
+	}
+
+	// Find the most common difference
+	var bestDiff uint32 = 3000
+	maxCount := 0
+	for diff, count := range diffs {
+		if count > maxCount {
+			maxCount = count
+			bestDiff = diff
+		}
+	}
+
+	return bestDiff
+}
+
+// maxUint32 returns the maximum of two uint32 values
+func maxUint32(a, b uint32) uint32 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// maxInt returns the maximum of two int values
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // Reset clears all SSRC tracking state

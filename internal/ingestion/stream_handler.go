@@ -13,11 +13,23 @@ import (
 	"github.com/zsiec/mirror/internal/ingestion/memory"
 	"github.com/zsiec/mirror/internal/ingestion/pipeline"
 	"github.com/zsiec/mirror/internal/ingestion/recovery"
+	"github.com/zsiec/mirror/internal/ingestion/resolution"
 	isync "github.com/zsiec/mirror/internal/ingestion/sync"
 	"github.com/zsiec/mirror/internal/ingestion/types"
 	"github.com/zsiec/mirror/internal/logger"
 	"github.com/zsiec/mirror/internal/queue"
 )
+
+// countIFrames counts the number of I-frames in a GOP
+func countIFrames(gop *types.GOP) int {
+	count := 0
+	for _, frame := range gop.Frames {
+		if frame.IsKeyframe() {
+			count++
+		}
+	}
+	return count
+}
 
 // VideoAwareConnection is an interface for connections that provide video/audio channels
 type VideoAwareConnection interface {
@@ -27,7 +39,6 @@ type VideoAwareConnection interface {
 }
 
 // StreamHandler handles a single stream with full video awareness
-// This is the unified handler that understands frames, GOPs, and timestamps
 type StreamHandler struct {
 	streamID string
 	codec    types.CodecType
@@ -87,6 +98,15 @@ type StreamHandler struct {
 	// Error recovery
 	recoveryHandler *recovery.Handler
 
+	// Resolution detection
+	resolutionDetector *resolution.Detector
+	detectedResolution resolution.Resolution
+	resolutionMu       sync.RWMutex
+
+	// Session-long parameter set cache
+	sessionParameterCache *types.ParameterSetContext
+	parameterCacheMu      sync.RWMutex
+
 	// Bitrate calculation
 	startTime       time.Time
 	bitrateWindow   []bitratePoint // Sliding window for bitrate calculation
@@ -122,8 +142,15 @@ func NewStreamHandler(
 	if vac, ok := conn.(VideoAwareConnection); ok {
 		videoSource = vac.GetVideoOutput()
 		audioSource = vac.GetAudioOutput()
+		logger.WithFields(map[string]interface{}{
+			"stream_id":        streamID,
+			"connection_type":  fmt.Sprintf("%T", conn),
+			"video_source_nil": videoSource == nil,
+			"audio_source_nil": audioSource == nil,
+		}).Info("Successfully connected to VideoAwareConnection channels")
 	} else {
 		logger.WithField("connection_type", fmt.Sprintf("%T", conn)).Error("Connection does not implement VideoAwareConnection")
+		cancel()
 		return nil
 	}
 
@@ -138,6 +165,7 @@ func NewStreamHandler(
 		MaxGOPs:     10,               // Keep last 10 GOPs
 		MaxBytes:    50 * 1024 * 1024, // 50MB buffer
 		MaxDuration: 30 * time.Second, // 30 seconds of content
+		Codec:       codec,            // Pass codec for robust parameter set parsing
 	}
 	gopBuffer := gop.NewBuffer(streamID, gopBufferConfig, logger)
 
@@ -159,6 +187,7 @@ func NewStreamHandler(
 	// Initialize video track (always present)
 	if err := syncManager.InitializeVideo(types.Rational{Num: 1, Den: 90000}); err != nil {
 		logger.WithError(err).Error("Failed to initialize video sync")
+		cancel()
 		return nil
 	}
 
@@ -171,6 +200,7 @@ func NewStreamHandler(
 		}
 		if err := syncManager.InitializeAudio(audioTimeBase); err != nil {
 			logger.WithError(err).Error("Failed to initialize audio sync")
+			cancel()
 			return nil
 		}
 	}
@@ -187,10 +217,9 @@ func NewStreamHandler(
 
 	videoPipeline, err := pipeline.NewVideoPipeline(ctx, pipelineCfg, videoSource)
 	if err != nil {
-		// Log the error but continue - we can still process at byte level
-		logger.WithError(err).Warn("Failed to create video pipeline, continuing with byte-level processing")
-		// Set to nil to handle gracefully in Start()
-		videoPipeline = nil
+		logger.WithError(err).Error("Failed to create video pipeline")
+		cancel()
+		return nil
 	}
 
 	// Create recovery handler
@@ -201,28 +230,44 @@ func NewStreamHandler(
 	}
 	recoveryHandler := recovery.NewHandler(streamID, recoveryConfig, gopBuffer, logger)
 
+	// Create resolution detector
+	resolutionDetector := resolution.NewDetector()
+
+	// Initialize session-long parameter set cache
+	sessionParameterCache := types.NewParameterSetContext(codec, streamID)
+
+	if srtAdapter, ok := conn.(*SRTConnectionAdapter); ok {
+		if transportCache := srtAdapter.GetParameterSetCache(); transportCache != nil {
+			logger.WithField("stream_id", streamID).
+				Info("Seeding session parameter cache with transport-level parameter sets")
+			seedSessionCacheFromTransport(sessionParameterCache, transportCache, logger)
+		}
+	}
+
 	h := &StreamHandler{
-		streamID:         streamID,
-		codec:            codec,
-		conn:             conn,
-		frameAssembler:   assembler,
-		pipeline:         videoPipeline,
-		gopDetector:      gopDetector,
-		gopBuffer:        gopBuffer,
-		bpController:     bpController,
-		syncManager:      syncManager,
-		recoveryHandler:  recoveryHandler,
-		videoInput:       videoSource,
-		audioInput:       audioSource,
-		frameQueue:       queue,
-		memoryController: memController,
-		ctx:              ctx,
-		cancel:           cancel,
-		maxRecentFrames:  300, // Keep last 10 seconds at 30fps
-		recentFrames:     make([]*types.VideoFrame, 0, 300),
-		startTime:        time.Now(),
-		bitrateWindow:    make([]bitratePoint, 0, 60), // Keep 60 seconds of data points
-		logger:           logger.WithField("stream_id", streamID),
+		streamID:              streamID,
+		codec:                 codec,
+		conn:                  conn,
+		frameAssembler:        assembler,
+		pipeline:              videoPipeline,
+		gopDetector:           gopDetector,
+		gopBuffer:             gopBuffer,
+		bpController:          bpController,
+		syncManager:           syncManager,
+		recoveryHandler:       recoveryHandler,
+		resolutionDetector:    resolutionDetector,
+		sessionParameterCache: sessionParameterCache,
+		videoInput:            videoSource,
+		audioInput:            audioSource,
+		frameQueue:            queue,
+		memoryController:      memController,
+		ctx:                   ctx,
+		cancel:                cancel,
+		maxRecentFrames:       300, // Keep last 10 seconds at 30fps
+		recentFrames:          make([]*types.VideoFrame, 0, 300),
+		startTime:             time.Now(),
+		bitrateWindow:         make([]bitratePoint, 0, 60), // Keep 60 seconds of data points
+		logger:                logger.WithField("stream_id", streamID),
 	}
 
 	// Set up recovery callbacks
@@ -235,6 +280,8 @@ func NewStreamHandler(
 	// Set up backpressure callbacks
 	bpController.SetRateChangeCallback(h.onRateChange)
 	bpController.SetGOPDropCallback(h.onGOPDrop)
+
+	gopBuffer.SetGOPDropCallback(h.onGOPBufferDrop)
 
 	return h
 }
@@ -249,14 +296,10 @@ func (h *StreamHandler) Start() {
 	}
 	h.started = true
 
-	// Start video pipeline if available
-	if h.pipeline != nil {
-		if err := h.pipeline.Start(); err != nil {
-			h.logger.WithError(err).Error("Failed to start video pipeline")
-			// Continue anyway - we can still do byte-level processing
-		}
-	} else {
-		h.logger.Warn("Video pipeline not available, using byte-level processing only")
+	// Start video pipeline
+	if err := h.pipeline.Start(); err != nil {
+		h.logger.WithError(err).Error("Failed to start video pipeline")
+		return
 	}
 
 	// Start backpressure controller
@@ -281,12 +324,6 @@ func (h *StreamHandler) Start() {
 func (h *StreamHandler) processFrames() {
 	defer h.wg.Done()
 
-	// If no pipeline, just return
-	if h.pipeline == nil {
-		h.logger.Debug("No video pipeline available for frame processing")
-		return
-	}
-
 	frameOutput := h.pipeline.GetOutput()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -302,7 +339,28 @@ func (h *StreamHandler) processFrames() {
 				return
 			}
 
+			h.logger.WithFields(map[string]interface{}{
+				"stream_id":  h.streamID,
+				"frame_id":   frame.ID,
+				"frame_type": frame.Type.String(),
+				"frame_size": frame.TotalSize,
+				"pts":        frame.PTS,
+				"dts":        frame.DTS,
+				"nal_units":  len(frame.NALUnits),
+			}).Info("Frame received in StreamHandler processFrames")
+
 			h.framesAssembled.Add(1)
+
+			h.extractParameterSetsFromFrame(frame)
+
+			if frame.Type == types.FrameTypeSPS || frame.Type == types.FrameTypePPS {
+				h.logger.WithFields(map[string]interface{}{
+					"stream_id":  h.streamID,
+					"frame_id":   frame.ID,
+					"frame_type": frame.Type.String(),
+					"nal_units":  len(frame.NALUnits),
+				}).Info("Processing standalone parameter set frame")
+			}
 
 			// Track frame types
 			switch frame.Type {
@@ -314,22 +372,24 @@ func (h *StreamHandler) processFrames() {
 				h.bFrameCount.Add(1)
 			}
 
-			// Check for frame corruption
-			if h.detectFrameCorruption(frame) {
-				frame.SetFlag(types.FrameFlagCorrupted)
-				if err := h.recoveryHandler.HandleError(recovery.ErrorTypeCorruption, frame); err != nil {
+			// Check for frame corruption (skip for metadata frames)
+			if frame.Type != types.FrameTypeSPS && frame.Type != types.FrameTypePPS && frame.Type != types.FrameTypeSEI {
+				if h.detectFrameCorruption(frame) {
+					frame.SetFlag(types.FrameFlagCorrupted)
+					if err := h.recoveryHandler.HandleError(recovery.ErrorTypeCorruption, frame); err != nil {
+						h.logger.WithFields(map[string]interface{}{
+							"stream_id": h.streamID,
+							"frame_id":  frame.ID,
+							"error":     err.Error(),
+						}).Error("Failed to handle corruption recovery")
+					}
+					h.framesDropped.Add(1)
 					h.logger.WithFields(map[string]interface{}{
 						"stream_id": h.streamID,
 						"frame_id":  frame.ID,
-						"error":     err.Error(),
-					}).Error("Failed to handle corruption recovery")
+					}).Warn("Dropping corrupted frame")
+					continue // Skip processing corrupted frames
 				}
-				h.framesDropped.Add(1)
-				h.logger.WithFields(map[string]interface{}{
-					"stream_id": h.streamID,
-					"frame_id":  frame.ID,
-				}).Warn("Dropping corrupted frame")
-				continue // Skip processing corrupted frames
 			}
 
 			// Update recovery handler with keyframes
@@ -337,17 +397,20 @@ func (h *StreamHandler) processFrames() {
 				h.recoveryHandler.UpdateKeyframe(frame)
 			}
 
+			// Try to detect resolution from this frame (safe - never fails)
+			h.tryDetectResolution(frame)
+
 			// Process frame through GOP detector
 			closedGOP := h.gopDetector.ProcessFrame(frame)
 			if closedGOP != nil {
 				h.logger.WithFields(map[string]interface{}{
 					"gop_id":      closedGOP.ID,
-					"frame_count": closedGOP.FrameCount,
-					"duration_ms": closedGOP.Duration.Milliseconds(),
-					"i_frames":    closedGOP.IFrames,
-					"p_frames":    closedGOP.PFrames,
-					"b_frames":    closedGOP.BFrames,
-				}).Debug("GOP closed")
+					"frame_count": len(closedGOP.Frames),
+					"duration_ms": closedGOP.Duration / 90, // Convert PTS to milliseconds
+					"i_frames":    countIFrames(closedGOP),
+					"p_frames":    closedGOP.PFrameCount,
+					"b_frames":    closedGOP.BFrameCount,
+				}).Info("GOP closed")
 
 				// Add closed GOP to buffer
 				h.gopBuffer.AddGOP(closedGOP)
@@ -536,6 +599,9 @@ func (h *StreamHandler) monitorBackpressure() {
 			if h.backpressure.Load() && pressure < 0.5 {
 				h.releaseBackpressure()
 			}
+
+			h.enforceSessionCacheLimits()
+			h.enforceRecentFramesLimits()
 		}
 	}
 }
@@ -600,10 +666,16 @@ func (h *StreamHandler) Stop() error {
 	// Wait for all goroutines
 	h.wg.Wait()
 
+	h.cleanupSessionCache()
+
+	h.cleanupRecentFrames()
+
 	// Release memory reservation
 	if h.memoryReserved > 0 {
 		h.memoryController.ReleaseMemory(h.streamID, h.memoryReserved)
 	}
+
+	h.cleanupBitrateWindow()
 
 	h.logger.Info("Stream handler stopped")
 
@@ -619,11 +691,17 @@ func (h *StreamHandler) GetStats() StreamStats {
 	started := h.started
 	h.mu.RUnlock()
 
+	// Get pipeline stats first so we can use the real counters
+	var pipelineStats pipeline.PipelineStats
+	if h.pipeline != nil {
+		pipelineStats = h.pipeline.GetStats()
+	}
+
 	stats := StreamStats{
 		StreamID:        h.streamID,
 		Codec:           h.codec.String(),
-		PacketsReceived: h.packetsReceived.Load(),
-		FramesAssembled: h.framesAssembled.Load(),
+		PacketsReceived: pipelineStats.PacketsProcessed, // Use pipeline counter
+		FramesAssembled: pipelineStats.FramesOutput,     // Use pipeline counter
 		FramesDropped:   h.framesDropped.Load(),
 		BytesProcessed:  h.bytesProcessed.Load(),
 		Errors:          h.errors.Load(),
@@ -635,16 +713,48 @@ func (h *StreamHandler) GetStats() StreamStats {
 		Started:         started,
 	}
 
+	// Get connection-level statistics if available
+	if h.conn != nil {
+		switch c := h.conn.(type) {
+		case *SRTConnectionAdapter:
+			if c.Connection != nil {
+				srtStats := c.Connection.GetStats()
+				h.logger.WithFields(map[string]interface{}{
+					"packets_lost":       srtStats.PacketsLost,
+					"packets_retrans":    srtStats.PacketsRetrans,
+					"rtt_ms":             srtStats.RTTMs,
+					"bandwidth_mbps":     srtStats.BandwidthMbps,
+					"delivery_delay_ms":  srtStats.DeliveryDelayMs,
+					"connection_time_ms": srtStats.ConnectionTimeMs.Milliseconds(),
+				}).Debug("SRT connection stats retrieved")
+
+				stats.ConnectionStats = &ConnectionStats{
+					PacketsLost:      srtStats.PacketsLost,
+					PacketsRetrans:   srtStats.PacketsRetrans,
+					RTTMs:            srtStats.RTTMs,
+					BandwidthMbps:    srtStats.BandwidthMbps,
+					DeliveryDelayMs:  srtStats.DeliveryDelayMs,
+					ConnectionTimeMs: srtStats.ConnectionTimeMs.Milliseconds(),
+				}
+			} else {
+				h.logger.Debug("SRT connection adapter has nil Connection field")
+			}
+		case *RTPConnectionAdapter:
+			// RTP stats would go here - they may have different interface
+			h.logger.Debug("RTP connection detected, stats not yet implemented")
+		default:
+			h.logger.WithField("conn_type", fmt.Sprintf("%T", h.conn)).Debug("Unknown connection type for stats")
+		}
+	}
+
 	// Get queue stats if available
 	if h.frameQueue != nil {
 		stats.QueueDepth = h.frameQueue.GetDepth()
 		stats.QueuePressure = h.frameQueue.GetPressure()
 	}
 
-	// Get pipeline stats if available
-	if h.pipeline != nil {
-		stats.PipelineStats = h.pipeline.GetStats()
-	}
+	// Set pipeline stats (already retrieved above)
+	stats.PipelineStats = pipelineStats
 
 	// Get GOP detector stats if available
 	if h.gopDetector != nil {
@@ -665,6 +775,10 @@ func (h *StreamHandler) GetStats() StreamStats {
 	if h.recoveryHandler != nil {
 		stats.RecoveryStats = h.recoveryHandler.GetStatistics()
 	}
+
+	// Add video information
+	stats.Resolution = h.GetDetectedResolution()
+	stats.Framerate = h.calculateFramerate()
 
 	return stats
 }
@@ -721,6 +835,16 @@ func (h *StreamHandler) calculateBitrate() float64 {
 	return float64(bytesDiff*8) / duration // Convert to bits per second
 }
 
+// ConnectionStats contains connection-level statistics
+type ConnectionStats struct {
+	PacketsLost      int64
+	PacketsRetrans   int64
+	RTTMs            float64
+	BandwidthMbps    float64
+	DeliveryDelayMs  float64
+	ConnectionTimeMs int64
+}
+
 // StreamStats contains unified statistics
 type StreamStats struct {
 	StreamID        string
@@ -736,10 +860,15 @@ type StreamStats struct {
 	Backpressure    bool
 	Started         bool
 	PipelineStats   pipeline.PipelineStats
+	// Connection-level statistics
+	ConnectionStats *ConnectionStats
 	// Frame type breakdown
 	KeyframeCount uint64
 	PFrameCount   uint64
 	BFrameCount   uint64
+	// Video information
+	Resolution resolution.Resolution
+	Framerate  float64
 	// GOP statistics
 	GOPStats gop.GOPStatistics
 	// GOP buffer statistics
@@ -892,33 +1021,49 @@ func (h *StreamHandler) serializeFrame(frame *types.VideoFrame) []byte {
 // Helper functions
 
 func detectCodecFromConnection(conn StreamConnection) types.CodecType {
-	// TODO: Implement codec detection from stream metadata
-	// For now, default to HEVC
-	return types.CodecHEVC
+	// Try to detect codec from SRT connection with MPEG-TS PMT
+	if srtConn, ok := conn.(*SRTConnectionAdapter); ok {
+		for attempts := 0; attempts < 10; attempts++ {
+			codec := srtConn.GetDetectedVideoCodec()
+			if codec != types.CodecUnknown {
+				return codec
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	return types.CodecH264
 }
 
 func (h *StreamHandler) logStats() {
 	stats := h.GetStats()
 
 	h.logger.WithFields(map[string]interface{}{
-		"packets_received": stats.PacketsReceived,
-		"frames_assembled": stats.FramesAssembled,
-		"frames_dropped":   stats.FramesDropped,
-		"bytes_processed":  stats.BytesProcessed,
-		"errors":           stats.Errors,
-		"queue_depth":      stats.QueueDepth,
-		"queue_pressure":   stats.QueuePressure,
-		"backpressure":     stats.Backpressure,
-		"keyframes":        stats.KeyframeCount,
-		"p_frames":         stats.PFrameCount,
-		"b_frames":         stats.BFrameCount,
-		"gops_total":       stats.GOPStats.TotalGOPs,
-		"gop_avg_size":     stats.GOPStats.AverageGOPSize,
-		"gop_avg_duration": stats.GOPStats.AverageDuration.Milliseconds(),
-		"bp_pressure":      stats.BackpressureStats.CurrentPressure,
-		"bp_rate_bps":      stats.BackpressureStats.CurrentRate,
-		"bp_adjustments":   stats.BackpressureStats.AdjustmentCount,
-		"bp_gops_dropped":  stats.BackpressureStats.GOPsDropped,
+		"packets_received":           stats.PacketsReceived,
+		"frames_assembled":           stats.FramesAssembled,
+		"frames_dropped":             stats.FramesDropped,
+		"bytes_processed":            stats.BytesProcessed,
+		"errors":                     stats.Errors,
+		"queue_depth":                stats.QueueDepth,
+		"queue_pressure":             stats.QueuePressure,
+		"backpressure":               stats.Backpressure,
+		"keyframes":                  stats.KeyframeCount,
+		"p_frames":                   stats.PFrameCount,
+		"b_frames":                   stats.BFrameCount,
+		"gops_total":                 stats.GOPStats.TotalGOPs,
+		"gop_avg_size":               stats.GOPStats.AverageGOPSize,
+		"gop_avg_duration":           stats.GOPStats.AverageDuration.Milliseconds(),
+		"bp_pressure":                stats.BackpressureStats.CurrentPressure,
+		"bp_rate_bps":                stats.BackpressureStats.CurrentRate,
+		"bp_adjustments":             stats.BackpressureStats.AdjustmentCount,
+		"bp_gops_dropped":            stats.BackpressureStats.GOPsDropped,
+		"pipeline_packets":           stats.PipelineStats.PacketsProcessed,
+		"pipeline_frames":            stats.PipelineStats.FramesOutput,
+		"pipeline_errors":            stats.PipelineStats.Errors,
+		"assembler_frames_assembled": stats.PipelineStats.AssemblerStats.FramesAssembled,
+		"assembler_frames_dropped":   stats.PipelineStats.AssemblerStats.FramesDropped,
+		"assembler_packets_received": stats.PipelineStats.AssemblerStats.PacketsReceived,
+		"assembler_packets_dropped":  stats.PipelineStats.AssemblerStats.PacketsDropped,
 	}).Info("Stream handler statistics")
 }
 
@@ -941,7 +1086,7 @@ func (h *StreamHandler) RecoverFromError() error {
 	lastGOP := recentGOPs[0]
 	h.logger.WithFields(map[string]interface{}{
 		"gop_id":      lastGOP.ID,
-		"frame_count": lastGOP.FrameCount,
+		"frame_count": len(lastGOP.Frames),
 	}).Info("Recovering from last complete GOP")
 
 	// Re-queue frames from the last GOP
@@ -1016,6 +1161,83 @@ func (h *StreamHandler) onRateChange(newRate int64) {
 func (h *StreamHandler) onGOPDrop(gopID uint64) {
 	h.logger.WithField("gop_id", gopID).Warn("Dropping entire GOP due to extreme pressure")
 	h.framesDropped.Add(30) // Approximate frames in a GOP
+}
+
+// onGOPBufferDrop handles GOP buffer drop notifications and preserves parameter sets
+func (h *StreamHandler) onGOPBufferDrop(gop *types.GOP, gopBufferContext *types.ParameterSetContext) {
+	h.parameterCacheMu.Lock()
+	defer h.parameterCacheMu.Unlock()
+
+	beforeStats := h.sessionParameterCache.GetStatistics()
+
+	if totalSets, ok := beforeStats["total_sets"].(int); ok && totalSets > 500 {
+		h.logger.WithFields(map[string]interface{}{
+			"stream_id":    h.streamID,
+			"current_sets": totalSets,
+			"threshold":    500,
+			"action":       "skipping_copy_to_prevent_memory_leak",
+		}).Warn("Session parameter cache size limit reached, skipping GOP buffer copy")
+		return
+	}
+
+	copiedCount := h.sessionParameterCache.CopyParameterSetsFrom(gopBufferContext)
+	afterStats := h.sessionParameterCache.GetStatistics()
+
+	if copiedCount <= types.ErrorCodeCriticalFailure {
+		// CRITICAL ERROR: System is in dangerous memory state
+		h.logger.WithFields(map[string]interface{}{
+			"stream_id":            h.streamID,
+			"gop_id":               gop.ID,
+			"error_code":           copiedCount,
+			"session_total_sets":   afterStats["total_sets"],
+			"emergency_cleanup":    "FAILED",
+			"system_health":        "CRITICAL_MEMORY_LEAK",
+		}).Error("🚨 CRITICAL: Parameter set memory leak detected - emergency cleanup failed!")
+		
+		// Increment error counter to trigger alerts
+		h.errors.Add(10) // Add multiple errors to signal severity
+		
+	} else if copiedCount <= types.ErrorCodeMemoryPressure {
+		// WARNING: System approaching limits
+		h.logger.WithFields(map[string]interface{}{
+			"stream_id":          h.streamID,
+			"gop_id":             gop.ID,
+			"error_code":         copiedCount,
+			"session_total_sets": afterStats["total_sets"],
+			"emergency_cleanup":  "PARTIAL",
+			"system_health":      "WARNING_MEMORY_PRESSURE",
+		}).Warn("⚠️  WARNING: Parameter set memory pressure - emergency cleanup performed")
+		
+		h.errors.Add(1) // Track as error for monitoring
+		
+	} else if copiedCount < 0 {
+		// Memory limits hit - copy was truncated
+		h.logger.WithFields(map[string]interface{}{
+			"stream_id":          h.streamID,
+			"gop_id":             gop.ID,
+			"partial_copy_count": -(copiedCount + 1),
+			"session_total_sets": afterStats["total_sets"],
+			"reason":             "memory_limits_reached",
+		}).Warn("📊 Parameter set copy truncated due to memory limits")
+		
+	} else if copiedCount > 0 {
+		h.logger.WithFields(map[string]interface{}{
+			"stream_id":             h.streamID,
+			"gop_id":                gop.ID,
+			"copied_parameter_sets": copiedCount,
+			"session_sps_before":    beforeStats["sps_count"],
+			"session_pps_before":    beforeStats["pps_count"],
+			"session_sps_after":     afterStats["sps_count"],
+			"session_pps_after":     afterStats["pps_count"],
+			"session_total_after":   afterStats["total_sets"],
+		}).Info("📦 Preserved parameter sets from GOP before buffer drop")
+	} else {
+		h.logger.WithFields(map[string]interface{}{
+			"stream_id": h.streamID,
+			"gop_id":    gop.ID,
+			"reason":    "no_new_parameter_sets",
+		}).Debug("GOP drop: no new parameter sets to preserve")
+	}
 }
 
 // dropOldestGOP drops the oldest GOP from the buffer
@@ -1190,6 +1412,374 @@ func uint32ToBytes(v uint32) []byte {
 	return b
 }
 
+// extractParameterSetsFromFrame extracts parameter sets from every frame as they flow through
+func (h *StreamHandler) extractParameterSetsFromFrame(frame *types.VideoFrame) {
+	h.parameterCacheMu.Lock()
+	defer h.parameterCacheMu.Unlock()
+
+	// Increment frame count for session statistics
+	h.sessionParameterCache.IncrementFrameCount()
+
+	spsAttempts, spsSuccesses := 0, 0
+	ppsAttempts, ppsSuccesses := 0, 0
+
+	// Extract parameter sets from every frame using existing GOP buffer extraction logic
+	for _, nalUnit := range frame.NALUnits {
+		nalType := nalUnit.Type
+		if nalType == 0 && len(nalUnit.Data) > 0 {
+			nalType = nalUnit.Data[0] & 0x1F
+		}
+
+		// Track extraction attempts
+		switch nalType {
+		case 7: // H.264 SPS
+			spsAttempts++
+			if h.gopBuffer.ExtractParameterSetFromNAL(h.sessionParameterCache, nalUnit, nalType, frame.GOPId) {
+				spsSuccesses++
+			}
+		case 8: // H.264 PPS
+			ppsAttempts++
+			if h.gopBuffer.ExtractParameterSetFromNAL(h.sessionParameterCache, nalUnit, nalType, frame.GOPId) {
+				ppsSuccesses++
+			}
+		default:
+			// For non-parameter NAL units, still call extraction (it will return false)
+			h.gopBuffer.ExtractParameterSetFromNAL(h.sessionParameterCache, nalUnit, nalType, frame.GOPId)
+		}
+	}
+
+	if spsAttempts > 0 || ppsAttempts > 0 {
+		h.logger.WithFields(map[string]interface{}{
+			"stream_id":       h.streamID,
+			"frame_id":        frame.ID,
+			"frame_type":      frame.Type.String(),
+			"sps_attempts":    spsAttempts,
+			"sps_successes":   spsSuccesses,
+			"pps_attempts":    ppsAttempts,
+			"pps_successes":   ppsSuccesses,
+			"total_nal_units": len(frame.NALUnits),
+		}).Info("Parameter set extraction from frame")
+	}
+
+	if (frame.Type == types.FrameTypeSPS || frame.Type == types.FrameTypePPS) && (spsAttempts == 0 && ppsAttempts == 0) {
+		// Log NAL unit details for diagnosis
+		var nalDetails []map[string]interface{}
+		for i, nalUnit := range frame.NALUnits {
+			nalType := nalUnit.Type
+			if nalType == 0 && len(nalUnit.Data) > 0 {
+				nalType = nalUnit.Data[0] & 0x1F
+			}
+			nalDetails = append(nalDetails, map[string]interface{}{
+				"index":     i,
+				"nal_type":  nalType,
+				"data_size": len(nalUnit.Data),
+			})
+		}
+
+		h.logger.WithFields(map[string]interface{}{
+			"stream_id":       h.streamID,
+			"frame_id":        frame.ID,
+			"frame_type":      frame.Type.String(),
+			"total_nal_units": len(frame.NALUnits),
+			"nal_details":     nalDetails,
+			"issue":           "parameter frame detected but no extraction attempts",
+		}).Warn("Parameter frame processing anomaly detected")
+	}
+}
+
+// tryDetectResolution attempts to detect resolution from a frame
+// This method is safe and will never panic or fail
+func (h *StreamHandler) tryDetectResolution(frame *types.VideoFrame) {
+	// Only attempt detection if we haven't detected resolution yet
+	h.resolutionMu.RLock()
+	alreadyDetected := h.detectedResolution.Width > 0 && h.detectedResolution.Height > 0
+	h.resolutionMu.RUnlock()
+
+	if alreadyDetected {
+		return // Already detected, no need to check again
+	}
+
+	// Only detect from keyframes and parameter sets (SPS, PPS, VPS)
+	if !frame.IsKeyframe() && frame.Type != types.FrameTypeSPS && frame.Type != types.FrameTypePPS && frame.Type != types.FrameTypeVPS {
+		return
+	}
+
+	// Extract NAL units from frame
+	var nalUnits [][]byte
+	for _, nalUnit := range frame.NALUnits {
+		if len(nalUnit.Data) > 0 {
+			nalUnits = append(nalUnits, nalUnit.Data)
+		}
+	}
+
+	if len(nalUnits) == 0 {
+		return
+	}
+
+	// Attempt detection (safe - never panics)
+	detectedRes := h.resolutionDetector.DetectFromNALUnits(nalUnits, h.codec)
+
+	// If we detected a valid resolution, store it
+	if detectedRes.Width > 0 && detectedRes.Height > 0 {
+		h.resolutionMu.Lock()
+		h.detectedResolution = detectedRes
+		h.resolutionMu.Unlock()
+
+		h.logger.WithFields(map[string]interface{}{
+			"stream_id":  h.streamID,
+			"width":      detectedRes.Width,
+			"height":     detectedRes.Height,
+			"resolution": detectedRes.String(),
+			"codec":      h.codec.String(),
+		}).Info("Resolution detected")
+	}
+}
+
+// GetDetectedResolution returns the detected resolution
+func (h *StreamHandler) GetDetectedResolution() resolution.Resolution {
+	h.resolutionMu.RLock()
+	defer h.resolutionMu.RUnlock()
+	return h.detectedResolution
+}
+
+// calculateFramerate calculates the current framerate based on frame count over time
+func (h *StreamHandler) calculateFramerate() float64 {
+	h.mu.RLock()
+	started := h.started
+	h.mu.RUnlock()
+
+	if !started {
+		return 0
+	}
+
+	// Get current frame count
+	frames := h.framesAssembled.Load()
+	if frames == 0 {
+		return 0
+	}
+
+	// Calculate duration since start
+	duration := time.Since(h.startTime).Seconds()
+	if duration <= 0 {
+		return 0
+	}
+
+	// Calculate framerate
+	framerate := float64(frames) / duration
+
+	// Cap at reasonable maximum (e.g., 120 fps)
+	if framerate > 120 {
+		return 120
+	}
+
+	return framerate
+}
+
+// seedSessionCacheFromTransport seeds session parameter cache with transport-level parameter sets
+func seedSessionCacheFromTransport(sessionCache, transportCache *types.ParameterSetContext, logger logger.Logger) {
+	if sessionCache == nil || transportCache == nil {
+		return
+	}
+
+	// Get transport-level parameter sets before copying
+	transportStats := transportCache.GetStatistics()
+	sessionStatsBefore := sessionCache.GetStatistics()
+
+	logger.WithFields(map[string]interface{}{
+		"transport_sps_count": transportStats["sps_count"],
+		"transport_pps_count": transportStats["pps_count"],
+		"transport_total":     transportStats["total_sets"],
+		"session_sps_before":  sessionStatsBefore["sps_count"],
+		"session_pps_before":  sessionStatsBefore["pps_count"],
+	}).Info("Starting transport-to-session parameter set copy")
+
+	// Copy all parameter sets from transport cache to session cache
+	copiedCount := sessionCache.CopyParameterSetsFrom(transportCache)
+
+	// Get updated session statistics
+	sessionStatsAfter := sessionCache.GetStatistics()
+
+	if copiedCount <= types.ErrorCodeCriticalFailure {
+		// CRITICAL ERROR during transport-to-session seeding
+		logger.WithFields(map[string]interface{}{
+			"error_code":           copiedCount,
+			"session_total_sets":   sessionStatsAfter["total_sets"],
+			"transport_total_sets": transportStats["total_sets"],
+			"emergency_cleanup":    "FAILED",
+			"system_health":        "CRITICAL_MEMORY_LEAK",
+		}).Error("🚨 CRITICAL: Transport-to-session parameter copy failed - memory leak detected!")
+		
+	} else if copiedCount <= types.ErrorCodeMemoryPressure {
+		// WARNING during transport-to-session seeding
+		logger.WithFields(map[string]interface{}{
+			"error_code":           copiedCount,
+			"session_total_sets":   sessionStatsAfter["total_sets"],
+			"transport_total_sets": transportStats["total_sets"],
+			"emergency_cleanup":    "PARTIAL",
+			"system_health":        "WARNING_MEMORY_PRESSURE",
+		}).Warn("⚠️  WARNING: Transport-to-session copy hit memory pressure - emergency cleanup performed")
+		
+	} else if copiedCount < 0 {
+		// Copy was truncated due to memory limits
+		logger.WithFields(map[string]interface{}{
+			"partial_copy_count":   -(copiedCount + 1),
+			"session_total_sets":   sessionStatsAfter["total_sets"],
+			"transport_total_sets": transportStats["total_sets"],
+			"reason":               "memory_limits_reached",
+		}).Warn("📊 Transport-to-session parameter copy truncated due to memory limits")
+		
+	} else if copiedCount > 0 {
+		logger.WithFields(map[string]interface{}{
+			"copied_count":        copiedCount,
+			"session_sps_after":   sessionStatsAfter["sps_count"],
+			"session_pps_after":   sessionStatsAfter["pps_count"],
+			"session_total_after": sessionStatsAfter["total_sets"],
+		}).Info("Successfully seeded session cache with transport-level parameter sets")
+
+		// Log the detailed parameter set inventory
+		transportSets := transportCache.GetAllParameterSets()
+		for paramType, paramMap := range transportSets {
+			var ids []uint8
+			for id := range paramMap {
+				ids = append(ids, id)
+			}
+			logger.WithFields(map[string]interface{}{
+				"param_type": paramType,
+				"ids":        ids,
+				"count":      len(ids),
+			}).Info("Copied parameter sets by type")
+		}
+	} else {
+		logger.WithFields(map[string]interface{}{
+			"transport_sps_count": transportStats["sps_count"],
+			"transport_pps_count": transportStats["pps_count"],
+		}).Warn("No parameter sets were copied from transport cache")
+	}
+}
+
+// GetSessionParameterCache returns the session parameter cache for external access
+func (h *StreamHandler) GetSessionParameterCache() *types.ParameterSetContext {
+	h.parameterCacheMu.RLock()
+	defer h.parameterCacheMu.RUnlock()
+	return h.sessionParameterCache
+}
+
+// GetLatestIFrameWithSessionContext returns the latest iframe with session-long parameter context
+// This replaces the GOP buffer approach with session-scoped parameter management
+func (h *StreamHandler) GetLatestIFrameWithSessionContext() (*types.VideoFrame, *types.ParameterSetContext) {
+	paramContext := h.GetSessionParameterCache()
+
+	recentGOPs := h.gopBuffer.GetRecentGOPs(5) // Check last 5 GOPs
+
+	for _, gop := range recentGOPs {
+		if gop.Keyframe != nil {
+			canDecode, reason := paramContext.CanDecodeFrame(gop.Keyframe)
+			if canDecode {
+				h.logger.WithFields(map[string]interface{}{
+					"stream_id": h.streamID,
+					"frame_id":  gop.Keyframe.ID,
+					"gop_id":    gop.ID,
+					"method":    "session_context_found_decodable",
+					"stats":     paramContext.GetStatistics(),
+				}).Info("Found decodable iframe with session-long parameter context")
+				return gop.Keyframe, paramContext
+			} else {
+				h.logger.WithFields(map[string]interface{}{
+					"stream_id": h.streamID,
+					"frame_id":  gop.Keyframe.ID,
+					"gop_id":    gop.ID,
+					"reason":    reason,
+				}).Debug("Iframe not decodable, trying next GOP")
+			}
+		}
+	}
+
+	// If no decodable iframe found, try to extract parameter sets from the latest iframe's GOP
+	iframe := h.gopBuffer.GetLatestIFrame()
+	if iframe == nil {
+		return nil, nil
+	}
+
+	h.logger.WithFields(map[string]interface{}{
+		"stream_id": h.streamID,
+		"frame_id":  iframe.ID,
+	}).Warn("No decodable iframe found, attempting parameter extraction from latest")
+
+	// Try to extract parameter sets from the iframe's GOP
+	h.extractParameterSetsFromGOPForFrame(iframe, paramContext)
+
+	// Check again after extraction
+	canDecode, reason := paramContext.CanDecodeFrame(iframe)
+	h.logger.WithFields(map[string]interface{}{
+		"stream_id":   h.streamID,
+		"frame_id":    iframe.ID,
+		"can_decode":  canDecode,
+		"reason":      reason,
+		"stats_after": paramContext.GetStatistics(),
+	}).Info("Parameter extraction attempt completed")
+
+	h.logger.WithFields(map[string]interface{}{
+		"stream_id": h.streamID,
+		"frame_id":  iframe.ID,
+		"codec":     h.codec,
+		"method":    "session_context_fallback",
+		"stats":     paramContext.GetStatistics(),
+	}).Info("Providing iframe with session-long parameter context")
+
+	return iframe, paramContext
+}
+
+// extractParameterSetsFromGOPForFrame extracts parameter sets from ALL available GOPs to ensure completeness
+func (h *StreamHandler) extractParameterSetsFromGOPForFrame(frame *types.VideoFrame, paramContext *types.ParameterSetContext) {
+	recentGOPs := h.gopBuffer.GetRecentGOPs(10) // Get up to 10 recent GOPs
+
+	h.logger.WithFields(map[string]interface{}{
+		"stream_id":    h.streamID,
+		"frame_id":     frame.ID,
+		"total_gops":   len(recentGOPs),
+		"scanning_for": "missing parameter sets",
+	}).Info("Scanning ALL GOPs for comprehensive parameter set extraction")
+
+	extractedSPS := 0
+	extractedPPS := 0
+	scannedGOPs := 0
+
+	for _, gop := range recentGOPs {
+		scannedGOPs++
+
+		// Extract parameter sets from all frames in this GOP
+		for _, gopFrame := range gop.Frames {
+			for _, nalUnit := range gopFrame.NALUnits {
+				nalType := nalUnit.Type
+				if nalType == 0 && len(nalUnit.Data) > 0 {
+					nalType = nalUnit.Data[0] & 0x1F
+				}
+
+				// Extract SPS and PPS
+				switch nalType {
+				case 7: // H.264 SPS
+					if h.gopBuffer.ExtractParameterSetFromNAL(paramContext, nalUnit, nalType, gop.ID) {
+						extractedSPS++
+					}
+				case 8: // H.264 PPS
+					if h.gopBuffer.ExtractParameterSetFromNAL(paramContext, nalUnit, nalType, gop.ID) {
+						extractedPPS++
+					}
+				}
+			}
+		}
+	}
+
+	h.logger.WithFields(map[string]interface{}{
+		"stream_id":     h.streamID,
+		"frame_id":      frame.ID,
+		"scanned_gops":  scannedGOPs,
+		"extracted_sps": extractedSPS,
+		"extracted_pps": extractedPPS,
+		"stats_updated": paramContext.GetStatistics(),
+	}).Info("Completed comprehensive parameter set extraction from all GOPs")
+}
+
 // processAudio handles audio packets from the audio input channel
 func (h *StreamHandler) processAudio() {
 	defer h.wg.Done()
@@ -1219,4 +1809,125 @@ func (h *StreamHandler) processAudio() {
 			// - Muxing with video for output
 		}
 	}
+}
+
+
+// cleanupSessionCache clears the session parameter cache to prevent memory leaks
+func (h *StreamHandler) cleanupSessionCache() {
+	h.parameterCacheMu.Lock()
+	defer h.parameterCacheMu.Unlock()
+
+	if h.sessionParameterCache == nil {
+		return
+	}
+
+	// Get stats before cleanup
+	beforeStats := h.sessionParameterCache.GetStatistics()
+
+	// Clear all parameter sets from session cache
+	h.sessionParameterCache.Clear()
+
+	// Get stats after cleanup
+	afterStats := h.sessionParameterCache.GetStatistics()
+
+	h.logger.WithFields(map[string]interface{}{
+		"stream_id":       h.streamID,
+		"sps_before":      beforeStats["sps_count"],
+		"pps_before":      beforeStats["pps_count"],
+		"total_before":    beforeStats["total_sets"],
+		"total_after":     afterStats["total_sets"],
+		"memory_leak_fix": "session_cache_cleared",
+	}).Info("Session parameter cache cleaned up")
+}
+
+// cleanupRecentFrames clears the recent frames buffer to prevent memory leaks
+func (h *StreamHandler) cleanupRecentFrames() {
+	h.recentFramesMu.Lock()
+	defer h.recentFramesMu.Unlock()
+
+	frameCount := len(h.recentFrames)
+
+	// Clear the recent frames slice
+	h.recentFrames = nil
+
+	h.logger.WithFields(map[string]interface{}{
+		"stream_id":       h.streamID,
+		"frames_cleared":  frameCount,
+		"memory_leak_fix": "recent_frames_cleared",
+	}).Info("Recent frames buffer cleaned up")
+}
+
+// cleanupBitrateWindow clears the bitrate calculation window to prevent memory leaks
+func (h *StreamHandler) cleanupBitrateWindow() {
+	h.bitrateWindowMu.Lock()
+	defer h.bitrateWindowMu.Unlock()
+
+	windowSize := len(h.bitrateWindow)
+
+	// Clear the bitrate window
+	h.bitrateWindow = nil
+
+	h.logger.WithFields(map[string]interface{}{
+		"stream_id":       h.streamID,
+		"points_cleared":  windowSize,
+		"memory_leak_fix": "bitrate_window_cleared",
+	}).Info("Bitrate calculation window cleaned up")
+}
+
+// enforceSessionCacheLimits enforces memory limits on the session parameter cache
+func (h *StreamHandler) enforceSessionCacheLimits() {
+	h.parameterCacheMu.Lock()
+	defer h.parameterCacheMu.Unlock()
+
+	if h.sessionParameterCache == nil {
+		return
+	}
+
+	stats := h.sessionParameterCache.GetStatistics()
+	totalSets, ok := stats["total_sets"].(int)
+	if !ok || totalSets <= 500 { // Safe threshold (less than limit)
+		return
+	}
+
+	h.logger.WithFields(map[string]interface{}{
+		"stream_id":    h.streamID,
+		"current_sets": totalSets,
+		"threshold":    500,
+		"action":       "triggering_cleanup",
+	}).Warn("Session parameter cache approaching limit, clearing old entries")
+
+	// Clear half of the cache to prevent immediate re-triggering
+	h.sessionParameterCache.ClearOldest(totalSets / 2)
+
+	afterStats := h.sessionParameterCache.GetStatistics()
+	h.logger.WithFields(map[string]interface{}{
+		"stream_id":   h.streamID,
+		"sets_before": totalSets,
+		"sets_after":  afterStats["total_sets"],
+	}).Info("Session parameter cache partially cleaned")
+}
+
+// enforceRecentFramesLimits enforces memory limits on the recent frames buffer
+func (h *StreamHandler) enforceRecentFramesLimits() {
+	h.recentFramesMu.Lock()
+	defer h.recentFramesMu.Unlock()
+
+	if len(h.recentFrames) <= h.maxRecentFrames {
+		return
+	}
+
+	// Trim to 80% of max to prevent immediate re-triggering
+	targetSize := int(float64(h.maxRecentFrames) * 0.8)
+	oldSize := len(h.recentFrames)
+
+	// Keep only the most recent frames
+	h.recentFrames = h.recentFrames[len(h.recentFrames)-targetSize:]
+
+	h.logger.WithFields(map[string]interface{}{
+		"stream_id":       h.streamID,
+		"frames_before":   oldSize,
+		"frames_after":    len(h.recentFrames),
+		"max_frames":      h.maxRecentFrames,
+		"memory_leak_fix": "frames_trimmed",
+	}).Info("Recent frames buffer trimmed to prevent memory leak")
 }

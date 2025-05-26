@@ -7,10 +7,11 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/zsiec/mirror/internal/ingestion/types"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 func TestBuffer_GetFrame_NilSafety(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := BufferConfig{
 		MaxGOPs:     100,
 		MaxBytes:    1000000,
@@ -48,9 +49,10 @@ func TestBuffer_GetFrame_NilSafety(t *testing.T) {
 			name: "frame_with_out_of_bounds_position",
 			setup: func() {
 				// Create a GOP with one frame
-				gop := &GOP{
-					ID:     1,
-					Closed: true,
+				gop := &types.GOP{
+					ID:       1,
+					Closed:   true,
+					Complete: true,
 					Keyframe: &types.VideoFrame{
 						ID:          1,
 						Type:        types.FrameTypeI,
@@ -81,9 +83,10 @@ func TestBuffer_GetFrame_NilSafety(t *testing.T) {
 			name: "valid_frame",
 			setup: func() {
 				// Create a valid GOP
-				gop := &GOP{
-					ID:     2,
-					Closed: true,
+				gop := &types.GOP{
+					ID:       2,
+					Closed:   true,
+					Complete: true,
 					Keyframe: &types.VideoFrame{
 						ID:          2,
 						Type:        types.FrameTypeI,
@@ -137,7 +140,7 @@ func TestBuffer_GetFrame_NilSafety(t *testing.T) {
 
 // TestBuffer_DropFrames_NilSafety tests that DropFrames handles nil GOPs safely
 func TestBuffer_DropFrames_NilSafety(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := BufferConfig{
 		MaxGOPs:     100,
 		MaxBytes:    1000000,
@@ -146,9 +149,10 @@ func TestBuffer_DropFrames_NilSafety(t *testing.T) {
 	buffer := NewBuffer("test-stream", config, logger)
 
 	// Add a valid GOP
-	gop := &GOP{
-		ID:     1,
-		Closed: true,
+	gop := &types.GOP{
+		ID:       1,
+		Closed:   true,
+		Complete: true,
 		Keyframe: &types.VideoFrame{
 			ID:          1,
 			Type:        types.FrameTypeI,

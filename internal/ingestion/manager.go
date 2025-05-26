@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
@@ -27,12 +28,12 @@ const (
 	DefaultBitrate = int64(52428800)
 )
 
-// Manager orchestrates all ingestion components
+// Manager coordinates all ingestion components
 type Manager struct {
 	config           *config.IngestionConfig
 	registry         registry.Registry
 	memoryController *memory.Controller
-	srtListener      *srt.Listener
+	srtListener      *srt.ListenerAdapter
 	rtpListener      *rtp.Listener
 	logger           logger.Logger
 
@@ -68,15 +69,13 @@ func NewManager(cfg *config.IngestionConfig, logger logger.Logger) (*Manager, er
 		return nil, fmt.Errorf("failed to connect to Redis for registry: %w", err)
 	}
 
-	// Create Redis registry with logrus logger
-	logrusLogger := logger.(*logrus.Logger)
+	logrusLogger := logrus.New()
 	reg := registry.NewRedisRegistry(redisClient, logrusLogger)
 
 	// Create memory controller
 	maxTotal := cfg.Memory.MaxTotal
 	maxPerStream := cfg.Memory.MaxPerStream
 
-	// Use defaults if not configured
 	if maxTotal == 0 {
 		maxTotal = DefaultMaxMemory
 	}
@@ -86,7 +85,6 @@ func NewManager(cfg *config.IngestionConfig, logger logger.Logger) (*Manager, er
 
 	memController := memory.NewController(maxTotal, maxPerStream)
 
-	// Create context for the manager
 	ctx, cancel := context.WithCancel(context.Background())
 
 	m := &Manager{
@@ -100,13 +98,19 @@ func NewManager(cfg *config.IngestionConfig, logger logger.Logger) (*Manager, er
 		cancel:           cancel,
 	}
 
-	// Create SRT listener if enabled
+	// Create SRT listener if enabled using Haivision adapter
 	if cfg.SRT.Enabled {
-		m.srtListener = srt.NewListener(&cfg.SRT, &cfg.Codecs, reg, logger)
+		// Use new Haivision adapter for better FFmpeg compatibility
+		adapter := srt.NewHaivisionAdapter()
+		srtListener := srt.NewListenerWithAdapter(&cfg.SRT, &cfg.Codecs, reg, adapter, logger)
+
 		// Set the connection handler to use proper buffering
-		m.srtListener.SetConnectionHandler(func(conn *srt.Connection) error {
+		srtListener.SetHandler(func(conn *srt.Connection) error {
 			return m.HandleSRTConnection(conn)
 		})
+
+		// Store as the old interface type for now (we'll clean this up)
+		m.srtListener = &srt.ListenerAdapter{Listener: srtListener}
 	}
 
 	// Create RTP listener if enabled
@@ -257,18 +261,26 @@ func (m *Manager) GetStats(ctx context.Context) IngestionStats {
 
 	if m.srtListener != nil {
 		stats.SRTEnabled = true
-		stats.SRTSessions = m.srtListener.GetActiveSessions()
 	}
 
 	if m.rtpListener != nil {
 		stats.RTPEnabled = true
-		stats.RTPSessions = m.rtpListener.GetActiveSessions()
 	}
 
-	// Get active streams count
+	// Get active streams count from registry
 	streams, err := m.registry.List(ctx)
 	if err == nil {
 		stats.TotalStreams = len(streams)
+
+		// Count sessions by type from registry
+		for _, stream := range streams {
+			switch stream.Type {
+			case registry.StreamTypeSRT:
+				stats.SRTSessions++
+			case registry.StreamTypeRTP:
+				stats.RTPSessions++
+			}
+		}
 	}
 
 	// Get active stream handlers count safely
@@ -593,8 +605,59 @@ func (m *Manager) GetStreamHandler(streamID string) (*StreamHandler, bool) {
 	return handler, exists
 }
 
+// GetStreamHandlerWithStats atomically gets handler stats to prevent race conditions
+func (m *Manager) GetStreamHandlerWithStats(streamID string) (StreamStats, bool) {
+	m.handlersMu.RLock()
+	defer m.handlersMu.RUnlock()
+
+	handler, exists := m.streamHandlers[streamID]
+	if !exists {
+		return StreamStats{}, false
+	}
+
+	// Get stats while holding the lock - eliminates race condition
+	stats := handler.GetStats()
+	return stats, true
+}
+
+// GetStreamHandlerAndStats atomically gets both handler and stats to prevent race conditions
+func (m *Manager) GetStreamHandlerAndStats(streamID string) (*StreamHandler, StreamStats, bool) {
+	m.handlersMu.RLock()
+	defer m.handlersMu.RUnlock()
+
+	handler, exists := m.streamHandlers[streamID]
+	if !exists {
+		return nil, StreamStats{}, false
+	}
+
+	// Get stats while holding the lock - eliminates race condition
+	stats := handler.GetStats()
+	return handler, stats, true
+}
+
 // HandleSRTConnection handles a new SRT connection with proper backpressure
 func (m *Manager) HandleSRTConnection(conn *srt.Connection) error {
+	streamID := conn.GetStreamID()
+
+	// Register stream in registry (similar to RTP streams)
+	if m.registry != nil {
+		stream := &registry.Stream{
+			ID:            streamID,
+			Type:          registry.StreamTypeSRT,
+			Status:        registry.StatusActive,
+			SourceAddr:    conn.GetRemoteAddr(), // Get actual remote address from SRT connection
+			CreatedAt:     time.Now(),
+			LastHeartbeat: time.Now(),
+			VideoCodec:    "Unknown", // Will be updated when codec is detected
+		}
+
+		if err := m.registry.Register(context.Background(), stream); err != nil {
+			m.logger.WithError(err).Error("Failed to register SRT stream in registry", "stream_id", streamID)
+		} else {
+			m.logger.Info("SRT stream registered successfully", "stream_id", streamID)
+		}
+	}
+
 	// Create adapter
 	adapter := NewSRTConnectionAdapter(conn)
 	if adapter == nil {
@@ -602,56 +665,112 @@ func (m *Manager) HandleSRTConnection(conn *srt.Connection) error {
 	}
 
 	// Create and start stream handler
-	handler, err := m.CreateStreamHandler(conn.GetStreamID(), adapter)
+	handler, err := m.CreateStreamHandler(streamID, adapter)
 	if err != nil {
 		// Cleanup adapter on failure
 		if closeErr := adapter.Close(); closeErr != nil {
 			m.logger.WithError(closeErr).Warn("Failed to close adapter after handler creation failure")
 		}
+		// Unregister from registry on failure
+		if m.registry != nil {
+			m.registry.Unregister(context.Background(), streamID)
+		}
 		return fmt.Errorf("failed to create stream handler: %w", err)
 	}
 
-	// Handler is already started, just wait for completion
-	<-handler.ctx.Done()
+	// Handler is already started, wait for completion or manager shutdown
+	select {
+	case <-handler.ctx.Done():
+		m.logger.WithField("stream_id", streamID).Debug("SRT handler completed normally")
+	case <-m.ctx.Done():
+		m.logger.WithField("stream_id", streamID).Info("Manager shutdown, stopping SRT handler")
+		// Manager is shutting down, stop the handler gracefully
+		if err := handler.Stop(); err != nil {
+			m.logger.WithError(err).Error("Failed to stop SRT handler during manager shutdown")
+		}
+		// Wait a bit for graceful shutdown, but don't block forever
+		select {
+		case <-handler.ctx.Done():
+			m.logger.WithField("stream_id", streamID).Debug("SRT handler stopped gracefully")
+		case <-time.After(5 * time.Second):
+			m.logger.WithField("stream_id", streamID).Warn("SRT handler took too long to stop gracefully")
+		}
+	}
 
 	// Cleanup
-	m.RemoveStreamHandler(conn.GetStreamID())
+	m.RemoveStreamHandler(streamID)
+	// Unregister from registry
+	if m.registry != nil {
+		if err := m.registry.Unregister(context.Background(), streamID); err != nil {
+			m.logger.WithError(err).Error("Failed to unregister SRT stream from registry", "stream_id", streamID)
+		}
+	}
 	return nil
 }
 
 // HandleRTPSession handles a new RTP session with proper backpressure
 func (m *Manager) HandleRTPSession(session *rtp.Session) error {
+	m.logger.WithField("stream_id", session.GetStreamID()).Info("HandleRTPSession: Entry")
+
 	// Detect codec from session
+	m.logger.WithField("stream_id", session.GetStreamID()).Info("HandleRTPSession: About to call DetectCodecFromRTPSession")
 	codecType := DetectCodecFromRTPSession(session)
+	m.logger.WithField("stream_id", session.GetStreamID()).Info("HandleRTPSession: DetectCodecFromRTPSession completed")
 	if codecType == types.CodecUnknown {
 		// Default to H.264 for video sessions
 		m.logger.Warn("Could not detect codec, defaulting to H.264")
 		codecType = types.CodecH264
 	}
 
-	m.logger.Info("Detected codec for RTP session",
-		"stream_id", session.GetStreamID(),
-		"codec", codecType.String(),
-		"payload_type", session.GetPayloadType())
+	m.logger.WithFields(map[string]interface{}{
+		"stream_id":    session.GetStreamID(),
+		"codec":        codecType.String(),
+		"payload_type": session.GetPayloadType(),
+	}).Info("HandleRTPSession: Detected codec for RTP session")
 
 	// Create adapter
+	m.logger.WithField("stream_id", session.GetStreamID()).Info("HandleRTPSession: Creating RTP connection adapter")
 	adapter := NewRTPConnectionAdapter(session, codecType)
 	if adapter == nil {
+		m.logger.WithField("stream_id", session.GetStreamID()).Error("HandleRTPSession: Failed to create RTP connection adapter")
 		return fmt.Errorf("failed to create RTP connection adapter")
 	}
 
 	// Create and start stream handler
+	m.logger.WithField("stream_id", session.GetStreamID()).Info("HandleRTPSession: Creating stream handler")
 	handler, err := m.CreateStreamHandler(session.GetStreamID(), adapter)
 	if err != nil {
 		// Cleanup adapter on failure
 		if closeErr := adapter.Close(); closeErr != nil {
 			m.logger.WithError(closeErr).Warn("Failed to close adapter after handler creation failure")
 		}
+		m.logger.WithError(err).WithField("stream_id", session.GetStreamID()).Error("HandleRTPSession: Failed to create stream handler")
 		return fmt.Errorf("failed to create stream handler: %w", err)
 	}
 
-	// Handler is already started, just wait for completion
-	<-handler.ctx.Done()
+	m.logger.WithField("stream_id", session.GetStreamID()).Info("HandleRTPSession: Handler created successfully, waiting for completion")
+
+	// Handler is already started, wait for completion or manager shutdown
+	streamID := session.GetStreamID()
+	select {
+	case <-handler.ctx.Done():
+		m.logger.WithField("stream_id", streamID).Debug("RTP handler completed normally")
+	case <-m.ctx.Done():
+		m.logger.WithField("stream_id", streamID).Info("Manager shutdown, stopping RTP handler")
+		// Manager is shutting down, stop the handler gracefully
+		if err := handler.Stop(); err != nil {
+			m.logger.WithError(err).Error("Failed to stop RTP handler during manager shutdown")
+		}
+		// Wait a bit for graceful shutdown, but don't block forever
+		select {
+		case <-handler.ctx.Done():
+			m.logger.WithField("stream_id", streamID).Debug("RTP handler stopped gracefully")
+		case <-time.After(5 * time.Second):
+			m.logger.WithField("stream_id", streamID).Warn("RTP handler took too long to stop gracefully")
+		}
+	}
+
+	m.logger.WithField("stream_id", streamID).Info("HandleRTPSession: Handler completed, cleaning up")
 
 	// Cleanup
 	m.RemoveStreamHandler(session.GetStreamID())

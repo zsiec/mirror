@@ -8,10 +8,78 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zsiec/mirror/internal/ingestion/gop"
 	"github.com/zsiec/mirror/internal/ingestion/types"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
+// createRealisticGOP creates a realistic GOP for testing with proper metadata
+func createRealisticGOP(id uint64, streamID string) *types.GOP {
+	baseTime := time.Now()
+	basePTS := int64(90000) // 1 second at 90kHz
+
+	// Create realistic frames
+	frames := []*types.VideoFrame{
+		{
+			ID:          id*10 + 1,
+			Type:        types.FrameTypeI,
+			CaptureTime: baseTime,
+			PTS:         basePTS,
+			DTS:         basePTS,
+			TotalSize:   15000, // Realistic I-frame size
+			QP:          24,
+		},
+		{
+			ID:          id*10 + 2,
+			Type:        types.FrameTypeP,
+			CaptureTime: baseTime.Add(33 * time.Millisecond),
+			PTS:         basePTS + 3000, // 30fps = 3000 PTS units
+			DTS:         basePTS + 3000,
+			TotalSize:   5000, // Realistic P-frame size
+			QP:          26,
+		},
+		{
+			ID:          id*10 + 3,
+			Type:        types.FrameTypeB,
+			CaptureTime: baseTime.Add(66 * time.Millisecond),
+			PTS:         basePTS + 6000,
+			DTS:         basePTS + 3000, // B-frame reordering
+			TotalSize:   3000,           // Realistic B-frame size
+			QP:          28,
+		},
+	}
+
+	// Create GOP with realistic metadata
+	gop := &types.GOP{
+		ID:           id,
+		StreamID:     streamID,
+		Keyframe:     frames[0],
+		Frames:       frames,
+		StartTime:    baseTime,
+		EndTime:      baseTime.Add(66 * time.Millisecond),
+		Duration:     basePTS + 6000 - basePTS, // PTS duration
+		Complete:     true,
+		Closed:       true,
+		TotalSize:    23000, // Sum of frame sizes
+		PFrameCount:  1,
+		BFrameCount:  1,
+		IFrameSize:   15000,
+		AvgFrameSize: 7666,    // 23000/3
+		BitRate:      2784000, // Calculated from size and duration
+		Structure: types.GOPStructure{
+			Size:    3,
+			Pattern: "IBP",
+		},
+	}
+
+	// Set GOP ID for each frame
+	for _, frame := range frames {
+		frame.GOPId = id
+	}
+
+	return gop
+}
+
 func TestHandler_PacketLossRecovery(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	gopBufferConfig := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxDuration: 30 * time.Second,
@@ -27,20 +95,7 @@ func TestHandler_PacketLossRecovery(t *testing.T) {
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
 
 	// Add a complete GOP to buffer
-	testGOP := &gop.GOP{
-		ID:     1,
-		Closed: true,
-		Keyframe: &types.VideoFrame{
-			ID:          1,
-			Type:        types.FrameTypeI,
-			CaptureTime: time.Now(),
-		},
-		Frames: []*types.VideoFrame{
-			{ID: 1, Type: types.FrameTypeI},
-			{ID: 2, Type: types.FrameTypeP},
-			{ID: 3, Type: types.FrameTypeB},
-		},
-	}
+	testGOP := createRealisticGOP(1, "test-stream")
 	gopBuffer.AddGOP(testGOP)
 
 	// Test packet loss recovery
@@ -51,7 +106,7 @@ func TestHandler_PacketLossRecovery(t *testing.T) {
 }
 
 func TestHandler_CorruptionRecovery(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	gopBufferConfig := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxDuration: 30 * time.Second,
@@ -67,38 +122,14 @@ func TestHandler_CorruptionRecovery(t *testing.T) {
 	handler := NewHandler("test-stream", config, gopBuffer, logger)
 
 	// Add GOP with corrupted frame
-	testGOP := &gop.GOP{
-		ID:     1,
-		Closed: true, // Mark as closed so it gets added
-		Keyframe: &types.VideoFrame{
-			ID:          1,
-			Type:        types.FrameTypeI,
-			CaptureTime: time.Now(),
-		},
-		Frames: []*types.VideoFrame{
-			{ID: 1, Type: types.FrameTypeI},
-			{ID: 2, Type: types.FrameTypeP, Flags: types.FrameFlagCorrupted},
-			{ID: 3, Type: types.FrameTypeB},
-			{ID: 4, Type: types.FrameTypeB},
-		},
-		FrameCount: 4,
-	}
+	testGOP := createRealisticGOP(1, "test-stream")
+	// Mark one frame as corrupted
+	testGOP.Frames[1].Flags = types.FrameFlagCorrupted
+	testGOP.CorruptedFrames = 1
 	gopBuffer.AddGOP(testGOP)
 
 	// Add another GOP with good keyframe
-	goodGOP := &gop.GOP{
-		ID:     2,
-		Closed: true, // Mark as closed so it gets added
-		Keyframe: &types.VideoFrame{
-			ID:          5,
-			Type:        types.FrameTypeI,
-			CaptureTime: time.Now(),
-		},
-		Frames: []*types.VideoFrame{
-			{ID: 5, Type: types.FrameTypeI},
-		},
-		FrameCount: 1,
-	}
+	goodGOP := createRealisticGOP(2, "test-stream")
 	gopBuffer.AddGOP(goodGOP)
 
 	// Test corruption recovery
@@ -110,7 +141,7 @@ func TestHandler_CorruptionRecovery(t *testing.T) {
 }
 
 func TestHandler_TimeoutRecovery(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	gopBufferConfig := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxDuration: 30 * time.Second,
@@ -160,7 +191,7 @@ func TestHandler_TimeoutRecovery(t *testing.T) {
 }
 
 func TestHandler_SequenceGapRecovery(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	gopBufferConfig := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxDuration: 30 * time.Second,
@@ -187,7 +218,7 @@ func TestHandler_SequenceGapRecovery(t *testing.T) {
 }
 
 func TestHandler_TimestampJumpRecovery(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	gopBufferConfig := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxDuration: 30 * time.Second,
@@ -215,7 +246,7 @@ func TestHandler_TimestampJumpRecovery(t *testing.T) {
 }
 
 func TestHandler_CodecErrorRecovery(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	gopBufferConfig := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxDuration: 30 * time.Second,
@@ -243,7 +274,7 @@ func TestHandler_CodecErrorRecovery(t *testing.T) {
 }
 
 func TestHandler_RecoveryEscalation(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	gopBufferConfig := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxDuration: 30 * time.Second,
@@ -269,7 +300,7 @@ func TestHandler_RecoveryEscalation(t *testing.T) {
 }
 
 func TestHandler_UpdateKeyframe(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	gopBufferConfig := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxDuration: 30 * time.Second,
@@ -304,7 +335,7 @@ func TestHandler_UpdateKeyframe(t *testing.T) {
 }
 
 func TestHandler_Statistics(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	gopBufferConfig := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxDuration: 30 * time.Second,
@@ -351,7 +382,7 @@ func TestHandler_Statistics(t *testing.T) {
 }
 
 func TestHandler_WaitForKeyframe(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	gopBufferConfig := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxDuration: 30 * time.Second,

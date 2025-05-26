@@ -6,19 +6,21 @@ This directory contains Docker-related files for containerizing the Mirror appli
 
 ### Dockerfile
 Multi-stage Dockerfile optimized for production deployment:
-- **Stage 1**: Build stage using Go 1.23
+- **Stage 1**: Build stage using Go 1.23 Alpine with CGO support
 - **Stage 2**: Runtime stage using NVIDIA CUDA base image
 
 Key features:
-- Static binary compilation with CGO disabled
-- Minimal runtime image with NVIDIA GPU support
+- CGO enabled for native SRT library integration
+- Haivision SRT library built from source (v1.5.4)
+- Optimized runtime image with NVIDIA GPU support
 - Non-root user execution
 - Health check configuration
 - Exposed ports: 
-  - 8443 (HTTP/3 API server)
-  - 9090 (Prometheus metrics)
-  - 30000 (SRT ingestion)
-  - 5004 (RTP ingestion)
+  - 8443/udp (HTTP/3 API server - QUIC protocol)
+  - 8080/tcp (HTTP/1.1 and HTTP/2 fallback)
+  - 9090/tcp (Prometheus metrics)
+  - 30000/udp (SRT stream ingestion)
+  - 5004/udp (RTP stream ingestion)
 
 ### docker-compose.yml
 Development environment orchestration including:
@@ -45,27 +47,61 @@ Prometheus configuration for metrics collection:
 
 ### Development
 ```bash
-# Start all services
-docker-compose up -d
+# Start all services with proper port mapping
+make docker-compose
 
 # View logs
-docker-compose logs -f mirror
+make docker-compose-logs
+
+# Restart services
+make docker-compose-restart
 
 # Stop all services
-docker-compose down
+make docker-compose-down
 
-# Rebuild after changes
-docker-compose up -d --build
+# Start with monitoring (Prometheus + Grafana)
+make docker-compose-monitoring
+
+# Clean up Docker resources
+make docker-clean
 ```
+
+### CGO and SRT Library
+The Dockerfile now includes:
+- **CGO Support**: Enabled for native library integration
+- **SRT Library**: Haivision SRT v1.5.4 built from source
+- **Build Dependencies**: GCC, CMake, OpenSSL for compilation
+- **Runtime Dependencies**: Shared SRT library in runtime image
+
+The build process:
+1. Installs build tools and dependencies in Alpine
+2. Compiles SRT library from official Haivision source
+3. Builds Go application with CGO enabled
+4. Creates minimal runtime image with SRT shared library
+5. Configures proper library paths with ldconfig
+
+### Port Mapping
+All necessary ports are now mapped in docker-compose.yml:
+- `8443:8443/udp` - HTTP/3 (QUIC) API server
+- `8080:8080/tcp` - HTTP/1.1 and HTTP/2 fallback
+- `9090:9090` - Prometheus metrics endpoint
+- `30000:30000/udp` - SRT stream ingestion
+- `5004:5004/udp` - RTP stream ingestion
+- `6379:6379` - Redis (for development)
+- `9091:9090` - Prometheus web UI (with monitoring profile)
+- `3000:3000` - Grafana web UI (with monitoring profile)
 
 ### Production Build
 ```bash
 # Build production image
-docker build -f docker/Dockerfile -t mirror:latest .
+make docker
 
-# Run standalone
+# Run standalone with all ports
+make docker-run
+
+# Or manually:
 docker run -d \
-  -p 8443:8443 \
+  -p 8443:8443/udp \
   -p 9090:9090 \
   -p 30000:30000/udp \
   -p 5004:5004/udp \
@@ -116,6 +152,25 @@ Important volumes to mount:
 The docker-compose setup creates a custom network for service communication:
 - Network name: `mirror-network`
 - Services can communicate using service names (e.g., `redis:6379`)
+- All required ports are exposed to the host for external access
+
+## Customization
+
+Use `docker-compose.override.yml` for local customizations:
+```bash
+# Copy the example file
+cp docker/docker-compose.override.yml.example docker/docker-compose.override.yml
+
+# Edit as needed, then run normally
+make docker-compose
+```
+
+The override file allows you to:
+- Enable GPU support
+- Customize environment variables
+- Add additional volume mounts
+- Expose additional ports
+- Enable monitoring services by default
 
 ## Health Checks
 

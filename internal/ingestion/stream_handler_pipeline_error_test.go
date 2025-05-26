@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zsiec/mirror/internal/ingestion/pipeline"
 	"github.com/zsiec/mirror/internal/ingestion/types"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 // TestVideoPipelineErrorHandling tests that pipeline creation errors are handled gracefully
@@ -32,8 +33,9 @@ func TestVideoPipelineErrorHandling(t *testing.T) {
 
 // TestStreamHandlerWithNilPipeline tests that StreamHandler works with nil pipeline
 func TestStreamHandlerWithNilPipeline(t *testing.T) {
-	logger := logrus.New()
-	logger.SetLevel(logrus.DebugLevel)
+	logrusLogger := logrus.New()
+	logrusLogger.SetLevel(logrus.DebugLevel)
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
 
 	// Create a test to verify the handler can work without a pipeline
 	// This simulates the scenario where pipeline creation fails
@@ -101,12 +103,14 @@ func TestStreamHandlerWithNilPipeline(t *testing.T) {
 // TestPipelineCreationLogging tests that errors are logged appropriately
 func TestPipelineCreationLogging(t *testing.T) {
 	// Create a test logger that captures output
-	logger := logrus.New()
-	logger.SetLevel(logrus.DebugLevel)
+	logrusLogger := logrus.New()
+	logrusLogger.SetLevel(logrus.DebugLevel)
 
 	// Create buffer to capture logs
 	buf := &bytes.Buffer{}
-	logger.SetOutput(buf)
+	logrusLogger.SetOutput(buf)
+
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
 
 	// Simulate pipeline creation with empty stream ID (will fail)
 	cfg := pipeline.Config{

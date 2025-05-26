@@ -8,11 +8,13 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 // TestControllerResponsiveness verifies the controller responds to pressure changes
 func TestControllerResponsiveness(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 
 	config := Config{
 		MinRate:        1000,
@@ -134,7 +136,7 @@ func TestControllerResponsiveness(t *testing.T) {
 
 // TestControllerDeadZone verifies the dead zone is not too wide
 func TestControllerDeadZone(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 
 	config := Config{
 		MinRate:        1000,
@@ -191,7 +193,7 @@ func TestControllerDeadZone(t *testing.T) {
 
 // TestControllerSmallChanges verifies small rate changes are applied
 func TestControllerSmallChanges(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 
 	config := Config{
 		MinRate:        1000,

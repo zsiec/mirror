@@ -8,10 +8,44 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zsiec/mirror/internal/ingestion/gop"
 	"github.com/zsiec/mirror/internal/ingestion/types"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
+// countIFrames counts the number of I-frames in a GOP
+func countIFrames(gop *types.GOP) int {
+	count := 0
+	for _, frame := range gop.Frames {
+		if frame.IsKeyframe() {
+			count++
+		}
+	}
+	return count
+}
+
+// countPFrames counts the number of P-frames in a GOP
+func countPFrames(gop *types.GOP) int {
+	count := 0
+	for _, frame := range gop.Frames {
+		if frame.Type == types.FrameTypeP {
+			count++
+		}
+	}
+	return count
+}
+
+// countBFrames counts the number of B-frames in a GOP
+func countBFrames(gop *types.GOP) int {
+	count := 0
+	for _, frame := range gop.Frames {
+		if frame.Type == types.FrameTypeB {
+			count++
+		}
+	}
+	return count
+}
+
 func TestHandler_DropCorruptedFrames_Persistence(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxBytes:    1000000,
@@ -26,9 +60,9 @@ func TestHandler_DropCorruptedFrames_Persistence(t *testing.T) {
 	}
 
 	// Create a GOP with some frames, one of which is corrupted
-	testGOP := &gop.GOP{
-		ID:     1,
-		Closed: true,
+	testGOP := &types.GOP{
+		ID:       1,
+		Complete: true,
 		Keyframe: &types.VideoFrame{
 			ID:          1,
 			Type:        types.FrameTypeI,
@@ -68,11 +102,8 @@ func TestHandler_DropCorruptedFrames_Persistence(t *testing.T) {
 				TotalSize:   500,
 			},
 		},
-		FrameCount: 5,
-		IFrames:    1,
-		PFrames:    2,
-		BFrames:    2,
-		TotalSize:  2600,
+		StreamID:  "test-stream",
+		TotalSize: 2600,
 	}
 
 	// Add GOP to buffer
@@ -116,15 +147,14 @@ func TestHandler_DropCorruptedFrames_Persistence(t *testing.T) {
 	updatedGOP := gops[0]
 
 	assert.Equal(t, 2, len(updatedGOP.Frames), "GOP should only have 2 frames left")
-	assert.Equal(t, 2, updatedGOP.FrameCount)
 	assert.Equal(t, int64(1500), updatedGOP.TotalSize) // 1000 + 500
-	assert.Equal(t, 1, updatedGOP.IFrames)
-	assert.Equal(t, 1, updatedGOP.PFrames)
-	assert.Equal(t, 0, updatedGOP.BFrames)
+	assert.Equal(t, 1, countIFrames(updatedGOP))
+	assert.Equal(t, 1, countPFrames(updatedGOP))
+	assert.Equal(t, 0, countBFrames(updatedGOP))
 }
 
 func TestHandler_DropCorruptedFrames_MultipleGOPs(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxBytes:    1000000,
@@ -173,13 +203,13 @@ func TestHandler_DropCorruptedFrames_MultipleGOPs(t *testing.T) {
 			})
 		}
 
-		gop := &gop.GOP{
-			ID:         gopID,
-			Closed:     true,
-			Keyframe:   frames[0],
-			Frames:     frames,
-			FrameCount: len(frames),
-			TotalSize:  1500,
+		gop := &types.GOP{
+			ID:        gopID,
+			Complete:  true,
+			Keyframe:  frames[0],
+			Frames:    frames,
+			StreamID:  "test-stream",
+			TotalSize: 1500,
 		}
 
 		if i == 2 {
@@ -214,7 +244,7 @@ func TestHandler_DropCorruptedFrames_MultipleGOPs(t *testing.T) {
 }
 
 func TestHandler_DropCorruptedFrames_EmptyBuffer(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := gop.BufferConfig{
 		MaxGOPs:     10,
 		MaxBytes:    1000000,

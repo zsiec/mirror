@@ -3,12 +3,11 @@ package srt
 import (
 	"context"
 	"fmt"
+	"net"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
-	srt "github.com/datarhei/gosrt"
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/internal/ingestion/codec"
 	"github.com/zsiec/mirror/internal/ingestion/ratelimit"
@@ -17,14 +16,12 @@ import (
 	"github.com/zsiec/mirror/internal/metrics"
 )
 
-// ConnectionHandler is a function that handles new SRT connections
-type ConnectionHandler func(*Connection) error
-
-// Listener handles SRT stream ingestion
+// NewListener creates a new SRT listener using the adapter pattern
 type Listener struct {
 	config           *config.SRTConfig
 	codecsConfig     *config.CodecsConfig
-	listener         srt.Listener
+	adapter          SRTAdapter
+	listener         SRTListener
 	registry         registry.Registry
 	connLimiter      *ratelimit.ConnectionLimiter
 	bandwidthManager *ratelimit.BandwidthManager
@@ -39,8 +36,8 @@ type Listener struct {
 	testStatsInterval time.Duration // For testing: custom stats interval
 }
 
-// NewListener creates a new SRT listener
-func NewListener(cfg *config.SRTConfig, codecsCfg *config.CodecsConfig, reg registry.Registry, logger logger.Logger) *Listener {
+// NewListenerWithAdapter creates a new SRT listener with the specified adapter
+func NewListenerWithAdapter(cfg *config.SRTConfig, codecsCfg *config.CodecsConfig, reg registry.Registry, adapter SRTAdapter, logger logger.Logger) *Listener {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create connection limiter (max 5 connections per stream, 100 total)
@@ -55,68 +52,80 @@ func NewListener(cfg *config.SRTConfig, codecsCfg *config.CodecsConfig, reg regi
 	return &Listener{
 		config:           cfg,
 		codecsConfig:     codecsCfg,
+		adapter:          adapter,
 		registry:         reg,
 		connLimiter:      connLimiter,
-		codecDetector:    codecDetector,
 		bandwidthManager: bandwidthManager,
+		codecDetector:    codecDetector,
 		logger:           logger,
 		ctx:              ctx,
 		cancel:           cancel,
 	}
 }
 
-// SetTestStatsInterval sets a custom stats update interval for testing
-func (l *Listener) SetTestStatsInterval(interval time.Duration) {
-	l.testStatsInterval = interval
-}
-
-// SetConnectionHandler sets the handler for new connections
-func (l *Listener) SetConnectionHandler(handler ConnectionHandler) {
-	l.handler = handler
-}
-
-// Start starts the SRT listener
+// Start begins listening for SRT connections
 func (l *Listener) Start() error {
-	srtConfig := srt.DefaultConfig()
-	srtConfig.FC = uint32(l.config.FlowControlWindow)
-	srtConfig.InputBW = l.config.InputBandwidth
-	srtConfig.MaxBW = l.config.MaxBandwidth
-	srtConfig.Latency = l.config.Latency
-	srtConfig.PayloadSize = uint32(l.config.PayloadSize)
-	srtConfig.PeerIdleTimeout = l.config.PeerIdleTimeout
-
-	// Configure encryption if enabled
-	if l.config.Encryption.Enabled {
-		if err := l.configureEncryption(&srtConfig); err != nil {
-			return fmt.Errorf("failed to configure SRT encryption: %w", err)
-		}
+	// Convert config to adapter config
+	adapterConfig := Config{
+		Address:           l.config.ListenAddr,
+		Port:              l.config.Port,
+		Latency:           l.config.Latency,
+		MaxBandwidth:      l.config.MaxBandwidth,
+		InputBandwidth:    l.config.InputBandwidth,
+		PayloadSize:       l.config.PayloadSize,
+		FlowControlWindow: l.config.FlowControlWindow,
+		PeerIdleTimeout:   l.config.PeerIdleTimeout,
+		MaxConnections:    l.config.MaxConnections,
+		Encryption: EncryptionConfig{
+			Enabled:         l.config.Encryption.Enabled,
+			Passphrase:      l.config.Encryption.Passphrase,
+			KeyLength:       l.config.Encryption.KeyLength,
+			PBKDFIterations: l.config.Encryption.PBKDFIterations,
+		},
 	}
 
-	addr := fmt.Sprintf("%s:%d", l.config.ListenAddr, l.config.Port)
-	listener, err := srt.Listen("srt", addr, srtConfig)
+	l.logger.WithFields(map[string]interface{}{
+		"latency":           adapterConfig.Latency,
+		"max_bandwidth":     adapterConfig.MaxBandwidth,
+		"peer_idle_timeout": adapterConfig.PeerIdleTimeout,
+		"payload_size":      adapterConfig.PayloadSize,
+		"flow_control":      adapterConfig.FlowControlWindow,
+		"input_bandwidth":   adapterConfig.InputBandwidth,
+	}).Info("SRT listener configured with Haivision official bindings")
+
+	// Create listener using adapter
+	listener, err := l.adapter.NewListener(adapterConfig.Address, adapterConfig.Port, adapterConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create SRT listener: %w", err)
+	}
+	l.listener = listener
+
+	// Set listen callback for connection filtering
+	err = l.listener.SetListenCallback(l.handleIncomingConnection)
+	if err != nil {
+		return fmt.Errorf("failed to set listen callback: %w", err)
+	}
+
+	// Start listening
+	err = l.listener.Listen(l.ctx, 1)
 	if err != nil {
 		return fmt.Errorf("failed to start SRT listener: %w", err)
 	}
 
-	l.listener = listener
-	l.logger.Infof("SRT listener started on %s", addr)
+	l.logger.WithField("port", adapterConfig.Port).Info("SRT listener started successfully")
 
 	// Start accept loop
 	l.wg.Add(1)
 	go l.acceptLoop()
-
-	// Start monitoring loop
-	l.wg.Add(1)
-	go l.monitorConnections()
 
 	return nil
 }
 
 // Stop stops the SRT listener
 func (l *Listener) Stop() error {
-	l.logger.Info("Stopping SRT listener")
 	l.cancel()
 
+	// Close listener
 	if l.listener != nil {
 		l.listener.Close()
 	}
@@ -124,263 +133,129 @@ func (l *Listener) Stop() error {
 	// Wait for all goroutines to finish
 	l.wg.Wait()
 
-	// Close all connections
-	l.connections.Range(func(key, value interface{}) bool {
-		conn := value.(*Connection)
-		conn.Close()
-		return true
-	})
-
 	l.logger.Info("SRT listener stopped")
 	return nil
 }
 
-// configureEncryption sets up SRT encryption parameters
-func (l *Listener) configureEncryption(cfg *srt.Config) error {
-	// Validate passphrase length (minimum 10 characters as per SRT spec)
-	if len(l.config.Encryption.Passphrase) < 10 {
-		return fmt.Errorf("SRT encryption passphrase must be at least 10 characters long")
-	}
-
-	// Set passphrase
-	cfg.Passphrase = l.config.Encryption.Passphrase
-
-	// Set key length if specified
-	if l.config.Encryption.KeyLength > 0 {
-		switch l.config.Encryption.KeyLength {
-		case 128, 192, 256:
-			cfg.PBKeylen = l.config.Encryption.KeyLength
-		default:
-			return fmt.Errorf("invalid SRT encryption key length: %d (must be 128, 192, or 256)", l.config.Encryption.KeyLength)
-		}
-	}
-	// If KeyLength is 0, let SRT auto-select based on passphrase length
-
-	l.logger.WithFields(map[string]interface{}{
-		"key_length": l.config.Encryption.KeyLength,
-		"enabled":    true,
-	}).Info("SRT encryption configured")
-
-	return nil
+// SetHandler sets the connection handler
+func (l *Listener) SetHandler(handler ConnectionHandler) {
+	l.handler = handler
 }
 
+// handleIncomingConnection filters incoming SRT connections
+func (l *Listener) handleIncomingConnection(socket SRTSocket, version int, addr *net.UDPAddr, streamID string) bool {
+	l.logger.WithFields(map[string]interface{}{
+		"remote":    addr.String(),
+		"stream_id": streamID,
+		"version":   version,
+	}).Info("New SRT connection request")
+
+	// Validate stream ID
+	if !l.isValidStreamID(streamID) {
+		l.logger.WithFields(map[string]interface{}{
+			"remote":    addr.String(),
+			"stream_id": streamID,
+		}).Warn("Invalid stream ID format")
+		socket.SetRejectReason(RejectionReasonBadRequest)
+		return false
+	}
+
+	// Check connection limits
+	if !l.connLimiter.TryAcquire(streamID) {
+		l.logger.WithFields(map[string]interface{}{
+			"remote":    addr.String(),
+			"stream_id": streamID,
+		}).Warn("Connection limit exceeded")
+		socket.SetRejectReason(RejectionReasonResourceUnavailable)
+		return false
+	}
+
+	// Check if stream already exists
+	if _, exists := l.connections.Load(streamID); exists {
+		l.logger.WithFields(map[string]interface{}{
+			"remote":    addr.String(),
+			"stream_id": streamID,
+		}).Warn("Stream already active")
+		socket.SetRejectReason(RejectionReasonResourceUnavailable)
+		return false
+	}
+
+	return true
+}
+
+// acceptLoop continuously accepts new connections
 func (l *Listener) acceptLoop() {
 	defer l.wg.Done()
-
-	for {
-		req, err := l.listener.Accept2()
-		if err != nil {
-			select {
-			case <-l.ctx.Done():
-				return
-			default:
-				l.logger.Errorf("Failed to accept SRT connection: %v", err)
-				continue
-			}
-		}
-
-		// Handle connection request in a new goroutine
-		l.wg.Add(1)
-		go l.handleConnectionRequest(req)
-	}
-}
-
-func (l *Listener) handleConnectionRequest(req srt.ConnRequest) {
-	defer l.wg.Done()
-
-	// Extract stream ID from connection request
-	streamID := req.StreamId()
-	if streamID == "" {
-		l.logger.Warn("No stream ID provided in SRT connection, rejecting")
-		req.Reject(srt.REJ_PEER)
-		return
-	}
-
-	// Validate stream ID format
-	if err := l.validateStreamID(streamID); err != nil {
-		l.logger.Errorf("Invalid stream ID '%s': %v", streamID, err)
-		req.Reject(srt.REJ_PEER)
-		return
-	}
-
-	// Check connection limit
-	if !l.connLimiter.TryAcquire(streamID) {
-		l.logger.Warnf("Connection limit exceeded for stream %s", streamID)
-		req.Reject(srt.REJ_RESOURCE)
-		return
-	}
-	// Note: We'll release the connection slot in the main defer if connection fails
-
-	// Allocate bandwidth (50 Mbps per stream)
-	rateLimiter, ok := l.bandwidthManager.AllocateBandwidth(streamID, 50_000_000)
-	if !ok {
-		l.logger.Warnf("Insufficient bandwidth for stream %s", streamID)
-		l.connLimiter.Release(streamID)
-		req.Reject(srt.REJ_RESOURCE)
-		return
-	}
-
-	// Accept the connection
-	conn, err := req.Accept()
-	if err != nil {
-		l.logger.Errorf("Failed to accept connection: %v", err)
-		return
-	}
-	defer conn.Close()
-
-	l.logger.WithFields(map[string]interface{}{
-		"stream_id": streamID,
-		"remote":    conn.RemoteAddr().String(),
-	}).Info("New SRT connection")
-
-	// Detect codec from stream ID or use default
-	videoCodec := l.detectCodecFromStreamID(streamID)
-
-	// Register stream
-	stream := &registry.Stream{
-		ID:         streamID,
-		Type:       registry.StreamTypeSRT,
-		SourceAddr: conn.RemoteAddr().String(),
-		Status:     registry.StatusConnecting,
-		VideoCodec: videoCodec,
-		Bitrate:    l.config.InputBandwidth,
-	}
-
-	if err := l.registry.Register(l.ctx, stream); err != nil {
-		l.logger.Errorf("Failed to register stream %s: %v", streamID, err)
-		return
-	}
-	defer l.registry.Unregister(l.ctx, streamID)
-
-	// Update status to active
-	if err := l.registry.UpdateStatus(l.ctx, streamID, registry.StatusActive); err != nil {
-		l.logger.Warnf("Failed to update stream status: %v", err)
-	}
-
-	// Create connection wrapper
-	now := time.Now()
-	connection := &Connection{
-		streamID:     streamID,
-		conn:         conn,
-		registry:     l.registry,
-		logger:       l.logger,
-		config:       l.config,
-		startTime:    now,
-		lastActive:   now,
-		done:         make(chan struct{}),
-		maxBandwidth: l.config.MaxBandwidth, // Initialize with configured max
-	}
-
-	// Set rate limiter
-	connection.SetRateLimiter(rateLimiter)
-
-	// Set test stats interval if configured
-	if l.testStatsInterval > 0 {
-		connection.SetStatsInterval(l.testStatsInterval)
-	}
-
-	// Store connection
-	l.connections.Store(streamID, connection)
-	defer func() {
-		l.connections.Delete(streamID)
-		l.connLimiter.Release(streamID)
-		l.bandwidthManager.ReleaseBandwidth(streamID)
-	}()
-
-	// Use handler if available, otherwise use direct ReadLoop
-	if l.handler != nil {
-		// Handler manages the connection lifecycle
-		if err := l.handler(connection); err != nil {
-			l.logger.Errorf("Stream %s handler error: %v", streamID, err)
-			l.registry.UpdateStatus(l.ctx, streamID, registry.StatusError)
-		}
-	} else {
-		// Fallback to direct ReadLoop (old behavior)
-		if err := connection.ReadLoop(l.ctx); err != nil {
-			l.logger.Errorf("Stream %s read error: %v", streamID, err)
-			l.registry.UpdateStatus(l.ctx, streamID, registry.StatusError)
-		}
-	}
-}
-
-func (l *Listener) validateStreamID(streamID string) error {
-	// Stream ID validation rules:
-	// - Must be 1-64 characters long
-	// - Can contain alphanumeric characters, hyphens, and underscores
-	// - Must start with a letter or number
-	// - Cannot contain spaces or special characters
-
-	if len(streamID) == 0 {
-		return fmt.Errorf("stream ID cannot be empty")
-	}
-
-	if len(streamID) > 64 {
-		return fmt.Errorf("stream ID too long (max 64 characters)")
-	}
-
-	// Check format with regex
-	validPattern := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
-	if !validPattern.MatchString(streamID) {
-		return fmt.Errorf("stream ID must start with alphanumeric and contain only alphanumeric, hyphen, or underscore characters")
-	}
-
-	return nil
-}
-
-func (l *Listener) monitorConnections() {
-	defer l.wg.Done()
-
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
 
 	for {
 		select {
 		case <-l.ctx.Done():
 			return
-		case <-ticker.C:
-			activeCount := 0
-			var toRemove []string
-
-			l.connections.Range(func(key, value interface{}) bool {
-				streamID := key.(string)
-				conn := value.(*Connection)
-
-				// Check if connection is dead (2x idle timeout for safety)
-				if time.Since(conn.lastActive) > 2*l.config.PeerIdleTimeout {
-					toRemove = append(toRemove, streamID)
-
-					// Force close the connection
-					conn.closeOnce.Do(func() {
-						close(conn.done)
-						conn.conn.Close()
-					})
-
-					l.logger.Warnf("Force closing dead connection: %s", streamID)
-				} else if time.Since(conn.lastActive) > l.config.PeerIdleTimeout {
-					// Normal idle timeout
-					l.logger.Warnf("Connection %s idle for too long, closing", conn.streamID)
-					conn.Close()
-					toRemove = append(toRemove, streamID)
-				} else {
-					activeCount++
+		default:
+			socket, addr, err := l.listener.Accept()
+			if err != nil {
+				if l.ctx.Err() != nil {
+					// Context cancelled, normal shutdown
+					return
 				}
-
-				return true
-			})
-
-			// Remove dead connections
-			for _, id := range toRemove {
-				l.connections.Delete(id)
-				l.connLimiter.Release(id)
-				l.bandwidthManager.ReleaseBandwidth(id)
+				l.logger.WithError(err).Error("Failed to accept SRT connection")
+				continue
 			}
 
-			// Update active streams metric
-			metrics.SetActiveStreams("srt", activeCount)
+			// Create connection wrapper
+			srtConn, err := l.adapter.NewConnection(socket)
+			if err != nil {
+				l.logger.WithError(err).Error("Failed to create SRT connection wrapper")
+				socket.Close()
+				continue
+			}
 
-			l.logger.WithField("active_connections", activeCount).Debug("SRT connections status")
+			streamID := socket.GetStreamID()
+
+			l.logger.WithFields(map[string]interface{}{
+				"remote":    addr.String(),
+				"stream_id": streamID,
+			}).Info("SRT connection accepted")
+
+			// Create connection object
+			conn := NewConnectionWithSRTConn(streamID, srtConn, addr.String(), l.registry, l.codecDetector, l.logger)
+			l.connections.Store(streamID, conn)
+
+			// Handle the connection
+			l.wg.Add(1)
+			go l.handleConnection(conn, streamID)
 		}
 	}
+}
+
+// handleConnection processes a single SRT connection
+func (l *Listener) handleConnection(conn *Connection, streamID string) {
+	defer l.wg.Done()
+	defer l.connections.Delete(streamID)
+
+	// Update metrics
+	metrics.IncrementSRTConnections()
+	defer metrics.DecrementSRTConnections()
+
+	// Call handler if set
+	if l.handler != nil {
+		if err := l.handler(conn); err != nil {
+			l.logger.WithError(err).WithField("stream_id", streamID).Error("Connection handler failed")
+		}
+	}
+
+	l.logger.WithField("stream_id", streamID).Info("SRT connection finished")
+}
+
+// isValidStreamID validates the stream ID format
+func (l *Listener) isValidStreamID(streamID string) bool {
+	if streamID == "" {
+		return false
+	}
+
+	// Basic validation: alphanumeric, underscores, hyphens, max 64 chars
+	validPattern := regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+	return validPattern.MatchString(streamID)
 }
 
 // GetActiveConnections returns the number of active connections
@@ -393,92 +268,23 @@ func (l *Listener) GetActiveConnections() int {
 	return count
 }
 
-// GetActiveSessions returns the number of active SRT sessions (alias for GetActiveConnections)
-func (l *Listener) GetActiveSessions() int {
-	return l.GetActiveConnections()
-}
+// GetConnectionInfo returns information about active connections
+func (l *Listener) GetConnectionInfo() map[string]interface{} {
+	connections := make(map[string]interface{})
+	l.connections.Range(func(key, value interface{}) bool {
+		streamID := key.(string)
+		conn := value.(*Connection)
 
-// TerminateStream terminates a specific stream connection
-func (l *Listener) TerminateStream(streamID string) error {
-	value, ok := l.connections.Load(streamID)
-	if !ok {
-		return fmt.Errorf("stream %s not found", streamID)
-	}
-
-	conn := value.(*Connection)
-	conn.Close()
-
-	// Remove from connections map
-	l.connections.Delete(streamID)
-
-	// Release resources
-	l.connLimiter.Release(streamID)
-	l.bandwidthManager.ReleaseBandwidth(streamID)
-
-	l.logger.WithField("stream_id", streamID).Info("Stream terminated")
-	return nil
-}
-
-// PauseStream pauses data ingestion for a stream
-func (l *Listener) PauseStream(streamID string) error {
-	value, ok := l.connections.Load(streamID)
-	if !ok {
-		return fmt.Errorf("stream %s not found", streamID)
-	}
-
-	conn := value.(*Connection)
-	conn.Pause()
-
-	l.logger.WithField("stream_id", streamID).Info("Stream paused")
-	return nil
-}
-
-// ResumeStream resumes data ingestion for a paused stream
-func (l *Listener) ResumeStream(streamID string) error {
-	value, ok := l.connections.Load(streamID)
-	if !ok {
-		return fmt.Errorf("stream %s not found", streamID)
-	}
-
-	conn := value.(*Connection)
-	conn.Resume()
-
-	l.logger.WithField("stream_id", streamID).Info("Stream resumed")
-	return nil
-}
-
-// detectCodecFromStreamID attempts to detect codec from stream ID format
-// Format examples: "stream-name:codec=h264", "stream-name-h264", "stream-name"
-func (l *Listener) detectCodecFromStreamID(streamID string) string {
-	// First try explicit codec parameter
-	if idx := strings.Index(streamID, ":codec="); idx != -1 {
-		codecStr := streamID[idx+7:]
-		codecType := codec.ParseType(codecStr)
-		if codecType.IsValid() && l.isCodecSupported(codecType) {
-			return codecType.String()
+		connections[streamID] = map[string]interface{}{
+			"stream_id":  streamID,
+			"start_time": conn.GetStartTime(),
+			"stats":      conn.GetStats(),
 		}
-	}
+		return true
+	})
 
-	// Try codec suffix
-	streamLower := strings.ToLower(streamID)
-	for _, supported := range l.codecsConfig.Supported {
-		codecType := codec.ParseType(supported)
-		suffix := "-" + strings.ToLower(codecType.String())
-		if strings.HasSuffix(streamLower, suffix) && l.isCodecSupported(codecType) {
-			return codecType.String()
-		}
+	return map[string]interface{}{
+		"active_count": len(connections),
+		"connections":  connections,
 	}
-
-	// Default to preferred codec
-	return l.codecsConfig.Preferred
-}
-
-// isCodecSupported checks if a codec is in the supported list
-func (l *Listener) isCodecSupported(codecType codec.Type) bool {
-	for _, supported := range l.codecsConfig.Supported {
-		if strings.EqualFold(supported, codecType.String()) {
-			return true
-		}
-	}
-	return false
 }

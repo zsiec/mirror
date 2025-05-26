@@ -80,7 +80,7 @@ func NewAssembler(streamID string, codec types.CodecType, outputBufferSize int) 
 		output:        make(chan *types.VideoFrame, outputBufferSize),
 		ctx:           ctx,
 		cancel:        cancel,
-		logger:        logger.FromContext(ctx).WithField("stream_id", streamID),
+		logger:        logger.NewLogrusAdapter(logger.FromContext(ctx).WithField("stream_id", streamID)),
 		nextFrameID:   1,
 	}
 }
@@ -100,18 +100,30 @@ func (a *Assembler) Stop() error {
 		close(a.output)
 	})
 
-	a.logger.WithFields(map[string]interface{}{
+	// Get stats with proper locking
+	a.mu.Lock()
+	stats := map[string]interface{}{
 		"frames_assembled": a.framesAssembled,
 		"frames_dropped":   a.framesDropped,
 		"packets_received": a.packetsReceived,
 		"packets_dropped":  a.packetsDropped,
-	}).Info("Frame assembler stopped")
+	}
+	a.mu.Unlock()
+	
+	a.logger.WithFields(stats).Info("Frame assembler stopped")
 
 	return nil
 }
 
 // AddPacket adds a packet to the assembler
 func (a *Assembler) AddPacket(pkt types.TimestampedPacket) error {
+	// Check if context is cancelled first (before acquiring lock)
+	select {
+	case <-a.ctx.Done():
+		return a.ctx.Err()
+	default:
+	}
+	
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -154,6 +166,7 @@ func (a *Assembler) AddPacket(pkt types.TimestampedPacket) error {
 	} else if a.currentFrame != nil {
 		// Add to current frame
 		a.framePackets = append(a.framePackets, pkt)
+
 		a.nalBuffer = append(a.nalBuffer, pkt.Data...)
 
 		// Update frame timing if needed
@@ -163,10 +176,15 @@ func (a *Assembler) AddPacket(pkt types.TimestampedPacket) error {
 		}
 
 	} else {
-		// No frame context, drop packet
-		// Note: This is a dropped packet, not a dropped frame
+		// No frame context - we're starting mid-stream
+		// Instead of erroring, silently wait for the next frame start (keyframe)
+		// This is normal when joining a live stream
 		a.packetsDropped++
-		return ErrNoFrameContext
+		a.logger.WithFields(map[string]interface{}{
+			"pts":         pkt.PTS,
+			"is_keyframe": pkt.IsKeyframe(),
+		}).Debug("Dropping packet while waiting for frame start (normal for mid-stream join)")
+		return nil // Return nil instead of ErrNoFrameContext to avoid error logging
 	}
 
 	// Handle frame end
@@ -229,36 +247,49 @@ func (a *Assembler) completeFrame() error {
 		a.currentFrame.PresentationTime = a.currentFrame.CaptureTime
 	}
 
-	// Send to output
+	// Send to output with proper timeout handling
+	return a.sendFrameToOutput(a.currentFrame)
+}
+
+// sendFrameToOutput sends a frame to the output channel with proper timeout handling
+func (a *Assembler) sendFrameToOutput(frame *types.VideoFrame) error {
+	// First try non-blocking send
 	select {
-	case a.output <- a.currentFrame:
+	case a.output <- frame:
 		a.framesAssembled++
+		return nil
 	case <-a.ctx.Done():
 		return a.ctx.Err()
 	default:
-		// Non-blocking check first
-		select {
-		case a.output <- a.currentFrame:
-			a.framesAssembled++
-		default:
-			// Only create timer if we need to wait
-			timer := time.NewTimer(10 * time.Millisecond)
-			defer timer.Stop()
-
-			select {
-			case a.output <- a.currentFrame:
-				a.framesAssembled++
-			case <-timer.C:
-				a.framesDropped++
-				return ErrOutputBlocked
-			case <-a.ctx.Done():
-				return a.ctx.Err()
-			}
-		}
+		// Channel is blocked, try with timeout
 	}
 
-	// Buffer cleanup handled by defer
-	return nil
+	// Create timer for output timeout - use frame timeout duration
+	outputTimeout := a.frameTimeout
+	if outputTimeout < 50*time.Millisecond {
+		outputTimeout = 50 * time.Millisecond // Minimum timeout
+	}
+	if outputTimeout > 500*time.Millisecond {
+		outputTimeout = 500 * time.Millisecond // Maximum timeout
+	}
+
+	timer := time.NewTimer(outputTimeout)
+	defer timer.Stop()
+
+	select {
+	case a.output <- frame:
+		a.framesAssembled++
+		return nil
+	case <-timer.C:
+		a.framesDropped++
+		a.logger.WithFields(map[string]interface{}{
+			"frame_id":       frame.ID,
+			"output_timeout": outputTimeout,
+		}).Warn("Frame dropped due to output channel timeout")
+		return ErrOutputBlocked
+	case <-a.ctx.Done():
+		return a.ctx.Err()
+	}
 }
 
 // parseNALUnits extracts NAL units from buffer
@@ -272,10 +303,13 @@ func (a *Assembler) parseNALUnits(data []byte) []types.NALUnit {
 		units := a.findStartCodeUnits(data)
 		for _, unitData := range units {
 			if len(unitData) > 0 {
-				nalUnits = append(nalUnits, types.NALUnit{
-					Type: a.getNALType(unitData),
+				nalType := a.getNALType(unitData)
+				nalUnit := types.NALUnit{
+					Type: nalType,
 					Data: unitData,
-				})
+				}
+
+				nalUnits = append(nalUnits, nalUnit)
 			}
 		}
 
@@ -330,7 +364,9 @@ func (a *Assembler) findStartCodeUnits(data []byte) [][]byte {
 				}
 
 				if unitEnd > unitStart {
-					units = append(units, data[unitStart:unitEnd])
+					unitData := data[unitStart:unitEnd]
+					units = append(units, unitData)
+
 				}
 
 				i = unitEnd

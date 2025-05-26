@@ -149,8 +149,12 @@ func (c *Controller) UpdateGOPStats(stats *gop.GOPStatistics) {
 // adjustRate adjusts the ingestion rate based on pressure
 func (c *Controller) adjustRate() {
 	currentPressure := c.GetPressure()
-	smoothedPressure := c.GetSmoothedPressure()
 	currentRate := c.currentRate.Load()
+
+	// Calculate smoothed pressure by acquiring lock separately to avoid deadlock
+	c.mu.RLock()
+	smoothedPressure := c.getSmoothedPressureUnsafe()
+	c.mu.RUnlock()
 
 	// Use current pressure for immediate responsiveness, but consider smoothed for stability
 	pressure := currentPressure
@@ -295,7 +299,11 @@ func (c *Controller) GetSmoothedPressure() float64 {
 	defer c.mu.RUnlock()
 
 	if len(c.pressureHistory) == 0 {
-		return c.currentPressure.Load().(float64)
+		// Safe type assertion with fallback
+		if pressure, ok := c.currentPressure.Load().(float64); ok {
+			return pressure
+		}
+		return 0.0 // Fallback value
 	}
 
 	// Calculate weighted average (recent values weighted more)
@@ -309,6 +317,39 @@ func (c *Controller) GetSmoothedPressure() float64 {
 	return sum / weightSum
 }
 
+// getSmoothedPressureUnsafe returns averaged pressure without locking (for internal use)
+// This is safe to call from adjustRate() since it doesn't acquire locks
+// IMPORTANT: Caller must hold at least RLock on c.mu
+func (c *Controller) getSmoothedPressureUnsafe() float64 {
+	// If no history exists, return current pressure
+	if len(c.pressureHistory) == 0 {
+		// Safe type assertion with fallback
+		if pressure, ok := c.currentPressure.Load().(float64); ok {
+			return pressure
+		}
+		return 0.0 // Fallback value
+	}
+
+	// Calculate weighted average (recent values weighted more)
+	// Access pressure history directly since caller holds lock
+	var sum, weightSum float64
+	for i, p := range c.pressureHistory {
+		weight := float64(i + 1) // More recent = higher weight
+		sum += p * weight
+		weightSum += weight
+	}
+
+	if weightSum == 0 {
+		// Fallback to current pressure
+		if pressure, ok := c.currentPressure.Load().(float64); ok {
+			return pressure
+		}
+		return 0.0
+	}
+
+	return sum / weightSum
+}
+
 // GetCurrentRate returns the current ingestion rate
 func (c *Controller) GetCurrentRate() int64 {
 	return c.currentRate.Load()
@@ -316,7 +357,10 @@ func (c *Controller) GetCurrentRate() int64 {
 
 // GetPressure returns the current pressure
 func (c *Controller) GetPressure() float64 {
-	return c.currentPressure.Load().(float64)
+	if pressure, ok := c.currentPressure.Load().(float64); ok {
+		return pressure
+	}
+	return 0.0 // Fallback value for type safety
 }
 
 // ShouldDropGOP determines if we should drop an entire GOP
@@ -357,13 +401,23 @@ func (c *Controller) SetGOPDropCallback(callback func(gopID uint64)) {
 
 // GetStatistics returns controller statistics
 func (c *Controller) GetStatistics() Statistics {
+	// Get current pressure safely without lock
+	currentPressure := 0.0
+	if pressure, ok := c.currentPressure.Load().(float64); ok {
+		currentPressure = pressure
+	}
+
+	// Get smoothed pressure without lock
+	smoothedPressure := c.GetSmoothedPressure()
+
+	// Now acquire lock for the remaining fields
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	stats := Statistics{
 		CurrentRate:      c.currentRate.Load(),
-		CurrentPressure:  c.currentPressure.Load().(float64),
-		SmoothedPressure: c.GetSmoothedPressure(),
+		CurrentPressure:  currentPressure,
+		SmoothedPressure: smoothedPressure,
 		AdjustmentCount:  c.adjustmentCount.Load(),
 		GOPsDropped:      c.gopsDropped.Load(),
 		LastAdjustment:   c.lastAdjustment,

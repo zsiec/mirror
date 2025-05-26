@@ -176,3 +176,23 @@ func IncrementMemoryAllocation(component string, bytes int64) {
 func IncrementContextCancellation(component, reason string) {
 	contextCancellations.WithLabelValues(component, reason).Inc()
 }
+
+// UpdateSRTBytesReceived updates the SRT bytes received counter
+func UpdateSRTBytesReceived(streamID string, bytes int64) {
+	streamBytesTotal.WithLabelValues(streamID, "srt").Add(float64(bytes))
+}
+
+// UpdateSRTBytesSent updates the SRT bytes sent counter
+func UpdateSRTBytesSent(streamID string, bytes int64) {
+	streamBytesTotal.WithLabelValues(streamID, "srt").Add(float64(bytes))
+}
+
+// IncrementSRTConnections increments the SRT connection counter
+func IncrementSRTConnections() {
+	streamsActiveTotal.WithLabelValues("srt").Inc()
+}
+
+// DecrementSRTConnections decrements the SRT connection counter
+func DecrementSRTConnections() {
+	streamsActiveTotal.WithLabelValues("srt").Dec()
+}

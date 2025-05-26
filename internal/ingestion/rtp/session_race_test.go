@@ -11,14 +11,16 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/internal/ingestion/codec"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 // TestSessionCodecDetectionRace tests for race conditions in codec detection
 func TestSessionCodecDetectionRace(t *testing.T) {
 	// Create test dependencies
 	reg := &mockRegistry{}
-	log := logrus.New()
-	log.SetLevel(logrus.DebugLevel)
+	logEntry := logrus.NewEntry(logrus.New())
+	logEntry.Logger.SetLevel(logrus.DebugLevel)
+	log := logger.NewLogrusAdapter(logEntry)
 
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:5004")
 	streamID := "test-stream"
@@ -140,8 +142,9 @@ a=fmtp:96 profile-level-id=42001f`
 func TestSessionConcurrentStats(t *testing.T) {
 	// Create test dependencies
 	reg := &mockRegistry{}
-	log := logrus.New()
-	log.SetLevel(logrus.DebugLevel)
+	logEntry := logrus.NewEntry(logrus.New())
+	logEntry.Logger.SetLevel(logrus.DebugLevel)
+	log := logger.NewLogrusAdapter(logEntry)
 
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:5004")
 	streamID := "test-stream"
@@ -249,8 +252,9 @@ func TestSessionConcurrentStats(t *testing.T) {
 func BenchmarkSessionCodecDetection(b *testing.B) {
 	// Create test dependencies
 	reg := &mockRegistry{}
-	log := logrus.New()
-	log.SetLevel(logrus.ErrorLevel)
+	logEntry := logrus.NewEntry(logrus.New())
+	logEntry.Logger.SetLevel(logrus.ErrorLevel)
+	log := logger.NewLogrusAdapter(logEntry)
 
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:5004")
 

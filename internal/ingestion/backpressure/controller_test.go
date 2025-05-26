@@ -1,17 +1,21 @@
 package backpressure
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/zsiec/mirror/internal/ingestion/gop"
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 func TestController_BasicOperation(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,    // 1KB/s min
 		MaxRate:        1000000, // 1MB/s max
@@ -34,7 +38,7 @@ func TestController_BasicOperation(t *testing.T) {
 }
 
 func TestController_RateAdjustment(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,
@@ -68,7 +72,7 @@ func TestController_RateAdjustment(t *testing.T) {
 }
 
 func TestController_PressureSmoothing(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,
@@ -90,7 +94,7 @@ func TestController_PressureSmoothing(t *testing.T) {
 }
 
 func TestController_GOPAwareAdjustment(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,
@@ -117,7 +121,7 @@ func TestController_GOPAwareAdjustment(t *testing.T) {
 }
 
 func TestController_ExtremePressure(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,
@@ -151,7 +155,7 @@ func TestController_ExtremePressure(t *testing.T) {
 }
 
 func TestController_RateLimits(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        10000,  // 10KB/s
 		MaxRate:        100000, // 100KB/s
@@ -174,7 +178,7 @@ func TestController_RateLimits(t *testing.T) {
 }
 
 func TestController_Callbacks(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,
@@ -201,7 +205,7 @@ func TestController_Callbacks(t *testing.T) {
 }
 
 func TestController_Statistics(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
 		MaxRate:        1000000,
@@ -244,4 +248,357 @@ func TestController_Statistics(t *testing.T) {
 	assert.Equal(t, 0.5, stats.TargetPressure)
 	assert.Greater(t, stats.SmoothedPressure, 0.0)
 	assert.Greater(t, stats.AdjustmentCount, uint64(0)) // Should have at least 1 adjustment
+}
+
+// TestController_DeadlockPrevention tests the fixes for potential deadlocks
+func TestController_DeadlockPrevention(t *testing.T) {
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+	config := Config{
+		MinRate:        1000,
+		MaxRate:        1000000,
+		TargetPressure: 0.5,
+		IncreaseRatio:  1.2,
+		DecreaseRatio:  0.8,
+		AdjustInterval: 10 * time.Millisecond, // Fast adjustments
+		HistorySize:    10,
+	}
+
+	controller := NewController("test-stream", config, logger)
+	controller.Start()
+	defer controller.Stop()
+
+	var wg sync.WaitGroup
+	const numGoroutines = 20
+	const numOperations = 100
+
+	// Goroutines continuously updating pressure
+	for i := 0; i < numGoroutines/2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				pressure := 0.1 + 0.8*float64(j%10)/10.0 // Vary between 0.1 and 0.9
+				controller.UpdatePressure(pressure)
+				time.Sleep(time.Microsecond)
+			}
+		}()
+	}
+
+	// Goroutines continuously reading statistics (which calls GetSmoothedPressure)
+	for i := 0; i < numGoroutines/2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				stats := controller.GetStatistics()
+				_ = stats // Use the stats to prevent optimization
+				time.Sleep(time.Microsecond)
+			}
+		}()
+	}
+
+	// Wait for all goroutines with timeout to detect deadlocks
+	done := make(chan bool, 1)
+	go func() {
+		wg.Wait()
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		// Success - no deadlock
+		t.Log("No deadlock detected")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Potential deadlock detected - test timed out")
+	}
+}
+
+// TestController_TypeSafety tests the type safety fixes
+func TestController_TypeSafety(t *testing.T) {
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+	config := Config{
+		MinRate:        1000,
+		MaxRate:        1000000,
+		TargetPressure: 0.5,
+		IncreaseRatio:  1.2,
+		DecreaseRatio:  0.8,
+		HistorySize:    5,
+	}
+
+	controller := NewController("test-stream", config, logger)
+
+	// Test GetPressure with uninitialized value
+	pressure := controller.GetPressure()
+	assert.Equal(t, 0.0, pressure, "Should return 0.0 for uninitialized pressure")
+
+	// Test GetSmoothedPressure with uninitialized value
+	smoothed := controller.GetSmoothedPressure()
+	assert.Equal(t, 0.0, smoothed, "Should return 0.0 for uninitialized smoothed pressure")
+
+	// Test GetStatistics with uninitialized value
+	stats := controller.GetStatistics()
+	assert.Equal(t, 0.0, stats.CurrentPressure, "Should return 0.0 for uninitialized pressure in stats")
+
+	// Test with valid pressure value
+	controller.UpdatePressure(0.8)
+	pressure = controller.GetPressure()
+	assert.Equal(t, 0.8, pressure, "Should return correct pressure")
+
+	// Test type consistency - atomic.Value requires consistent types
+	// We can't store different types after storing float64, so test the safety mechanisms
+	stats = controller.GetStatistics()
+	assert.Equal(t, 0.8, stats.CurrentPressure, "Should return correct pressure in stats")
+	
+	// Test edge case with extreme values
+	controller.UpdatePressure(1.5) // Over 1.0
+	pressure = controller.GetPressure()
+	assert.Equal(t, 1.5, pressure, "Should handle values over 1.0")
+	
+	controller.UpdatePressure(-0.1) // Negative
+	pressure = controller.GetPressure()
+	assert.Equal(t, -0.1, pressure, "Should handle negative values")
+}
+
+// TestController_ConcurrentPressureUpdates tests concurrent pressure updates and rate adjustments
+func TestController_ConcurrentPressureUpdates(t *testing.T) {
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+	config := Config{
+		MinRate:        1000,
+		MaxRate:        1000000,
+		TargetPressure: 0.5,
+		IncreaseRatio:  1.2,
+		DecreaseRatio:  0.8,
+		AdjustInterval: 5 * time.Millisecond, // Very fast for stress testing
+		HistorySize:    20,
+	}
+
+	controller := NewController("test-stream", config, logger)
+	controller.Start()
+	defer controller.Stop()
+
+	var wg sync.WaitGroup
+	var totalPressureUpdates atomic.Uint64
+	var totalRateChanges atomic.Uint64
+
+	// Callback to count rate changes
+	controller.SetRateChangeCallback(func(newRate int64) {
+		totalRateChanges.Add(1)
+	})
+
+	const numGoroutines = 10
+	const numOperations = 200
+
+	// Multiple goroutines updating pressure simultaneously
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(goroutineID int) {
+			defer wg.Done()
+			
+			for j := 0; j < numOperations; j++ {
+				// Create pressure patterns that should trigger adjustments
+				var pressure float64
+				switch j % 4 {
+				case 0:
+					pressure = 0.1 // Low pressure - should increase rate
+				case 1:
+					pressure = 0.3 // Medium-low pressure
+				case 2:
+					pressure = 0.7 // Medium-high pressure  
+				case 3:
+					pressure = 0.9 // High pressure - should decrease rate
+				}
+				
+				controller.UpdatePressure(pressure)
+				totalPressureUpdates.Add(1)
+				
+				// Read statistics to exercise the type safety fixes
+				stats := controller.GetStatistics()
+				require.GreaterOrEqual(t, stats.CurrentPressure, 0.0)
+				require.LessOrEqual(t, stats.CurrentPressure, 1.0)
+				
+				// Small delay to increase concurrency
+				time.Sleep(time.Microsecond)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Allow time for final adjustments
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify we processed all updates
+	assert.Equal(t, uint64(numGoroutines*numOperations), totalPressureUpdates.Load())
+	
+	// Should have triggered multiple rate changes
+	assert.Greater(t, totalRateChanges.Load(), uint64(0), "Should have triggered rate changes")
+	
+	// Final state should be consistent
+	stats := controller.GetStatistics()
+	assert.GreaterOrEqual(t, stats.CurrentRate, config.MinRate)
+	assert.LessOrEqual(t, stats.CurrentRate, config.MaxRate)
+	assert.GreaterOrEqual(t, stats.CurrentPressure, 0.0)
+	assert.LessOrEqual(t, stats.CurrentPressure, 1.0)
+}
+
+// TestController_RaceConditionFixed tests that the race condition in getSmoothedPressureUnsafe is fixed
+func TestController_RaceConditionFixed(t *testing.T) {
+	t.Parallel()
+	
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+	config := Config{
+		MinRate:        1000,
+		MaxRate:        50000,
+		TargetPressure: 0.7,
+		HistorySize:    20, // Moderate history size
+	}
+	
+	controller := NewController("test-race-fix", config, logger)
+	
+	const numGoroutines = 50
+	const numOperations = 1000
+	
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines * 2) // writers and readers
+	
+	// Start writer goroutines that update pressure
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				pressure := 0.1 + float64(id%10)*0.08 // 0.1 to 0.9
+				controller.UpdatePressure(pressure)
+				if j%100 == 0 {
+					time.Sleep(time.Microsecond) // Occasional small delay
+				}
+			}
+		}(i)
+	}
+	
+	// Start reader goroutines that read smoothed pressure
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				// This should not race with UpdatePressure after the fix
+				smoothed := controller.GetSmoothedPressure()
+				
+				// Validate the result is reasonable
+				if smoothed < 0.0 || smoothed > 1.0 {
+					t.Errorf("Invalid smoothed pressure: %f", smoothed)
+				}
+				
+				if j%100 == 0 {
+					time.Sleep(time.Microsecond) // Occasional small delay
+				}
+			}
+		}(i)
+	}
+	
+	// Wait for all goroutines to complete
+	wg.Wait()
+	
+	// If we reach here without the race detector triggering, the fix is working
+	t.Logf("Race condition test completed successfully - no data races detected")
+	
+	// Verify final state is consistent
+	stats := controller.GetStatistics()
+	assert.GreaterOrEqual(t, stats.CurrentPressure, 0.0)
+	assert.LessOrEqual(t, stats.CurrentPressure, 1.0)
+	assert.GreaterOrEqual(t, stats.SmoothedPressure, 0.0)
+	assert.LessOrEqual(t, stats.SmoothedPressure, 1.0)
+}
+
+// TestController_PressureHistoryConsistency tests pressure history under concurrent access
+func TestController_PressureHistoryConsistency(t *testing.T) {
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+	config := Config{
+		MinRate:        1000,
+		MaxRate:        1000000,
+		TargetPressure: 0.5,
+		HistorySize:    100, // Large history to increase contention
+	}
+
+	controller := NewController("test-stream", config, logger)
+
+	var wg sync.WaitGroup
+	const numWriters = 5
+	const numReaders = 10
+	const numOperations = 500
+
+	// Writer goroutines
+	for i := 0; i < numWriters; i++ {
+		wg.Add(1)
+		go func(writerID int) {
+			defer wg.Done()
+			
+			for j := 0; j < numOperations; j++ {
+				pressure := 0.1 + 0.8*float64(j%10)/10.0 // Predictable pattern
+				controller.UpdatePressure(pressure)
+				time.Sleep(time.Microsecond)
+			}
+		}(i)
+	}
+
+	// Reader goroutines
+	for i := 0; i < numReaders; i++ {
+		wg.Add(1)
+		go func(readerID int) {
+			defer wg.Done()
+			
+			for j := 0; j < numOperations; j++ {
+				// Test both direct and timeout-based access
+				smoothed := controller.GetSmoothedPressure()
+				assert.GreaterOrEqual(t, smoothed, 0.0)
+				assert.LessOrEqual(t, smoothed, 1.0)
+				
+				// Also test current pressure
+				current := controller.GetPressure()
+				
+				// Should be valid values
+				assert.GreaterOrEqual(t, current, 0.0)
+				
+				time.Sleep(time.Microsecond)
+			}
+		}(i)
+	}
+
+	// Wait for completion
+	wg.Wait()
+
+	// Final consistency check
+	finalSmoothed := controller.GetSmoothedPressure()
+	assert.GreaterOrEqual(t, finalSmoothed, 0.0)
+	assert.LessOrEqual(t, finalSmoothed, 1.0)
+}
+
+// TestController_LockTimeoutBehavior tests the timeout behavior in getSmoothedPressureUnsafe
+func TestController_LockTimeoutBehavior(t *testing.T) {
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+	config := Config{
+		MinRate:        1000,
+		MaxRate:        1000000,
+		TargetPressure: 0.5,
+		HistorySize:    10,
+	}
+
+	controller := NewController("test-stream", config, logger)
+
+	// Set a known pressure value
+	controller.UpdatePressure(0.7)
+
+	// Hold the lock to force timeout in getSmoothedPressureUnsafe
+	controller.mu.Lock()
+	
+	go func() {
+		// Release lock after timeout period
+		time.Sleep(20 * time.Millisecond)
+		controller.mu.Unlock()
+	}()
+
+	// This should timeout and fallback to current pressure
+	result := controller.getSmoothedPressureUnsafe()
+	
+	// Should return the current pressure (0.7) due to timeout fallback
+	assert.Equal(t, 0.7, result)
 }

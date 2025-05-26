@@ -3,6 +3,7 @@ package srt
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"runtime"
 	"sync"
 	"testing"
@@ -11,7 +12,85 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zsiec/mirror/internal/ingestion/registry"
+	"github.com/zsiec/mirror/internal/logger"
 )
+
+// ExponentialBackoff implements exponential backoff for reconnection attempts
+type ExponentialBackoff struct {
+	attempt  int
+	maxDelay time.Duration
+}
+
+// NewExponentialBackoff creates a new exponential backoff instance
+func NewExponentialBackoff() *ExponentialBackoff {
+	return &ExponentialBackoff{
+		attempt:  0,
+		maxDelay: 30 * time.Second,
+	}
+}
+
+// Next returns the next backoff delay
+func (b *ExponentialBackoff) Next() time.Duration {
+	b.attempt++
+	// Base delay: 2^attempt * 100ms
+	delay := time.Duration(1<<uint(b.attempt)) * 100 * time.Millisecond
+	if delay > b.maxDelay {
+		delay = b.maxDelay
+	}
+	// Add 25% jitter
+	jitter := time.Duration(rand.Int63n(int64(delay / 4)))
+	return delay + jitter
+}
+
+// Reset resets the backoff to initial state
+func (b *ExponentialBackoff) Reset() {
+	b.attempt = 0
+}
+
+// mockRegistry is a mock implementation of registry.Registry for testing
+type mockRegistry struct{}
+
+func (m *mockRegistry) Register(ctx context.Context, stream *registry.Stream) error {
+	return nil
+}
+
+func (m *mockRegistry) Unregister(ctx context.Context, streamID string) error {
+	return nil
+}
+
+func (m *mockRegistry) Get(ctx context.Context, streamID string) (*registry.Stream, error) {
+	return nil, nil
+}
+
+func (m *mockRegistry) List(ctx context.Context) ([]*registry.Stream, error) {
+	return []*registry.Stream{}, nil
+}
+
+func (m *mockRegistry) UpdateHeartbeat(ctx context.Context, streamID string) error {
+	return nil
+}
+
+func (m *mockRegistry) UpdateStatus(ctx context.Context, streamID string, status registry.StreamStatus) error {
+	return nil
+}
+
+func (m *mockRegistry) UpdateStats(ctx context.Context, streamID string, stats *registry.StreamStats) error {
+	return nil
+}
+
+func (m *mockRegistry) Delete(ctx context.Context, streamID string) error {
+	return nil
+}
+
+func (m *mockRegistry) Update(ctx context.Context, stream *registry.Stream) error {
+	return nil
+}
+
+func (m *mockRegistry) Close() error {
+	return nil
+}
 
 func TestConnectionStats(t *testing.T) {
 	stats := &ConnectionStats{}
@@ -65,8 +144,9 @@ func TestConnection_GoroutineCleanup(t *testing.T) {
 	before := runtime.NumGoroutine()
 
 	// Create mock dependencies
-	logger := logrus.New()
-	logger.SetLevel(logrus.ErrorLevel) // Reduce noise
+	logrusLogger := logrus.New()
+	logrusLogger.SetLevel(logrus.ErrorLevel) // Reduce noise
+	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -83,7 +163,7 @@ func TestConnection_GoroutineCleanup(t *testing.T) {
 			conn := &Connection{
 				streamID:   streamID,
 				registry:   &mockRegistry{},
-				logger:     logger,
+				logger:     testLogger,
 				startTime:  time.Now(),
 				lastActive: time.Now(),
 				done:       make(chan struct{}),
@@ -127,9 +207,12 @@ func TestConnection_GoroutineCleanup(t *testing.T) {
 }
 
 func TestConnection_CloseIdempotent(t *testing.T) {
+	logrusLogger := logrus.New()
+	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
+
 	conn := &Connection{
 		streamID:   "test-stream",
-		logger:     logrus.New(),
+		logger:     testLogger,
 		startTime:  time.Now(),
 		lastActive: time.Now(),
 		done:       make(chan struct{}),

@@ -64,7 +64,7 @@ func TestManager_StopErrorCollection(t *testing.T) {
 		memoryController: memory.NewController(100*1024*1024, 50*1024*1024),
 		streamHandlers:   make(map[string]*StreamHandler),
 		streamOpLocks:    make(map[string]*sync.Mutex),
-		logger:           logger.Logger(logrus.New()),
+		logger:           logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())),
 		started:          true,
 	}
 
@@ -132,7 +132,7 @@ func TestStreamHandler_StopErrorCollection(t *testing.T) {
 		AdjustInterval: 100 * time.Millisecond,
 		HistorySize:    10,
 	}
-	bpController := backpressure.NewController("test-stream", bpConfig, logger.Logger(logrus.New()))
+	bpController := backpressure.NewController("test-stream", bpConfig, logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())))
 
 	handler := &StreamHandler{
 		streamID:         "test-stream",
@@ -140,7 +140,7 @@ func TestStreamHandler_StopErrorCollection(t *testing.T) {
 		ctx:              context.Background(),
 		cancel:           func() {},
 		memoryController: memory.NewController(100*1024*1024, 50*1024*1024),
-		logger:           logger.Logger(logrus.New()),
+		logger:           logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())),
 		started:          true,
 		bpController:     bpController,
 	}

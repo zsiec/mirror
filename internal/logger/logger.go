@@ -11,6 +11,96 @@ import (
 	"github.com/zsiec/mirror/pkg/version"
 )
 
+// Logger defines the interface for structured logging
+type Logger interface {
+	WithFields(fields map[string]interface{}) Logger
+	WithField(key string, value interface{}) Logger
+	WithError(err error) Logger
+	Debug(args ...interface{})
+	Info(args ...interface{})
+	Warn(args ...interface{})
+	Error(args ...interface{})
+	Log(level logrus.Level, args ...interface{})
+	// Printf-style methods for backward compatibility
+	Debugf(format string, args ...interface{})
+	Infof(format string, args ...interface{})
+	Warnf(format string, args ...interface{})
+	Errorf(format string, args ...interface{})
+	Fatal(args ...interface{})
+}
+
+// LogrusAdapter wraps logrus.Entry to implement Logger interface
+type LogrusAdapter struct {
+	entry *logrus.Entry
+}
+
+// NewLogrusAdapter creates a new LogrusAdapter
+func NewLogrusAdapter(entry *logrus.Entry) Logger {
+	return &LogrusAdapter{entry: entry}
+}
+
+// WithFields implements Logger interface
+func (l *LogrusAdapter) WithFields(fields map[string]interface{}) Logger {
+	return &LogrusAdapter{entry: l.entry.WithFields(fields)}
+}
+
+// WithField implements Logger interface
+func (l *LogrusAdapter) WithField(key string, value interface{}) Logger {
+	return &LogrusAdapter{entry: l.entry.WithField(key, value)}
+}
+
+// WithError implements Logger interface
+func (l *LogrusAdapter) WithError(err error) Logger {
+	return &LogrusAdapter{entry: l.entry.WithError(err)}
+}
+
+// Debug implements Logger interface
+func (l *LogrusAdapter) Debug(args ...interface{}) {
+	l.entry.Debug(args...)
+}
+
+// Info implements Logger interface
+func (l *LogrusAdapter) Info(args ...interface{}) {
+	l.entry.Info(args...)
+}
+
+// Warn implements Logger interface
+func (l *LogrusAdapter) Warn(args ...interface{}) {
+	l.entry.Warn(args...)
+}
+
+// Error implements Logger interface
+func (l *LogrusAdapter) Error(args ...interface{}) {
+	l.entry.Error(args...)
+}
+
+// Log implements Logger interface
+func (l *LogrusAdapter) Log(level logrus.Level, args ...interface{}) {
+	l.entry.Log(level, args...)
+}
+
+// Printf-style methods for backward compatibility
+func (l *LogrusAdapter) Debugf(format string, args ...interface{}) {
+	l.entry.Debugf(format, args...)
+}
+
+func (l *LogrusAdapter) Infof(format string, args ...interface{}) {
+	l.entry.Infof(format, args...)
+}
+
+func (l *LogrusAdapter) Warnf(format string, args ...interface{}) {
+	l.entry.Warnf(format, args...)
+}
+
+func (l *LogrusAdapter) Errorf(format string, args ...interface{}) {
+	l.entry.Errorf(format, args...)
+}
+
+func (l *LogrusAdapter) Fatal(args ...interface{}) {
+	l.entry.Log(logrus.FatalLevel, args...)
+	l.entry.Logger.Exit(1)
+}
+
 // New creates a new configured logger instance.
 func New(cfg *config.LoggingConfig) (*logrus.Logger, error) {
 	logger := logrus.New()
@@ -94,26 +184,3 @@ type Fields = logrus.Fields
 
 // Entry is a type alias for logrus.Entry
 type Entry = logrus.Entry
-
-// Logger interface that both logrus.Logger and logrus.Entry implement
-type Logger interface {
-	WithField(key string, value interface{}) *logrus.Entry
-	WithFields(fields logrus.Fields) *logrus.Entry
-	WithError(err error) *logrus.Entry
-
-	Debugf(format string, args ...interface{})
-	Infof(format string, args ...interface{})
-	Printf(format string, args ...interface{})
-	Warnf(format string, args ...interface{})
-	Errorf(format string, args ...interface{})
-	Fatalf(format string, args ...interface{})
-	Panicf(format string, args ...interface{})
-
-	Debug(args ...interface{})
-	Info(args ...interface{})
-	Print(args ...interface{})
-	Warn(args ...interface{})
-	Error(args ...interface{})
-	Fatal(args ...interface{})
-	Panic(args ...interface{})
-}

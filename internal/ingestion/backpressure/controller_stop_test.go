@@ -8,11 +8,13 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zsiec/mirror/internal/logger"
 )
 
 // TestControllerStopStopsGoroutine verifies the control loop goroutine stops
 func TestControllerStopStopsGoroutine(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 
 	// Get baseline goroutine count
 	runtime.GC()
@@ -48,7 +50,7 @@ func TestControllerStopStopsGoroutine(t *testing.T) {
 
 // TestControllerContextDone verifies context is cancelled on Stop
 func TestControllerContextDone(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 
 	config := Config{
 		MinRate:        1000,
@@ -85,7 +87,7 @@ func TestControllerContextDone(t *testing.T) {
 
 // TestControllerMultipleStartStop verifies multiple start/stop cycles work
 func TestControllerMultipleStartStop(t *testing.T) {
-	logger := logrus.New()
+	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 
 	config := Config{
 		MinRate:        1000,
