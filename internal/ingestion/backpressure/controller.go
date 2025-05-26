@@ -319,17 +319,10 @@ func (c *Controller) GetSmoothedPressure() float64 {
 
 // getSmoothedPressureUnsafe returns averaged pressure without locking (for internal use)
 // This is safe to call from adjustRate() since it doesn't acquire locks
+// IMPORTANT: Caller must hold at least RLock on c.mu
 func (c *Controller) getSmoothedPressureUnsafe() float64 {
-	var historyCopy []float64
-	c.mu.RLock()
-	if len(c.pressureHistory) > 0 {
-		historyCopy = make([]float64, len(c.pressureHistory))
-		copy(historyCopy, c.pressureHistory)
-	}
-	c.mu.RUnlock()
-	
 	// If no history exists, return current pressure
-	if len(historyCopy) == 0 {
+	if len(c.pressureHistory) == 0 {
 		// Safe type assertion with fallback
 		if pressure, ok := c.currentPressure.Load().(float64); ok {
 			return pressure
@@ -338,9 +331,9 @@ func (c *Controller) getSmoothedPressureUnsafe() float64 {
 	}
 
 	// Calculate weighted average (recent values weighted more)
-	// Now safe to iterate over the copy without race conditions
+	// Access pressure history directly since caller holds lock
 	var sum, weightSum float64
-	for i, p := range historyCopy {
+	for i, p := range c.pressureHistory {
 		weight := float64(i + 1) // More recent = higher weight
 		sum += p * weight
 		weightSum += weight
