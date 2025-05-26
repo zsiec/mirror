@@ -208,15 +208,7 @@ func StreamTypeIcon(streamType string) string {
 	case "srt":
 		return LiveStyle.Render("📡 SRT")
 	case "rtp":
-		// Create RTP badge style to match SRT
-		rtpStyle := lipgloss.NewStyle().
-			Foreground(Primary).
-			Background(PanelBg).
-			Bold(true).
-			Padding(0, 1).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Primary)
-		return rtpStyle.Render("📺 RTP")
+		return InfoStyle.Render("📺 RTP")
 	case "rtmp":
 		return RecordingStyle.Render("📹 RTMP")
 	default:
