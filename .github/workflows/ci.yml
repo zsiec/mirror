@@ -134,6 +134,11 @@ jobs:
       - name: Generate test certificates
         run: make generate-certs
 
+      - name: Set SRT environment variables
+        run: |
+          echo "CGO_CFLAGS=$(pkg-config --cflags srt)" >> $GITHUB_ENV
+          echo "CGO_LDFLAGS=$(pkg-config --libs srt)" >> $GITHUB_ENV
+
       - name: Run tests
         env:
           MIRROR_REDIS_ADDRESSES: localhost:6379
@@ -214,6 +219,11 @@ jobs:
           ffmpeg -version | head -3
           echo "FFmpeg libraries:"
           pkg-config --modversion libavcodec libavformat libavutil libswscale
+
+      - name: Set SRT environment variables (build)
+        run: |
+          echo "CGO_CFLAGS=$(pkg-config --cflags srt)" >> $GITHUB_ENV
+          echo "CGO_LDFLAGS=$(pkg-config --libs srt)" >> $GITHUB_ENV
 
       - name: Build binary
         env:
