@@ -124,32 +124,6 @@ func main() {
 		}()
 	}
 
-	// Create ingestion manager if enabled
-	var ingestionMgr *ingestion.Manager
-	if cfg.Ingestion.SRT.Enabled || cfg.Ingestion.RTP.Enabled {
-		var err error
-		ingestionMgr, err = ingestion.NewManager(&cfg.Ingestion, log)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to create ingestion manager")
-		}
-
-		// Register ingestion routes
-		ingestionHandlers := ingestion.NewHandlers(ingestionMgr, log)
-		srv.RegisterRoutes(ingestionHandlers.RegisterRoutes)
-
-		// Start ingestion
-		if err := ingestionMgr.Start(); err != nil {
-			log.WithError(err).Fatal("Failed to start ingestion manager")
-		}
-		log.Info("Ingestion manager started")
-
-		defer func() {
-			if err := ingestionMgr.Stop(); err != nil {
-				log.WithError(err).Error("Failed to stop ingestion manager")
-			}
-		}()
-	}
-
 	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
