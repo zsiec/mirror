@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mirror Frame Visualization - Live Digital Video Analysis</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/date-fns/2.29.3/index.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0a0a;
+            color: #ffffff;
+            overflow-x: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto auto auto;
+            gap: 20px;
+            padding: 20px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+
+        .card h3 {
+            margin-bottom: 15px;
+            color: #64b5f6;
+            border-bottom: 2px solid #64b5f6;
+            padding-bottom: 8px;
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            font-size: 14px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #2196f3, #21cbf3);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(45deg, #4caf50, #8bc34a);
+            color: white;
+        }
+
+        .btn-warning {
+            background: linear-gradient(45deg, #ff9800, #ffc107);
+            color: white;
+        }
+
+        .btn-danger {
+            background: linear-gradient(45deg, #f44336, #e91e63);
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-connected {
+            background: #4caf50;
+        }
+
+        .status-disconnected {
+            background: #f44336;
+        }
+
+        .status-capturing {
+            background: #ff9800;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #64b5f6;
+            display: block;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-top: 5px;
+        }
+
+        .frame-info {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
+        .frame-type {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.8em;
+            margin: 2px;
+        }
+
+        .frame-type-I { background: #4caf50; color: white; }
+        .frame-type-P { background: #2196f3; color: white; }
+        .frame-type-B { background: #ff9800; color: white; }
+        .frame-type-IDR { background: #9c27b0; color: white; }
+
+        .nal-unit {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 6px 12px;
+            margin: 3px;
+            border-radius: 8px;
+            font-size: 0.8em;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 15px;
+        }
+
+        .frame-timeline {
+            height: 80px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 10px;
+            margin-top: 15px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .frame-block {
+            position: absolute;
+            height: 60px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7em;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .frame-block:hover {
+            transform: scale(1.1);
+            z-index: 10;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+
+        .captured-frames {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+
+        .captured-frame {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 8px;
+            border-left: 4px solid #64b5f6;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .captured-frame:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(5px);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background: #1a1a1a;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 15px;
+            width: 80%;
+            max-width: 800px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .close:hover {
+            color: #fff;
+        }
+
+        .select {
+            padding: 8px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 14px;
+        }
+
+        .select option {
+            background: #2a2a2a;
+            color: white;
+        }
+
+        .input {
+            padding: 8px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 14px;
+        }
+
+        .input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        #log {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            padding: 15px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8em;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .log-entry {
+            margin: 2px 0;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+
+        .log-info { color: #64b5f6; }
+        .log-success { color: #4caf50; }
+        .log-warning { color: #ff9800; }
+        .log-error { color: #f44336; }
+
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+            
+            .controls {
+                justify-content: center;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎬 Mirror Frame Visualization</h1>
+        <p>Real-time analysis of digital video streaming, packetization, and frame processing</p>
+    </div>
+
+    <div class="container">
+        <!-- Connection & Control Panel -->
+        <div class="card full-width">
+            <h3>📡 Connection & Control</h3>
+            <div class="controls">
+                <select id="streamSelect" class="select">
+                    <option value="">Select Stream...</option>
+                </select>
+                
+                <button id="connectBtn" class="btn btn-primary">Connect</button>
+                <button id="disconnectBtn" class="btn btn-danger" disabled>Disconnect</button>
+                
+                <div class="status">
+                    <span>Status:</span>
+                    <div id="connectionStatus" class="status-indicator status-disconnected"></div>
+                    <span id="statusText">Disconnected</span>
+                </div>
+
+                <button id="startCapture" class="btn btn-success">Start Capture</button>
+                <button id="stopCapture" class="btn btn-warning" disabled>Stop Capture</button>
+                
+                <div class="status">
+                    <span>Capture:</span>
+                    <div id="captureStatus" class="status-indicator status-disconnected"></div>
+                    <span id="captureText">Stopped</span>
+                </div>
+
+                <input type="number" id="maxFrames" class="input" placeholder="Max frames (1000)" value="1000" min="10" max="10000">
+            </div>
+        </div>
+
+        <!-- Real-time Stats -->
+        <div class="card">
+            <h3>📊 Real-time Statistics</h3>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <span class="stat-value" id="frameRate">0</span>
+                    <div class="stat-label">Frames/sec</div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value" id="bitrate">0</span>
+                    <div class="stat-label">Mbps</div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value" id="totalFrames">0</span>
+                    <div class="stat-label">Total Frames</div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value" id="keyframes">0</span>
+                    <div class="stat-label">Keyframes</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Current Frame Info -->
+        <div class="card">
+            <h3>🎯 Current Frame</h3>
+            <div class="frame-info">
+                <div><strong>Type:</strong> <span id="currentFrameType" class="frame-type frame-type-P">P</span></div>
+                <div><strong>Size:</strong> <span id="currentFrameSize">0</span> bytes</div>
+                <div><strong>PTS:</strong> <span id="currentPTS">0</span></div>
+                <div><strong>Bitrate:</strong> <span id="currentBitrate">0</span> bps</div>
+                <div><strong>Resolution:</strong> <span id="currentResolution">0x0</span></div>
+                <div><strong>QP:</strong> <span id="currentQP">0</span></div>
+                <div><strong>Codec:</strong> <span id="currentCodec">Unknown</span></div>
+                
+                <div style="margin-top: 10px;">
+                    <strong>NAL Units:</strong>
+                    <div id="nalUnits"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Frame Timeline -->
+        <div class="card full-width">
+            <h3>🕒 Frame Timeline (Last 60 frames)</h3>
+            <div class="frame-timeline" id="frameTimeline"></div>
+        </div>
+
+        <!-- Frame Type Distribution Chart -->
+        <div class="card">
+            <h3>📈 Frame Type Distribution</h3>
+            <div class="chart-container">
+                <canvas id="frameTypeChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Bitrate Chart -->
+        <div class="card">
+            <h3>📊 Bitrate Over Time</h3>
+            <div class="chart-container">
+                <canvas id="bitrateChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Captured Frames -->
+        <div class="card">
+            <h3>💾 Captured Frames</h3>
+            <div class="captured-frames" id="capturedFrames">
+                <p style="text-align: center; opacity: 0.6;">No frames captured yet. Start capture to begin analysis.</p>
+            </div>
+        </div>
+
+        <!-- Activity Log -->
+        <div class="card">
+            <h3>📝 Activity Log</h3>
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <!-- Frame Detail Modal -->
+    <div id="frameModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Frame Analysis</h2>
+            <div id="frameDetails"></div>
+        </div>
+    </div>
+
+    <script>
+        class FrameVisualizer {
+            constructor() {
+                this.ws = null;
+                this.isConnected = false;
+                this.isCapturing = false;
+                this.currentStream = null;
+                this.frameCounter = 0;
+                this.frameTimeline = [];
+                this.capturedFrames = [];
+                
+                this.frameTypeChart = null;
+                this.bitrateChart = null;
+                
+                this.frameTypeData = { I: 0, P: 0, B: 0, IDR: 0 };
+                this.bitrateData = [];
+                
+                this.init();
+                this.setupCharts();
+                this.loadStreams();
+            }
+
+            init() {
+                // DOM elements
+                this.elements = {
+                    streamSelect: document.getElementById('streamSelect'),
+                    connectBtn: document.getElementById('connectBtn'),
+                    disconnectBtn: document.getElementById('disconnectBtn'),
+                    connectionStatus: document.getElementById('connectionStatus'),
+                    statusText: document.getElementById('statusText'),
+                    startCapture: document.getElementById('startCapture'),
+                    stopCapture: document.getElementById('stopCapture'),
+                    captureStatus: document.getElementById('captureStatus'),
+                    captureText: document.getElementById('captureText'),
+                    maxFrames: document.getElementById('maxFrames'),
+                    frameTimeline: document.getElementById('frameTimeline'),
+                    capturedFrames: document.getElementById('capturedFrames'),
+                    log: document.getElementById('log'),
+                    frameModal: document.getElementById('frameModal'),
+                    frameDetails: document.getElementById('frameDetails')
+                };
+
+                // Event listeners
+                this.elements.connectBtn.addEventListener('click', () => this.connect());
+                this.elements.disconnectBtn.addEventListener('click', () => this.disconnect());
+                this.elements.startCapture.addEventListener('click', () => this.startCapture());
+                this.elements.stopCapture.addEventListener('click', () => this.stopCapture());
+                
+                // Modal close
+                document.querySelector('.close').addEventListener('click', () => {
+                    this.elements.frameModal.style.display = 'none';
+                });
+                
+                window.addEventListener('click', (e) => {
+                    if (e.target === this.elements.frameModal) {
+                        this.elements.frameModal.style.display = 'none';
+                    }
+                });
+
+                this.log('info', 'Frame Visualizer initialized');
+            }
+
+            async loadStreams() {
+                try {
+                    const response = await fetch('/api/v1/streams');
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    const data = await response.json();
+                    this.elements.streamSelect.innerHTML = '<option value="">Select Stream...</option>';
+                    
+                    data.streams.forEach(stream => {
+                        const option = document.createElement('option');
+                        option.value = stream.id;
+                        option.textContent = `${stream.id} (${stream.video_codec || 'Unknown'} - ${stream.resolution || 'Unknown'})`;
+                        this.elements.streamSelect.appendChild(option);
+                    });
+                    
+                    this.log('success', `Loaded ${data.streams.length} streams`);
+                } catch (error) {
+                    this.log('error', `Failed to load streams: ${error.message}`);
+                }
+            }
+
+            connect() {
+                const streamId = this.elements.streamSelect.value;
+                if (!streamId) {
+                    this.log('warning', 'Please select a stream first');
+                    return;
+                }
+
+                this.currentStream = streamId;
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/streams/${streamId}/frames/live`;
+                
+                this.log('info', `Connecting to ${wsUrl}...`);
+                
+                try {
+                    this.ws = new WebSocket(wsUrl);
+                    
+                    this.ws.onopen = () => {
+                        this.isConnected = true;
+                        this.updateConnectionUI(true);
+                        this.log('success', `Connected to stream ${streamId}`);
+                    };
+                    
+                    this.ws.onmessage = (event) => {
+                        try {
+                            const frameData = JSON.parse(event.data);
+                            this.processFrame(frameData);
+                        } catch (error) {
+                            this.log('error', `Failed to parse frame data: ${error.message}`);
+                        }
+                    };
+                    
+                    this.ws.onclose = (event) => {
+                        this.isConnected = false;
+                        this.updateConnectionUI(false);
+                        this.log('warning', `Connection closed (${event.code}): ${event.reason || 'Unknown reason'}`);
+                    };
+                    
+                    this.ws.onerror = (error) => {
+                        this.log('error', `WebSocket error: ${error.message || 'Connection failed'}`);
+                    };
+                    
+                } catch (error) {
+                    this.log('error', `Failed to create WebSocket: ${error.message}`);
+                }
+            }
+
+            disconnect() {
+                if (this.ws) {
+                    this.ws.close();
+                    this.ws = null;
+                }
+                this.isConnected = false;
+                this.updateConnectionUI(false);
+                this.log('info', 'Disconnected');
+            }
+
+            async startCapture() {
+                try {
+                    const maxFrames = parseInt(this.elements.maxFrames.value) || 1000;
+                    const response = await fetch('/api/v1/frames/capture/start', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            enabled: true,
+                            max_frames: maxFrames,
+                            stream_id: this.currentStream
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        this.isCapturing = true;
+                        this.updateCaptureUI(true);
+                        this.log('success', `Started capturing frames (max: ${maxFrames})`);
+                        this.loadCapturedFrames();
+                    } else {
+                        throw new Error(`Failed to start capture: ${response.statusText}`);
+                    }
+                } catch (error) {
+                    this.log('error', error.message);
+                }
+            }
+
+            async stopCapture() {
+                try {
+                    const response = await fetch('/api/v1/frames/capture/stop', {
+                        method: 'POST'
+                    });
+                    
+                    if (response.ok) {
+                        this.isCapturing = false;
+                        this.updateCaptureUI(false);
+                        this.log('success', 'Stopped capturing frames');
+                    } else {
+                        throw new Error(`Failed to stop capture: ${response.statusText}`);
+                    }
+                } catch (error) {
+                    this.log('error', error.message);
+                }
+            }
+
+            async loadCapturedFrames() {
+                if (!this.isCapturing) return;
+                
+                try {
+                    const response = await fetch('/api/v1/frames/captured');
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.displayCapturedFrames(data.frames);
+                        
+                        // Auto-refresh every 2 seconds if capturing
+                        if (this.isCapturing) {
+                            setTimeout(() => this.loadCapturedFrames(), 2000);
+                        }
+                    }
+                } catch (error) {
+                    this.log('error', `Failed to load captured frames: ${error.message}`);
+                }
+            }
+
+            processFrame(frameData) {
+                this.frameCounter++;
+                
+                // Update frame type distribution
+                if (this.frameTypeData.hasOwnProperty(frameData.frame_type)) {
+                    this.frameTypeData[frameData.frame_type]++;
+                }
+                
+                // Update bitrate data
+                this.bitrateData.push({
+                    time: new Date(frameData.timestamp),
+                    bitrate: frameData.bitrate / 1000000 // Convert to Mbps
+                });
+                
+                // Keep only last 60 seconds of data
+                const oneMinuteAgo = new Date(Date.now() - 60000);
+                this.bitrateData = this.bitrateData.filter(d => d.time > oneMinuteAgo);
+                
+                // Update timeline
+                this.frameTimeline.push(frameData);
+                if (this.frameTimeline.length > 60) {
+                    this.frameTimeline.shift();
+                }
+                
+                // Update UI
+                this.updateStats(frameData);
+                this.updateCurrentFrame(frameData);
+                this.updateTimeline();
+                this.updateCharts();
+            }
+
+            updateStats(frameData) {
+                document.getElementById('frameRate').textContent = 
+                    (this.frameCounter / ((Date.now() - this.startTime) / 1000) || 0).toFixed(1);
+                document.getElementById('bitrate').textContent = 
+                    (frameData.bitrate / 1000000).toFixed(2);
+                document.getElementById('totalFrames').textContent = this.frameCounter;
+                document.getElementById('keyframes').textContent = this.frameTypeData.I + this.frameTypeData.IDR;
+            }
+
+            updateCurrentFrame(frameData) {
+                document.getElementById('currentFrameType').textContent = frameData.frame_type;
+                document.getElementById('currentFrameType').className = `frame-type frame-type-${frameData.frame_type}`;
+                document.getElementById('currentFrameSize').textContent = frameData.frame_size.toLocaleString();
+                document.getElementById('currentPTS').textContent = frameData.pts;
+                document.getElementById('currentBitrate').textContent = frameData.bitrate.toLocaleString();
+                document.getElementById('currentResolution').textContent = `${frameData.resolution.width}x${frameData.resolution.height}`;
+                document.getElementById('currentQP').textContent = frameData.qp;
+                document.getElementById('currentCodec').textContent = frameData.codec;
+                
+                // Update NAL units
+                const nalContainer = document.getElementById('nalUnits');
+                nalContainer.innerHTML = '';
+                frameData.nal_units.forEach(nal => {
+                    const nalElement = document.createElement('div');
+                    nalElement.className = 'nal-unit';
+                    nalElement.textContent = `${nal.type_name} (${nal.size}B)`;
+                    nalContainer.appendChild(nalElement);
+                });
+            }
+
+            updateTimeline() {
+                const timeline = this.elements.frameTimeline;
+                timeline.innerHTML = '';
+                
+                const width = timeline.clientWidth;
+                const frameWidth = Math.max(width / 60, 10); // Minimum 10px per frame
+                
+                this.frameTimeline.forEach((frame, index) => {
+                    const frameBlock = document.createElement('div');
+                    frameBlock.className = 'frame-block';
+                    frameBlock.style.left = `${index * frameWidth}px`;
+                    frameBlock.style.width = `${frameWidth - 2}px`;
+                    frameBlock.textContent = frame.frame_type;
+                    
+                    // Color based on frame type
+                    switch (frame.frame_type) {
+                        case 'I':
+                        case 'IDR':
+                            frameBlock.style.backgroundColor = '#4caf50';
+                            break;
+                        case 'P':
+                            frameBlock.style.backgroundColor = '#2196f3';
+                            break;
+                        case 'B':
+                            frameBlock.style.backgroundColor = '#ff9800';
+                            break;
+                        default:
+                            frameBlock.style.backgroundColor = '#757575';
+                    }
+                    
+                    frameBlock.addEventListener('click', () => this.showFrameDetails(frame));
+                    timeline.appendChild(frameBlock);
+                });
+            }
+
+            setupCharts() {
+                // Frame Type Distribution Chart
+                const ftCtx = document.getElementById('frameTypeChart').getContext('2d');
+                this.frameTypeChart = new Chart(ftCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['I-frames', 'P-frames', 'B-frames', 'IDR-frames'],
+                        datasets: [{
+                            data: [0, 0, 0, 0],
+                            backgroundColor: ['#4caf50', '#2196f3', '#ff9800', '#9c27b0'],
+                            borderWidth: 2,
+                            borderColor: '#ffffff'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                labels: { color: '#ffffff' }
+                            }
+                        }
+                    }
+                });
+
+                // Bitrate Chart
+                const brCtx = document.getElementById('bitrateChart').getContext('2d');
+                this.bitrateChart = new Chart(brCtx, {
+                    type: 'line',
+                    data: {
+                        datasets: [{
+                            label: 'Bitrate (Mbps)',
+                            data: [],
+                            borderColor: '#64b5f6',
+                            backgroundColor: 'rgba(100, 181, 246, 0.1)',
+                            fill: true,
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: { unit: 'second' },
+                                ticks: { color: '#ffffff' },
+                                grid: { color: 'rgba(255,255,255,0.1)' }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                ticks: { color: '#ffffff' },
+                                grid: { color: 'rgba(255,255,255,0.1)' }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                labels: { color: '#ffffff' }
+                            }
+                        }
+                    }
+                });
+            }
+
+            updateCharts() {
+                // Update frame type chart
+                this.frameTypeChart.data.datasets[0].data = [
+                    this.frameTypeData.I,
+                    this.frameTypeData.P,
+                    this.frameTypeData.B,
+                    this.frameTypeData.IDR
+                ];
+                this.frameTypeChart.update('none');
+
+                // Update bitrate chart
+                this.bitrateChart.data.datasets[0].data = this.bitrateData.map(d => ({
+                    x: d.time,
+                    y: d.bitrate
+                }));
+                this.bitrateChart.update('none');
+            }
+
+            displayCapturedFrames(frames) {
+                const container = this.elements.capturedFrames;
+                container.innerHTML = '';
+                
+                if (frames.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; opacity: 0.6;">No frames captured yet.</p>';
+                    return;
+                }
+                
+                frames.slice(-50).reverse().forEach((frame, index) => {
+                    const frameElement = document.createElement('div');
+                    frameElement.className = 'captured-frame';
+                    frameElement.innerHTML = `
+                        <div><strong>${frame.frame.type || 'Unknown'}</strong> frame - ${frame.frame.total_size || 0} bytes</div>
+                        <div style="font-size: 0.8em; opacity: 0.8;">
+                            PTS: ${frame.frame.pts || 0} | Captured: ${new Date(frame.capture_time).toLocaleTimeString()}
+                        </div>
+                    `;
+                    frameElement.addEventListener('click', () => this.showCapturedFrameDetails(frame));
+                    container.appendChild(frameElement);
+                });
+            }
+
+            showFrameDetails(frameData) {
+                const details = this.elements.frameDetails;
+                details.innerHTML = `
+                    <h3>Frame ${frameData.frame_type} - ${frameData.frame_size} bytes</h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+                        <div>
+                            <h4>Timing Information</h4>
+                            <p><strong>PTS:</strong> ${frameData.pts}</p>
+                            <p><strong>DTS:</strong> ${frameData.dts}</p>
+                            <p><strong>Duration:</strong> ${frameData.duration}</p>
+                            <p><strong>Capture Time:</strong> ${new Date(frameData.timing.capture_time).toLocaleString()}</p>
+                            <p><strong>Processing Latency:</strong> ${frameData.timing.processing_latency / 1000000}ms</p>
+                        </div>
+                        <div>
+                            <h4>Video Information</h4>
+                            <p><strong>Codec:</strong> ${frameData.codec}</p>
+                            <p><strong>Resolution:</strong> ${frameData.resolution.width}x${frameData.resolution.height}</p>
+                            <p><strong>Profile:</strong> ${frameData.resolution.profile}</p>
+                            <p><strong>Level:</strong> ${frameData.resolution.level}</p>
+                            <p><strong>QP:</strong> ${frameData.qp}</p>
+                            <p><strong>PSNR:</strong> ${frameData.psnr.toFixed(2)} dB</p>
+                        </div>
+                    </div>
+                    <div style="margin-top: 20px;">
+                        <h4>GOP Information</h4>
+                        <p><strong>GOP ID:</strong> ${frameData.gop.gop_id}</p>
+                        <p><strong>Position in GOP:</strong> ${frameData.gop.position + 1}/${frameData.gop.gop_size}</p>
+                        <p><strong>GOP Duration:</strong> ${frameData.gop.gop_duration}</p>
+                        <p><strong>Last in GOP:</strong> ${frameData.gop.is_last_in_gop ? 'Yes' : 'No'}</p>
+                    </div>
+                    <div style="margin-top: 20px;">
+                        <h4>NAL Units (${frameData.nal_units.length})</h4>
+                        ${frameData.nal_units.map(nal => 
+                            `<div class="nal-unit">Type ${nal.type}: ${nal.type_name} (${nal.size} bytes, importance: ${nal.importance})</div>`
+                        ).join('')}
+                    </div>
+                `;
+                this.elements.frameModal.style.display = 'block';
+            }
+
+            showCapturedFrameDetails(frame) {
+                this.showFrameDetails({
+                    frame_type: frame.frame.type || 'Unknown',
+                    frame_size: frame.frame.total_size || 0,
+                    pts: frame.frame.pts || 0,
+                    dts: frame.frame.dts || 0,
+                    duration: frame.frame.duration || 0,
+                    codec: 'H.264', // Mock data
+                    qp: frame.frame.qp || 0,
+                    psnr: frame.frame.psnr || 0,
+                    timing: {
+                        capture_time: frame.capture_time,
+                        processing_latency: frame.processing_time * 1000000 // Convert to nanoseconds for display
+                    },
+                    resolution: {
+                        width: 1920,
+                        height: 1080,
+                        profile: 'High',
+                        level: '4.0'
+                    },
+                    gop: {
+                        gop_id: Math.floor(frame.frame.frame_number / 12),
+                        position: frame.frame.frame_number % 12,
+                        gop_size: 12,
+                        gop_duration: 36000,
+                        is_last_in_gop: (frame.frame.frame_number % 12) === 11
+                    },
+                    nal_units: [
+                        { type: 1, type_name: frame.frame.type || 'P', size: frame.frame.total_size || 0, importance: 3 }
+                    ]
+                });
+            }
+
+            updateConnectionUI(connected) {
+                this.elements.connectBtn.disabled = connected;
+                this.elements.disconnectBtn.disabled = !connected;
+                this.elements.connectionStatus.className = `status-indicator ${connected ? 'status-connected' : 'status-disconnected'}`;
+                this.elements.statusText.textContent = connected ? 'Connected' : 'Disconnected';
+                
+                if (connected) {
+                    this.startTime = Date.now();
+                }
+            }
+
+            updateCaptureUI(capturing) {
+                this.elements.startCapture.disabled = capturing;
+                this.elements.stopCapture.disabled = !capturing;
+                this.elements.captureStatus.className = `status-indicator ${capturing ? 'status-capturing' : 'status-disconnected'}`;
+                this.elements.captureText.textContent = capturing ? 'Capturing' : 'Stopped';
+            }
+
+            log(level, message) {
+                const logEntry = document.createElement('div');
+                logEntry.className = `log-entry log-${level}`;
+                logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                this.elements.log.appendChild(logEntry);
+                this.elements.log.scrollTop = this.elements.log.scrollHeight;
+            }
+        }
+
+        // Initialize the application
+        window.addEventListener('DOMContentLoaded', () => {
+            new FrameVisualizer();
+        });
+    </script>
+</body>
+</html>

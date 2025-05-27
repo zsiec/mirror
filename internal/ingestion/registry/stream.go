@@ -24,6 +24,13 @@ const (
 	StatusPaused     StreamStatus = "paused"
 	StatusError      StreamStatus = "error"
 	StatusClosed     StreamStatus = "closed"
+	
+	// Aliases for backward compatibility with tests
+	StreamStatusActive     = StatusActive
+	StreamStatusConnecting = StatusConnecting
+	StreamStatusPaused     = StatusPaused
+	StreamStatusError      = StatusError
+	StreamStatusClosed     = StatusClosed
 )
 
 // Stream represents an active streaming session

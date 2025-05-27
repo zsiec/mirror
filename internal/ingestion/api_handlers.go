@@ -14,15 +14,22 @@ import (
 
 // Handlers wraps the ingestion manager to provide HTTP handlers
 type Handlers struct {
-	manager *Manager
-	logger  logger.Logger
+	manager               *Manager
+	logger                logger.Logger
+	frameVisualizationMgr *FrameVisualizationManager
 }
 
 // NewHandlers creates a new handlers wrapper
 func NewHandlers(manager *Manager, logger logger.Logger) *Handlers {
+	frameVisMgr := NewFrameVisualizationManager(manager, logger)
+	
+	// Set the frame visualization manager as the frame observer
+	manager.SetFrameObserver(frameVisMgr)
+	
 	return &Handlers{
-		manager: manager,
-		logger:  logger.WithField("component", "ingestion_handlers"),
+		manager:               manager,
+		logger:                logger.WithField("component", "ingestion_handlers"),
+		frameVisualizationMgr: frameVisMgr,
 	}
 }
 
@@ -60,6 +67,9 @@ func (h *Handlers) RegisterRoutes(router *mux.Router) {
 
 	// Parameter set monitoring endpoint
 	api.HandleFunc("/streams/{id}/parameters", h.manager.HandleStreamParameters).Methods("GET")
+
+	// Register frame visualization routes
+	h.frameVisualizationMgr.RegisterVisualizationRoutes(router)
 
 	h.logger.Info("Ingestion routes registered")
 }
@@ -466,10 +476,15 @@ func (m *Manager) HandleStats(w http.ResponseWriter, r *http.Request) {
 func (m *Manager) HandleVideoStats(w http.ResponseWriter, r *http.Request) {
 	// Get stats from all stream handlers (all are video-aware now)
 	m.handlersMu.RLock()
-	defer m.handlersMu.RUnlock()
+	// Create a copy of handlers to avoid holding lock during GetStats calls
+	handlers := make(map[string]*StreamHandler, len(m.streamHandlers))
+	for streamID, handler := range m.streamHandlers {
+		handlers[streamID] = handler
+	}
+	m.handlersMu.RUnlock()
 
 	stats := make(map[string]interface{})
-	for streamID, handler := range m.streamHandlers {
+	for streamID, handler := range handlers {
 		stats[streamID] = handler.GetStats()
 	}
 

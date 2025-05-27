@@ -19,6 +19,11 @@ import (
 	"github.com/zsiec/mirror/internal/queue"
 )
 
+// FrameObserver interface for receiving frame notifications
+type FrameObserver interface {
+	OnFrameProcessed(frame *types.VideoFrame, streamHandler *StreamHandler)
+}
+
 const (
 	// DefaultMaxMemory is the default total memory limit (2.5GB)
 	DefaultMaxMemory = int64(2684354560)
@@ -36,6 +41,7 @@ type Manager struct {
 	srtListener      *srt.ListenerAdapter
 	rtpListener      *rtp.Listener
 	logger           logger.Logger
+	frameObserver    FrameObserver
 
 	// Stream handlers with video awareness and backpressure support
 	streamHandlers map[string]*StreamHandler
@@ -570,7 +576,7 @@ func (m *Manager) CreateStreamHandler(streamID string, conn StreamConnection) (*
 	}
 
 	// Create stream handler with manager's context
-	handler := NewStreamHandler(m.ctx, streamID, conn, hybridQueue, m.memoryController, m.logger)
+	handler := NewStreamHandler(m.ctx, streamID, conn, hybridQueue, m.memoryController, m.logger, m.frameObserver)
 
 	// Store handler
 	m.streamHandlers[streamID] = handler
@@ -633,6 +639,11 @@ func (m *Manager) GetStreamHandlerAndStats(streamID string) (*StreamHandler, Str
 	// Get stats while holding the lock - eliminates race condition
 	stats := handler.GetStats()
 	return handler, stats, true
+}
+
+// SetFrameObserver sets the frame observer for frame notifications
+func (m *Manager) SetFrameObserver(observer FrameObserver) {
+	m.frameObserver = observer
 }
 
 // HandleSRTConnection handles a new SRT connection with proper backpressure

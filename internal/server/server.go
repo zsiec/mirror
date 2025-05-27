@@ -154,10 +154,13 @@ func (s *Server) setupRoutes() {
 	// Version endpoint
 	s.router.HandleFunc("/version", s.handleVersion).Methods("GET")
 
-	// Register any additional routes first
-	for _, registerFunc := range s.additionalRoutes {
-		registerFunc(s.router)
-	}
+	// Static files - serve web UI
+	s.router.PathPrefix("/web/").Handler(http.StripPrefix("/web/", http.FileServer(http.Dir("./web/"))))
+
+	// Root redirect to frame visualization
+	s.router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/web/frame-visualization.html", http.StatusFound)
+	}).Methods("GET")
 
 	// API routes
 	api := s.router.PathPrefix("/api/v1").Subrouter()

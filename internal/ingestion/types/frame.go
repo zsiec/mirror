@@ -122,6 +122,26 @@ type NALUnit struct {
 	RefIdc     uint8  // nal_ref_idc (for H.264)
 }
 
+// GetTypeName returns a human-readable name for the NAL unit type (H.264)
+func (n *NALUnit) GetTypeName() string {
+	switch n.Type {
+	case 1:
+		return "Coded slice (non-IDR)"
+	case 5:
+		return "Coded slice (IDR)"
+	case 6:
+		return "SEI"
+	case 7:
+		return "SPS"
+	case 8:
+		return "PPS"
+	case 9:
+		return "AUD"
+	default:
+		return "NAL unit"
+	}
+}
+
 // HasFlag checks if a flag is set
 func (f *VideoFrame) HasFlag(flag FrameFlags) bool {
 	return f.Flags&flag != 0

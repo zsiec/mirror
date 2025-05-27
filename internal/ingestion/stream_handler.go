@@ -63,6 +63,9 @@ type StreamHandler struct {
 	// Frame output for downstream processing
 	frameQueue *queue.HybridQueue
 
+	// Frame observer for notifications
+	frameObserver FrameObserver
+
 	// Memory management
 	memoryController *memory.Controller
 	memoryReserved   int64
@@ -129,6 +132,7 @@ func NewStreamHandler(
 	queue *queue.HybridQueue,
 	memController *memory.Controller,
 	logger logger.Logger,
+	frameObserver FrameObserver,
 ) *StreamHandler {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -260,6 +264,7 @@ func NewStreamHandler(
 		videoInput:            videoSource,
 		audioInput:            audioSource,
 		frameQueue:            queue,
+		frameObserver:         frameObserver,
 		memoryController:      memController,
 		ctx:                   ctx,
 		cancel:                cancel,
@@ -350,6 +355,11 @@ func (h *StreamHandler) processFrames() {
 			}).Info("Frame received in StreamHandler processFrames")
 
 			h.framesAssembled.Add(1)
+
+			// Notify frame observer if configured
+			if h.frameObserver != nil {
+				h.frameObserver.OnFrameProcessed(frame, h)
+			}
 
 			h.extractParameterSetsFromFrame(frame)
 
