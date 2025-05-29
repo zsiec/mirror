@@ -85,7 +85,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.http3Server = &http3.Server{
 		Addr:       fmt.Sprintf(":%d", s.config.HTTP3Port),
 		Handler:    s.router,
-		QuicConfig: quicConfig,
+		QUICConfig: quicConfig,
 		TLSConfig:  tlsConfig,
 	}
 

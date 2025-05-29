@@ -17,7 +17,7 @@ require (
 	github.com/pion/rtp v1.8.15
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/client_model v0.6.1
-	github.com/quic-go/quic-go v0.42.0
+	github.com/quic-go/quic-go v0.48.2
 	github.com/redis/go-redis/v9 v9.8.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.20.1
