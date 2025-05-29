@@ -64,19 +64,19 @@ type HybridQueue struct {
 // NewHybridQueue creates a new hybrid queue with memory and disk storage
 func NewHybridQueue(streamID string, memSize int, diskPath string) (*HybridQueue, error) {
 	// Ensure disk path exists
-	if err := os.MkdirAll(diskPath, 0755); err != nil {
+	if err := os.MkdirAll(diskPath, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create disk path: %w", err)
 	}
 
 	// Create disk file for overflow
 	filename := filepath.Join(diskPath, streamID+".overflow")
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create overflow file: %w", err)
 	}
 
 	// Create read file handle
-	readFile, err := os.OpenFile(filename, os.O_RDONLY, 0644)
+	readFile, err := os.OpenFile(filename, os.O_RDONLY, 0o644)
 	if err != nil {
 		file.Close()
 		return nil, fmt.Errorf("failed to open read handle: %w", err)

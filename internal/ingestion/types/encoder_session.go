@@ -237,7 +237,6 @@ type ParameterSetCompatibility struct {
 
 // findBestParameterSetMatch finds the best parameter set match for a frame
 func (esm *EncoderSessionManager) findBestParameterSetMatch(frame *VideoFrame) *ParameterSetCompatibility {
-
 	compatibility := &ParameterSetCompatibility{
 		IsDecodable:   false,
 		MissingParams: make([]string, 0),

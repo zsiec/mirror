@@ -233,7 +233,7 @@ func getAvailablePort() (int, error) {
 func CreateTestConfig(t *testing.T, tempDir, redisAddr string) *config.Config {
 	// Generate test certificates if they don't exist
 	certDir := filepath.Join(tempDir, "certs")
-	require.NoError(t, os.MkdirAll(certDir, 0755))
+	require.NoError(t, os.MkdirAll(certDir, 0o755))
 
 	certFile := filepath.Join(certDir, "cert.pem")
 	keyFile := filepath.Join(certDir, "key.pem")

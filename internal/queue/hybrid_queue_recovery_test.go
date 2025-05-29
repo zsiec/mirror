@@ -329,9 +329,9 @@ func TestHybridQueue_GracefulDegradation(t *testing.T) {
 	}
 
 	// Make disk path read-only to simulate disk issues
-	err = os.Chmod(tempDir, 0555)
+	err = os.Chmod(tempDir, 0o555)
 	if err == nil { // Only run this test if we can change permissions
-		defer os.Chmod(tempDir, 0755) // Restore permissions
+		defer os.Chmod(tempDir, 0o755) // Restore permissions
 
 		// Try to enqueue more - should fail gracefully
 		err = q.Enqueue([]byte("should_fail"))

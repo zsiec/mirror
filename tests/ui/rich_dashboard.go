@@ -141,8 +141,10 @@ type RichDashboardModel struct {
 }
 
 // Messages
-type tickMsg time.Time
-type statsMsg dashboardStats
+type (
+	tickMsg  time.Time
+	statsMsg dashboardStats
+)
 
 // ResponsiveLayout defines the layout configuration for different screen sizes
 type ResponsiveLayout struct {

@@ -88,8 +88,8 @@ type SessionStats struct {
 }
 
 func NewSession(streamID string, remoteAddr *net.UDPAddr, ssrc uint32,
-	reg registry.Registry, codecsCfg *config.CodecsConfig, logger logger.Logger) (*Session, error) {
-
+	reg registry.Registry, codecsCfg *config.CodecsConfig, logger logger.Logger,
+) (*Session, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create codec detector and factory
@@ -248,7 +248,6 @@ func (s *Session) SetSDP(sdp string) error {
 
 	// Create depacketizer for detected codec (outside lock)
 	depacketizer, err := s.codecFactory.Create(codecType, s.streamID)
-
 	if err != nil {
 		s.codecStateMu.Lock()
 		s.codecState = CodecStateError

@@ -1,10 +1,10 @@
 package ingestion
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
-	"bytes"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/zsiec/mirror/internal/ingestion/pipeline"
@@ -119,7 +119,6 @@ func TestPipelineCreationLogging(t *testing.T) {
 
 	videoSource := make(chan types.TimestampedPacket)
 	pipeline, err := pipeline.NewVideoPipeline(context.Background(), cfg, videoSource)
-
 	if err != nil {
 		// This is what happens in NewStreamHandler
 		logger.WithError(err).Warn("Failed to create video pipeline, continuing with byte-level processing")

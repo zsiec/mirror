@@ -244,7 +244,6 @@ func TestEvictionUnderPressure(t *testing.T) {
 	// Try to allocate more - we're already at 85%, so eviction should trigger
 	controller.TrackStream("stream3", 5)
 	err = controller.RequestMemory("stream3", 20*1024*1024) // 20MB more
-
 	if err != nil {
 		t.Logf("Allocation failed: %v", err)
 		t.Logf("Eviction count: %d", evictionCount)

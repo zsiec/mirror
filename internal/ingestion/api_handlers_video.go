@@ -795,7 +795,7 @@ func (m *Manager) convertRobustStreamToJPEG(decodableStream []byte, codec types.
 	inputFile := filepath.Join(tempDir, "input."+m.getFileExtensionForCodec(codec))
 	outputFile := filepath.Join(tempDir, "output.jpg")
 
-	if err := os.WriteFile(inputFile, decodableStream, 0644); err != nil {
+	if err := os.WriteFile(inputFile, decodableStream, 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write decodable stream to file: %w", err)
 	}
 

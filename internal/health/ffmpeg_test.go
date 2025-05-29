@@ -240,7 +240,7 @@ case "$1" in
         ;;
 esac`
 
-	err := os.WriteFile(mockFFmpeg, []byte(mockScript), 0755)
+	err := os.WriteFile(mockFFmpeg, []byte(mockScript), 0o755)
 	if err != nil {
 		t.Skip("Cannot create mock ffmpeg script:", err)
 	}

@@ -215,7 +215,8 @@ docker-clean:
 fmt:
 	@echo "Formatting code..."
 	@go fmt ./...
-	@gofmt -s -w $(GO_FILES)
+	@gofmt -l -s -w $(GO_FILES)
+	@gofumpt -l -w $(GO_FILES)
 
 ## lint: Run linters
 lint:

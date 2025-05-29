@@ -17,7 +17,6 @@ func testBitrateCalc(currentBytes, lastBytes int64, duration time.Duration) int6
 }
 
 func TestConnection_BitrateCalculation(t *testing.T) {
-
 	tests := []struct {
 		name            string
 		currentBytes    int64

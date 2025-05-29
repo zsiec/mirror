@@ -265,7 +265,8 @@ func DetectCodecFromRTPSession(session interface {
 	GetMediaFormat() string
 	GetEncodingName() string
 	GetClockRate() uint32
-}) types.CodecType {
+},
+) types.CodecType {
 	detector := NewCodecDetector()
 
 	// Try static payload type first
