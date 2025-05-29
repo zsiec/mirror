@@ -10,6 +10,7 @@
   [![Build Status](https://img.shields.io/github/actions/workflow/status/zsiec/mirror/ci.yml?branch=main&style=for-the-badge)](https://github.com/zsiec/mirror/actions)
   [![Coverage](https://img.shields.io/badge/Coverage-85%25-brightgreen?style=for-the-badge)](https://github.com/zsiec/mirror)
   [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/r/zsiec/mirror)
+  [![Go Report Card](https://goreportcard.com/badge/github.com/zsiec/mirror?style=for-the-badge)](https://goreportcard.com/report/github.com/zsiec/mirror)
   
   <p align="center">
     <a href="#-features">Features</a> •
