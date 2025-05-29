@@ -1186,17 +1186,17 @@ func (h *StreamHandler) onGOPBufferDrop(gop *types.GOP, gopBufferContext *types.
 	if copiedCount <= types.ErrorCodeCriticalFailure {
 		// CRITICAL ERROR: System is in dangerous memory state
 		h.logger.WithFields(map[string]interface{}{
-			"stream_id":            h.streamID,
-			"gop_id":               gop.ID,
-			"error_code":           copiedCount,
-			"session_total_sets":   afterStats["total_sets"],
-			"emergency_cleanup":    "FAILED",
-			"system_health":        "CRITICAL_MEMORY_LEAK",
+			"stream_id":          h.streamID,
+			"gop_id":             gop.ID,
+			"error_code":         copiedCount,
+			"session_total_sets": afterStats["total_sets"],
+			"emergency_cleanup":  "FAILED",
+			"system_health":      "CRITICAL_MEMORY_LEAK",
 		}).Error("🚨 CRITICAL: Parameter set memory leak detected - emergency cleanup failed!")
-		
+
 		// Increment error counter to trigger alerts
 		h.errors.Add(10) // Add multiple errors to signal severity
-		
+
 	} else if copiedCount <= types.ErrorCodeMemoryPressure {
 		// WARNING: System approaching limits
 		h.logger.WithFields(map[string]interface{}{
@@ -1207,9 +1207,9 @@ func (h *StreamHandler) onGOPBufferDrop(gop *types.GOP, gopBufferContext *types.
 			"emergency_cleanup":  "PARTIAL",
 			"system_health":      "WARNING_MEMORY_PRESSURE",
 		}).Warn("⚠️  WARNING: Parameter set memory pressure - emergency cleanup performed")
-		
+
 		h.errors.Add(1) // Track as error for monitoring
-		
+
 	} else if copiedCount < 0 {
 		// Memory limits hit - copy was truncated
 		h.logger.WithFields(map[string]interface{}{
@@ -1219,7 +1219,7 @@ func (h *StreamHandler) onGOPBufferDrop(gop *types.GOP, gopBufferContext *types.
 			"session_total_sets": afterStats["total_sets"],
 			"reason":             "memory_limits_reached",
 		}).Warn("📊 Parameter set copy truncated due to memory limits")
-		
+
 	} else if copiedCount > 0 {
 		h.logger.WithFields(map[string]interface{}{
 			"stream_id":             h.streamID,
@@ -1608,7 +1608,7 @@ func seedSessionCacheFromTransport(sessionCache, transportCache *types.Parameter
 			"emergency_cleanup":    "FAILED",
 			"system_health":        "CRITICAL_MEMORY_LEAK",
 		}).Error("🚨 CRITICAL: Transport-to-session parameter copy failed - memory leak detected!")
-		
+
 	} else if copiedCount <= types.ErrorCodeMemoryPressure {
 		// WARNING during transport-to-session seeding
 		logger.WithFields(map[string]interface{}{
@@ -1618,7 +1618,7 @@ func seedSessionCacheFromTransport(sessionCache, transportCache *types.Parameter
 			"emergency_cleanup":    "PARTIAL",
 			"system_health":        "WARNING_MEMORY_PRESSURE",
 		}).Warn("⚠️  WARNING: Transport-to-session copy hit memory pressure - emergency cleanup performed")
-		
+
 	} else if copiedCount < 0 {
 		// Copy was truncated due to memory limits
 		logger.WithFields(map[string]interface{}{
@@ -1627,7 +1627,7 @@ func seedSessionCacheFromTransport(sessionCache, transportCache *types.Parameter
 			"transport_total_sets": transportStats["total_sets"],
 			"reason":               "memory_limits_reached",
 		}).Warn("📊 Transport-to-session parameter copy truncated due to memory limits")
-		
+
 	} else if copiedCount > 0 {
 		logger.WithFields(map[string]interface{}{
 			"copied_count":        copiedCount,
@@ -1810,7 +1810,6 @@ func (h *StreamHandler) processAudio() {
 		}
 	}
 }
-
 
 // cleanupSessionCache clears the session parameter cache to prevent memory leaks
 func (h *StreamHandler) cleanupSessionCache() {

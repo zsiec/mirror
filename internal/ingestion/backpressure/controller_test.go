@@ -348,12 +348,12 @@ func TestController_TypeSafety(t *testing.T) {
 	// We can't store different types after storing float64, so test the safety mechanisms
 	stats = controller.GetStatistics()
 	assert.Equal(t, 0.8, stats.CurrentPressure, "Should return correct pressure in stats")
-	
+
 	// Test edge case with extreme values
 	controller.UpdatePressure(1.5) // Over 1.0
 	pressure = controller.GetPressure()
 	assert.Equal(t, 1.5, pressure, "Should handle values over 1.0")
-	
+
 	controller.UpdatePressure(-0.1) // Negative
 	pressure = controller.GetPressure()
 	assert.Equal(t, -0.1, pressure, "Should handle negative values")
@@ -393,7 +393,7 @@ func TestController_ConcurrentPressureUpdates(t *testing.T) {
 		wg.Add(1)
 		go func(goroutineID int) {
 			defer wg.Done()
-			
+
 			for j := 0; j < numOperations; j++ {
 				// Create pressure patterns that should trigger adjustments
 				var pressure float64
@@ -403,19 +403,19 @@ func TestController_ConcurrentPressureUpdates(t *testing.T) {
 				case 1:
 					pressure = 0.3 // Medium-low pressure
 				case 2:
-					pressure = 0.7 // Medium-high pressure  
+					pressure = 0.7 // Medium-high pressure
 				case 3:
 					pressure = 0.9 // High pressure - should decrease rate
 				}
-				
+
 				controller.UpdatePressure(pressure)
 				totalPressureUpdates.Add(1)
-				
+
 				// Read statistics to exercise the type safety fixes
 				stats := controller.GetStatistics()
 				require.GreaterOrEqual(t, stats.CurrentPressure, 0.0)
 				require.LessOrEqual(t, stats.CurrentPressure, 1.0)
-				
+
 				// Small delay to increase concurrency
 				time.Sleep(time.Microsecond)
 			}
@@ -429,10 +429,10 @@ func TestController_ConcurrentPressureUpdates(t *testing.T) {
 
 	// Verify we processed all updates
 	assert.Equal(t, uint64(numGoroutines*numOperations), totalPressureUpdates.Load())
-	
+
 	// Should have triggered multiple rate changes
 	assert.Greater(t, totalRateChanges.Load(), uint64(0), "Should have triggered rate changes")
-	
+
 	// Final state should be consistent
 	stats := controller.GetStatistics()
 	assert.GreaterOrEqual(t, stats.CurrentRate, config.MinRate)
@@ -444,7 +444,7 @@ func TestController_ConcurrentPressureUpdates(t *testing.T) {
 // TestController_RaceConditionFixed tests that the race condition in getSmoothedPressureUnsafe is fixed
 func TestController_RaceConditionFixed(t *testing.T) {
 	t.Parallel()
-	
+
 	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	config := Config{
 		MinRate:        1000,
@@ -452,15 +452,15 @@ func TestController_RaceConditionFixed(t *testing.T) {
 		TargetPressure: 0.7,
 		HistorySize:    20, // Moderate history size
 	}
-	
+
 	controller := NewController("test-race-fix", config, logger)
-	
+
 	const numGoroutines = 50
 	const numOperations = 1000
-	
+
 	var wg sync.WaitGroup
 	wg.Add(numGoroutines * 2) // writers and readers
-	
+
 	// Start writer goroutines that update pressure
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
@@ -474,7 +474,7 @@ func TestController_RaceConditionFixed(t *testing.T) {
 			}
 		}(i)
 	}
-	
+
 	// Start reader goroutines that read smoothed pressure
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
@@ -482,25 +482,25 @@ func TestController_RaceConditionFixed(t *testing.T) {
 			for j := 0; j < numOperations; j++ {
 				// This should not race with UpdatePressure after the fix
 				smoothed := controller.GetSmoothedPressure()
-				
+
 				// Validate the result is reasonable
 				if smoothed < 0.0 || smoothed > 1.0 {
 					t.Errorf("Invalid smoothed pressure: %f", smoothed)
 				}
-				
+
 				if j%100 == 0 {
 					time.Sleep(time.Microsecond) // Occasional small delay
 				}
 			}
 		}(i)
 	}
-	
+
 	// Wait for all goroutines to complete
 	wg.Wait()
-	
+
 	// If we reach here without the race detector triggering, the fix is working
 	t.Logf("Race condition test completed successfully - no data races detected")
-	
+
 	// Verify final state is consistent
 	stats := controller.GetStatistics()
 	assert.GreaterOrEqual(t, stats.CurrentPressure, 0.0)
@@ -531,7 +531,7 @@ func TestController_PressureHistoryConsistency(t *testing.T) {
 		wg.Add(1)
 		go func(writerID int) {
 			defer wg.Done()
-			
+
 			for j := 0; j < numOperations; j++ {
 				pressure := 0.1 + 0.8*float64(j%10)/10.0 // Predictable pattern
 				controller.UpdatePressure(pressure)
@@ -545,19 +545,19 @@ func TestController_PressureHistoryConsistency(t *testing.T) {
 		wg.Add(1)
 		go func(readerID int) {
 			defer wg.Done()
-			
+
 			for j := 0; j < numOperations; j++ {
 				// Test both direct and timeout-based access
 				smoothed := controller.GetSmoothedPressure()
 				assert.GreaterOrEqual(t, smoothed, 0.0)
 				assert.LessOrEqual(t, smoothed, 1.0)
-				
+
 				// Also test current pressure
 				current := controller.GetPressure()
-				
+
 				// Should be valid values
 				assert.GreaterOrEqual(t, current, 0.0)
-				
+
 				time.Sleep(time.Microsecond)
 			}
 		}(i)
@@ -589,7 +589,7 @@ func TestController_LockTimeoutBehavior(t *testing.T) {
 
 	// Hold the lock to force timeout in getSmoothedPressureUnsafe
 	controller.mu.Lock()
-	
+
 	go func() {
 		// Release lock after timeout period
 		time.Sleep(20 * time.Millisecond)
@@ -598,7 +598,7 @@ func TestController_LockTimeoutBehavior(t *testing.T) {
 
 	// This should timeout and fallback to current pressure
 	result := controller.getSmoothedPressureUnsafe()
-	
+
 	// Should return the current pressure (0.7) due to timeout fallback
 	assert.Equal(t, 0.7, result)
 }

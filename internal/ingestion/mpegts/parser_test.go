@@ -67,10 +67,10 @@ func TestParser_parsePacket_ValidPacket(t *testing.T) {
 
 	// Create a valid MPEG-TS packet
 	data := make([]byte, PacketSize)
-	data[0] = SyncByte   // Sync byte
-	data[1] = 0x40       // Payload unit start indicator + PID high
-	data[2] = 0x11       // PID low (PID = 0x0011 = 17)
-	data[3] = 0x10       // Adaptation field control (payload only) + continuity counter
+	data[0] = SyncByte // Sync byte
+	data[1] = 0x40     // Payload unit start indicator + PID high
+	data[2] = 0x11     // PID low (PID = 0x0011 = 17)
+	data[3] = 0x10     // Adaptation field control (payload only) + continuity counter
 
 	pkt, err := parser.parsePacket(data)
 	require.NoError(t, err)
@@ -327,15 +327,15 @@ func TestParser_parsePAT(t *testing.T) {
 
 	// Create a minimal valid PAT
 	payload := []byte{
-		0x00,                         // Pointer field
-		0x00,                         // Table ID (PAT = 0x00)
-		0xB0, 0x0D,                   // Section syntax indicator + section length (13 bytes)
-		0x00, 0x01,                   // Transport stream ID
-		0xC1,                         // Version number + current/next indicator
-		0x00,                         // Section number
-		0x00,                         // Last section number
-		0x00, 0x01, 0x00, 0x10,       // Program 1, PMT PID 16
-		0x00, 0x00, 0x00, 0x00,       // CRC32 (placeholder)
+		0x00,       // Pointer field
+		0x00,       // Table ID (PAT = 0x00)
+		0xB0, 0x0D, // Section syntax indicator + section length (13 bytes)
+		0x00, 0x01, // Transport stream ID
+		0xC1,                   // Version number + current/next indicator
+		0x00,                   // Section number
+		0x00,                   // Last section number
+		0x00, 0x01, 0x00, 0x10, // Program 1, PMT PID 16
+		0x00, 0x00, 0x00, 0x00, // CRC32 (placeholder)
 	}
 
 	parser.parsePAT(payload)

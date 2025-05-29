@@ -131,7 +131,7 @@ func TestParameterSetProber_OpportunisticExtraction(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create new prober for each test to avoid cumulative counters
 			prober := NewParameterSetProber("test", 10, time.Minute)
-			
+
 			frame := &VideoFrame{
 				ID:          1,
 				CaptureTime: time.Now(),
@@ -414,7 +414,7 @@ func TestParameterSetProber_HelperFunctions(t *testing.T) {
 	request := &ProbeRequest{
 		MissingParameters: []string{"sps", "pps"},
 	}
-	
+
 	extracted := map[string]*ParameterSet{
 		"sps": {Data: []byte{0x67}, Valid: true},
 	}

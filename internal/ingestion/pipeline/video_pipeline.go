@@ -243,9 +243,9 @@ func (p *VideoPipeline) processPackets() {
 			if err := p.frameAssembler.AddPacket(pkt); err != nil {
 				p.errors.Add(1)
 				p.sampledLogger.ErrorWithCategory(logger.CategoryPacketProcessing, "Frame assembler rejected packet", map[string]interface{}{
-					"error": err.Error(),
-					"pts":   pkt.PTS,
-					"dts":   pkt.DTS,
+					"error":    err.Error(),
+					"pts":      pkt.PTS,
+					"dts":      pkt.DTS,
 					"data_len": len(pkt.Data),
 				})
 				p.logger.WithFields(map[string]interface{}{
@@ -253,7 +253,7 @@ func (p *VideoPipeline) processPackets() {
 					"error":     err.Error(),
 					"data_len":  len(pkt.Data),
 				}).Info("❌ DEBUG: Frame assembler rejected packet")
-				
+
 				// Check if error indicates critical failure requiring pipeline restart
 				if p.isCriticalError(err) {
 					p.logger.WithError(err).Error("Critical error in frame assembler, stopping pipeline")
@@ -411,13 +411,13 @@ func (p *VideoPipeline) processReorderedFrames() {
 			p.framesOutput.Add(1)
 			p.framesReordered.Add(1)
 			p.logger.WithFields(map[string]interface{}{
-				"frame_index": i + 1,
+				"frame_index":  i + 1,
 				"total_frames": len(remainingFrames),
-				"frame_id": frame.ID,
+				"frame_id":     frame.ID,
 			}).Debug("Successfully flushed frame during shutdown")
 		case <-time.After(100 * time.Millisecond):
 			p.logger.WithFields(map[string]interface{}{
-				"frame_id": frame.ID,
+				"frame_id":       frame.ID,
 				"frames_dropped": len(remainingFrames) - i,
 			}).Warn("Timeout flushing frame during shutdown, dropping remaining frames")
 			return // Exit early to prevent hanging
@@ -520,25 +520,25 @@ func (p *VideoPipeline) isCriticalError(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	errStr := err.Error()
-	
+
 	// Check for critical error patterns
 	criticalPatterns := []string{
 		"out of memory",
-		"memory allocation failed", 
+		"memory allocation failed",
 		"context deadline exceeded",
 		"panic",
 		"buffer overflow",
 		"corrupted",
 		"invalid state",
 	}
-	
+
 	for _, pattern := range criticalPatterns {
 		if strings.Contains(strings.ToLower(errStr), pattern) {
 			return true
 		}
 	}
-	
+
 	return false
 }

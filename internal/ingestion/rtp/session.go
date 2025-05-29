@@ -24,11 +24,11 @@ import (
 type CodecDetectionState int32
 
 const (
-	CodecStateUnknown    CodecDetectionState = iota
-	CodecStateDetecting  // Detection in progress
-	CodecStateDetected   // Codec detected and depacketizer created
-	CodecStateError      // Detection failed
-	CodecStateTimeout    // Detection timed out
+	CodecStateUnknown   CodecDetectionState = iota
+	CodecStateDetecting                     // Detection in progress
+	CodecStateDetected                      // Codec detected and depacketizer created
+	CodecStateError                         // Detection failed
+	CodecStateTimeout                       // Detection timed out
 )
 
 type Session struct {
@@ -248,7 +248,7 @@ func (s *Session) SetSDP(sdp string) error {
 
 	// Create depacketizer for detected codec (outside lock)
 	depacketizer, err := s.codecFactory.Create(codecType, s.streamID)
-	
+
 	if err != nil {
 		s.codecStateMu.Lock()
 		s.codecState = CodecStateError
@@ -526,7 +526,7 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 
 	// Use atomic state machine for codec detection
 	s.codecStateMu.Lock()
-	
+
 	switch s.codecState {
 	case CodecStateDetected:
 		s.codecStateMu.Unlock()
@@ -541,9 +541,9 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 			}
 			close(done)
 		}()
-		
+
 		s.codecStateMu.Unlock()
-		
+
 		// Wait up to 1 second for detection to complete
 		select {
 		case <-done:
@@ -569,7 +569,7 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 			s.codecState = CodecStateTimeout
 			s.detectionCond.Broadcast()
 			s.codecStateMu.Unlock()
-			
+
 			s.logger.Error("Failed to detect codec within timeout period")
 			go func() {
 				s.registry.UpdateStatus(s.ctx, s.streamID, registry.StatusError)
@@ -585,14 +585,14 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 
 		// Perform detection outside of locks
 		detectedType, err := s.codecDetector.DetectFromRTPPacket(packet)
-		
+
 		s.codecStateMu.Lock()
 		if err != nil || detectedType == codec.TypeUnknown {
 			// Detection failed - return to unknown state
 			s.codecState = CodecStateUnknown
 			s.detectionCond.Broadcast()
 			s.codecStateMu.Unlock()
-			
+
 			// Log once per second to avoid spam
 			s.mu.RLock()
 			lastPacket := s.lastPacket
@@ -609,7 +609,7 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 			s.codecState = CodecStateError
 			s.detectionCond.Broadcast()
 			s.codecStateMu.Unlock()
-			
+
 			s.logger.WithError(err).Errorf("Failed to create depacketizer for codec %s", detectedType)
 			go func() {
 				s.registry.UpdateStatus(s.ctx, s.streamID, registry.StatusError)

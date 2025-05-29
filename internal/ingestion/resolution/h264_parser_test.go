@@ -69,30 +69,30 @@ func TestH264SPS_GetResolution(t *testing.T) {
 		{
 			name: "custom resolution with 4:2:2 chroma format",
 			sps: H264SPS{
-				PicWidthInMbsMinus1:       39,    // (39+1) * 16 = 640
-				PicHeightInMapUnitsMinus1: 29,    // (29+1) * 16 = 480
-				FrameMbsOnlyFlag:          true,  // Progressive
-				ChromaFormatIdc:           2,     // 4:2:2
+				PicWidthInMbsMinus1:       39,   // (39+1) * 16 = 640
+				PicHeightInMapUnitsMinus1: 29,   // (29+1) * 16 = 480
+				FrameMbsOnlyFlag:          true, // Progressive
+				ChromaFormatIdc:           2,    // 4:2:2
 				FrameCroppingFlag:         true,
-				FrameCropLeftOffset:       4,  // Crop 4 * 2 = 8 pixels from left (4:2:2 subsampling)
-				FrameCropRightOffset:      4,  // Crop 4 * 2 = 8 pixels from right
-				FrameCropTopOffset:        2,  // Crop 2 * 1 = 2 pixels from top
-				FrameCropBottomOffset:     2,  // Crop 2 * 1 = 2 pixels from bottom
+				FrameCropLeftOffset:       4, // Crop 4 * 2 = 8 pixels from left (4:2:2 subsampling)
+				FrameCropRightOffset:      4, // Crop 4 * 2 = 8 pixels from right
+				FrameCropTopOffset:        2, // Crop 2 * 1 = 2 pixels from top
+				FrameCropBottomOffset:     2, // Crop 2 * 1 = 2 pixels from bottom
 			},
 			expected: Resolution{Width: 624, Height: 476}, // 640 - 16 = 624, 480 - 4 = 476
 		},
 		{
 			name: "4:4:4 chroma format",
 			sps: H264SPS{
-				PicWidthInMbsMinus1:       59,    // (59+1) * 16 = 960
-				PicHeightInMapUnitsMinus1: 53,    // (53+1) * 16 = 864
-				FrameMbsOnlyFlag:          true,  // Progressive
-				ChromaFormatIdc:           3,     // 4:4:4
+				PicWidthInMbsMinus1:       59,   // (59+1) * 16 = 960
+				PicHeightInMapUnitsMinus1: 53,   // (53+1) * 16 = 864
+				FrameMbsOnlyFlag:          true, // Progressive
+				ChromaFormatIdc:           3,    // 4:4:4
 				FrameCroppingFlag:         true,
-				FrameCropLeftOffset:       2,  // Crop 2 * 1 = 2 pixels from left (4:4:4 subsampling)
-				FrameCropRightOffset:      2,  // Crop 2 * 1 = 2 pixels from right
-				FrameCropTopOffset:        1,  // Crop 1 * 1 = 1 pixel from top
-				FrameCropBottomOffset:     1,  // Crop 1 * 1 = 1 pixel from bottom
+				FrameCropLeftOffset:       2, // Crop 2 * 1 = 2 pixels from left (4:4:4 subsampling)
+				FrameCropRightOffset:      2, // Crop 2 * 1 = 2 pixels from right
+				FrameCropTopOffset:        1, // Crop 1 * 1 = 1 pixel from top
+				FrameCropBottomOffset:     1, // Crop 1 * 1 = 1 pixel from bottom
 			},
 			expected: Resolution{Width: 956, Height: 862}, // 960 - 4 = 956, 864 - 2 = 862
 		},
@@ -193,11 +193,11 @@ func TestDetector_parseH264SPSFull(t *testing.T) {
 			name: "minimal valid SPS - should fail due to insufficient data",
 			spsData: []byte{
 				0x42, 0x00, 0x0A, // profile_idc=66 (baseline), constraint_set_flags=0x00, level_idc=10
-				0x80,             // seq_parameter_set_id=0 (UE)
-				0x80,             // log2_max_frame_num_minus4=0 (UE)
-				0x80,             // pic_order_cnt_type=0 (UE)
-				0x80,             // log2_max_pic_order_cnt_lsb_minus4=0 (UE)
-				0x80,             // max_num_ref_frames=0 (UE)
+				0x80, // seq_parameter_set_id=0 (UE)
+				0x80, // log2_max_frame_num_minus4=0 (UE)
+				0x80, // pic_order_cnt_type=0 (UE)
+				0x80, // log2_max_pic_order_cnt_lsb_minus4=0 (UE)
+				0x80, // max_num_ref_frames=0 (UE)
 				// insufficient data for full parsing
 			},
 			expectError: true,
@@ -206,7 +206,7 @@ func TestDetector_parseH264SPSFull(t *testing.T) {
 			name: "corrupted SPS data",
 			spsData: []byte{
 				0x42, 0x00, 0x0A, // profile_idc, constraint_set_flags, level_idc
-				0x80,             // seq_parameter_set_id=0
+				0x80, // seq_parameter_set_id=0
 				// Missing required fields
 			},
 			expectError: true,
@@ -282,8 +282,8 @@ func TestDetector_skipScalingList(t *testing.T) {
 // TestH264SPS_ChromaFormatHandling tests chroma format handling in resolution calculation
 func TestH264SPS_ChromaFormatHandling(t *testing.T) {
 	baseCase := H264SPS{
-		PicWidthInMbsMinus1:       79,    // 1280 pixels
-		PicHeightInMapUnitsMinus1: 44,    // 720 pixels  
+		PicWidthInMbsMinus1:       79, // 1280 pixels
+		PicHeightInMapUnitsMinus1: 44, // 720 pixels
 		FrameMbsOnlyFlag:          true,
 		FrameCroppingFlag:         true,
 		FrameCropLeftOffset:       8,
@@ -302,25 +302,25 @@ func TestH264SPS_ChromaFormatHandling(t *testing.T) {
 			name:            "4:2:0 chroma format",
 			chromaFormatIdc: 1,
 			expectedWidth:   1248, // 1280 - (8+8)*2 = 1248
-			expectedHeight: 704,   // 720 - (4+4)*2 = 704
+			expectedHeight:  704,  // 720 - (4+4)*2 = 704
 		},
 		{
-			name:            "4:2:2 chroma format", 
+			name:            "4:2:2 chroma format",
 			chromaFormatIdc: 2,
 			expectedWidth:   1248, // 1280 - (8+8)*2 = 1248
-			expectedHeight: 712,   // 720 - (4+4)*1 = 712
+			expectedHeight:  712,  // 720 - (4+4)*1 = 712
 		},
 		{
 			name:            "4:4:4 chroma format",
 			chromaFormatIdc: 3,
 			expectedWidth:   1264, // 1280 - (8+8)*1 = 1264
-			expectedHeight: 712,   // 720 - (4+4)*1 = 712
+			expectedHeight:  712,  // 720 - (4+4)*1 = 712
 		},
 		{
 			name:            "monochrome (4:0:0)",
 			chromaFormatIdc: 0,
 			expectedWidth:   1264, // 1280 - (8+8)*1 = 1264 (default subWidthC=1)
-			expectedHeight: 712,   // 720 - (4+4)*1 = 712
+			expectedHeight:  712,  // 720 - (4+4)*1 = 712
 		},
 	}
 
@@ -328,7 +328,7 @@ func TestH264SPS_ChromaFormatHandling(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sps := baseCase
 			sps.ChromaFormatIdc = tt.chromaFormatIdc
-			
+
 			result := sps.GetResolution()
 			assert.Equal(t, tt.expectedWidth, result.Width)
 			assert.Equal(t, tt.expectedHeight, result.Height)
@@ -352,7 +352,7 @@ func TestH264SPS_InterlacedHandling(t *testing.T) {
 	t.Run("progressive (frame_mbs_only_flag=1)", func(t *testing.T) {
 		sps := baseCase
 		sps.FrameMbsOnlyFlag = true
-		
+
 		result := sps.GetResolution()
 		assert.Equal(t, 1920, result.Width)
 		// Height = (2 - 1) * (33+1) * 16 = 1 * 34 * 16 = 544
@@ -364,7 +364,7 @@ func TestH264SPS_InterlacedHandling(t *testing.T) {
 	t.Run("interlaced (frame_mbs_only_flag=0)", func(t *testing.T) {
 		sps := baseCase
 		sps.FrameMbsOnlyFlag = false
-		
+
 		result := sps.GetResolution()
 		assert.Equal(t, 1920, result.Width)
 		// Height = (2 - 0) * (33+1) * 16 = 2 * 34 * 16 = 1088

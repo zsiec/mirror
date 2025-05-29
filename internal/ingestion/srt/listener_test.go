@@ -103,7 +103,7 @@ func (m *mockSRTListener) addConnection(streamID string, shouldAccept bool) {
 		streamID:     streamID,
 		shouldAccept: shouldAccept,
 	}
-	
+
 	// Call callback if set
 	if m.callback != nil {
 		addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
@@ -204,7 +204,7 @@ func createTestListener(t *testing.T) (*Listener, *mockSRTAdapter) {
 
 func TestListener_Creation(t *testing.T) {
 	listener, _ := createTestListener(t)
-	
+
 	assert.NotNil(t, listener)
 	assert.NotNil(t, listener.config)
 	assert.NotNil(t, listener.registry)
@@ -276,10 +276,10 @@ func TestListener_HandleIncomingConnection(t *testing.T) {
 	listener, _ := createTestListener(t)
 
 	tests := []struct {
-		name       string
-		streamID   string
+		name         string
+		streamID     string
 		shouldAccept bool
-		reason     RejectionReason
+		reason       RejectionReason
 	}{
 		{"valid stream", "test-stream", true, 0},
 		{"invalid stream ID", "", false, RejectionReasonBadRequest},
@@ -352,7 +352,7 @@ func TestListener_GetConnectionInfo(t *testing.T) {
 
 	info := listener.GetConnectionInfo()
 	assert.Equal(t, 3, info["active_count"])
-	
+
 	connections, ok := info["connections"].(map[string]interface{})
 	assert.True(t, ok)
 	assert.Len(t, connections, 3)
@@ -360,7 +360,7 @@ func TestListener_GetConnectionInfo(t *testing.T) {
 	// Check a specific connection
 	conn0, exists := connections["stream-0"]
 	assert.True(t, exists)
-	
+
 	connMap, ok := conn0.(map[string]interface{})
 	assert.True(t, ok)
 	assert.Equal(t, "stream-0", connMap["stream_id"])

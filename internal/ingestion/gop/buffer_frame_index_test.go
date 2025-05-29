@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zsiec/mirror/internal/ingestion/types"
 	"github.com/zsiec/mirror/internal/logger"
-	"github.com/sirupsen/logrus"
 )
 
 // TestGOPBuffer_FrameIndexConsistency tests that frame indices remain consistent during concurrent operations
@@ -56,7 +56,7 @@ func TestGOPBuffer_FrameIndexConsistency(t *testing.T) {
 						if retrievedFrame == nil {
 							continue // Frame may have been dropped
 						}
-						
+
 						// Verify frame consistency
 						if retrievedFrame.ID != frame.ID {
 							errors <- assert.AnError
@@ -73,10 +73,10 @@ func TestGOPBuffer_FrameIndexConsistency(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			time.Sleep(10 * time.Millisecond) // Let readers start
-			
+
 			// Drop B frames (this should update frame indices)
 			buffer.DropFramesForPressure(0.6) // Should drop B frames
-			
+
 			// Wait a bit and drop more
 			time.Sleep(10 * time.Millisecond)
 			buffer.DropFramesForPressure(0.8) // Should drop P frames
@@ -190,7 +190,7 @@ func TestGOPBuffer_FrameIndexConcurrentModification(t *testing.T) {
 	const duration = 200 * time.Millisecond
 
 	stopChan := make(chan struct{})
-	
+
 	// Start frame readers
 	for i := 0; i < numReaders; i++ {
 		wg.Add(1)
@@ -198,7 +198,7 @@ func TestGOPBuffer_FrameIndexConcurrentModification(t *testing.T) {
 			defer wg.Done()
 			inconsistencies := 0
 			reads := 0
-			
+
 			for {
 				select {
 				case <-stopChan:
@@ -209,7 +209,7 @@ func TestGOPBuffer_FrameIndexConcurrentModification(t *testing.T) {
 					frameID := uint64(readerID*100 + reads%50 + 1)
 					frame := buffer.GetFrame(frameID)
 					reads++
-					
+
 					if frame != nil {
 						// Verify frame index consistency
 						buffer.mu.RLock()
@@ -233,7 +233,7 @@ func TestGOPBuffer_FrameIndexConcurrentModification(t *testing.T) {
 		go func(modifierID int) {
 			defer wg.Done()
 			modifications := 0
-			
+
 			for {
 				select {
 				case <-stopChan:
@@ -262,11 +262,11 @@ func TestGOPBuffer_FrameIndexConcurrentModification(t *testing.T) {
 
 		for frameID, location := range buffer.frameIndex {
 			// Verify frame exists in GOP at correct position
-			require.Less(t, location.Position, len(location.GOP.Frames), 
+			require.Less(t, location.Position, len(location.GOP.Frames),
 				"Frame position should be within GOP bounds")
-			
+
 			actualFrame := location.GOP.Frames[location.Position]
-			assert.Equal(t, frameID, actualFrame.ID, 
+			assert.Equal(t, frameID, actualFrame.ID,
 				"Frame at position should match indexed frame ID")
 		}
 	})
@@ -287,11 +287,11 @@ func TestGOPBuffer_DropFramesFromGOP(t *testing.T) {
 	buffer.AddGOP(gop)
 
 	originalFrameCount := len(gop.Frames)
-	
+
 	// Drop frames from index 3 onwards
 	droppedFrames := buffer.DropFramesFromGOP(gop.ID, 3)
-	
-	assert.Equal(t, 3, originalFrameCount-len(droppedFrames), 
+
+	assert.Equal(t, 3, originalFrameCount-len(droppedFrames),
 		"Should have 3 frames remaining")
 	assert.Equal(t, 3, len(gop.Frames), "GOP should have 3 frames")
 
@@ -303,7 +303,7 @@ func TestGOPBuffer_DropFramesFromGOP(t *testing.T) {
 		assert.Equal(t, i, location.Position, "Frame %d should have correct position", i)
 		assert.Equal(t, gop, location.GOP, "Frame %d should point to correct GOP", i)
 	}
-	
+
 	// Verify dropped frames are not in index
 	for _, droppedFrame := range droppedFrames {
 		_, exists := buffer.frameIndex[droppedFrame.ID]

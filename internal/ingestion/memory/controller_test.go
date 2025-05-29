@@ -198,15 +198,15 @@ func TestController_AccountingAccuracy(t *testing.T) {
 		// Request memory that will hit stream limit
 		err := ctrl.RequestMemory("stream1", 200*1024)
 		require.NoError(t, err)
-		
+
 		// Check initial state
 		assert.Equal(t, int64(200*1024), ctrl.usage.Load())
 		assert.Equal(t, int64(200*1024), ctrl.GetStreamUsage("stream1"))
-		
+
 		// Request more than stream limit allows (200KB + 100KB > 256KB limit)
 		err = ctrl.RequestMemory("stream1", 100*1024)
 		assert.ErrorIs(t, err, ErrStreamMemoryLimit)
-		
+
 		// Global and stream usage should remain unchanged after failed request
 		assert.Equal(t, int64(200*1024), ctrl.usage.Load(), "Global usage should not change after stream limit error")
 		assert.Equal(t, int64(200*1024), ctrl.GetStreamUsage("stream1"), "Stream usage should not change after stream limit error")
@@ -214,10 +214,10 @@ func TestController_AccountingAccuracy(t *testing.T) {
 
 	t.Run("ReleaseNonExistentStream", func(t *testing.T) {
 		initialGlobalUsage := ctrl.usage.Load()
-		
+
 		// Try to release memory for non-existent stream
 		ctrl.ReleaseMemory("nonexistent", 50*1024)
-		
+
 		// Global usage should be unchanged
 		assert.Equal(t, initialGlobalUsage, ctrl.usage.Load(), "Global usage should not change when releasing non-existent stream")
 	})
@@ -226,12 +226,12 @@ func TestController_AccountingAccuracy(t *testing.T) {
 		// Allocate some memory
 		err := ctrl.RequestMemory("stream2", 100*1024)
 		require.NoError(t, err)
-		
+
 		initialGlobalUsage := ctrl.usage.Load()
-		
+
 		// Try to release more than allocated
 		ctrl.ReleaseMemory("stream2", 200*1024) // More than the 100KB allocated
-		
+
 		// Should only release what was actually allocated
 		expectedGlobalUsage := initialGlobalUsage - 100*1024 // Only 100KB should be released
 		assert.Equal(t, expectedGlobalUsage, ctrl.usage.Load(), "Should only release what was actually allocated")
@@ -242,32 +242,32 @@ func TestController_AccountingAccuracy(t *testing.T) {
 // TestController_ConcurrentAccountingStress tests accounting under high concurrent stress
 func TestController_ConcurrentAccountingStress(t *testing.T) {
 	ctrl := NewController(10*1024*1024, 1024*1024) // 10MB total, 1MB per stream
-	
+
 	const numGoroutines = 20
 	const numOperations = 100
-	
+
 	var wg sync.WaitGroup
 	var totalExpectedUsage atomic.Int64
-	
+
 	// Track all successful allocations to verify accounting
 	type allocation struct {
 		streamID string
 		amount   int64
 	}
 	var successfulAllocations sync.Map
-	
+
 	// Multiple goroutines doing allocations and releases
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(goroutineID int) {
 			defer wg.Done()
-			
+
 			streamID := fmt.Sprintf("stream-%d", goroutineID)
 			var allocatedForThisStream int64
-			
+
 			for j := 0; j < numOperations; j++ {
 				size := int64(50 * 1024) // 50KB chunks
-				
+
 				if j%2 == 0 {
 					// Allocate
 					if err := ctrl.RequestMemory(streamID, size); err == nil {
@@ -284,7 +284,7 @@ func TestController_ConcurrentAccountingStress(t *testing.T) {
 					}
 				}
 			}
-			
+
 			// Release remaining allocation for this stream
 			if allocatedForThisStream > 0 {
 				ctrl.ReleaseMemory(streamID, allocatedForThisStream)
@@ -292,13 +292,13 @@ func TestController_ConcurrentAccountingStress(t *testing.T) {
 			}
 		}(i)
 	}
-	
+
 	wg.Wait()
-	
+
 	// Final global usage should be zero (all memory released)
 	assert.Equal(t, int64(0), ctrl.usage.Load(), "All memory should be released after test")
 	assert.Equal(t, int64(0), totalExpectedUsage.Load(), "Expected usage tracking should also be zero")
-	
+
 	// All stream usages should be zero
 	for i := 0; i < numGoroutines; i++ {
 		streamID := fmt.Sprintf("stream-%d", i)
@@ -309,20 +309,20 @@ func TestController_ConcurrentAccountingStress(t *testing.T) {
 // TestController_PartialGlobalMemoryFailure tests accounting when global memory allocation partially fails
 func TestController_PartialGlobalMemoryFailure(t *testing.T) {
 	ctrl := NewController(100*1024, 1024*1024) // Very small global limit (100KB), large per-stream limit
-	
+
 	// Fill up most of global memory
 	err := ctrl.RequestMemory("stream1", 80*1024)
 	require.NoError(t, err)
 	assert.Equal(t, int64(80*1024), ctrl.usage.Load())
-	
+
 	// Try to allocate more than remaining global capacity
 	err = ctrl.RequestMemory("stream2", 50*1024) // Would exceed 100KB limit
 	assert.ErrorIs(t, err, ErrGlobalMemoryLimit)
-	
+
 	// Global usage should be unchanged
 	assert.Equal(t, int64(80*1024), ctrl.usage.Load(), "Global usage should be unchanged after failed allocation")
 	assert.Equal(t, int64(0), ctrl.GetStreamUsage("stream2"), "stream2 should have no usage after failed allocation")
-	
+
 	// stream1 should still have its original allocation
 	assert.Equal(t, int64(80*1024), ctrl.GetStreamUsage("stream1"), "stream1 usage should be unchanged")
 }
@@ -330,23 +330,23 @@ func TestController_PartialGlobalMemoryFailure(t *testing.T) {
 // TestController_SimultaneousStreamLimitFailures tests multiple streams hitting limits simultaneously
 func TestController_SimultaneousStreamLimitFailures(t *testing.T) {
 	ctrl := NewController(10*1024*1024, 100*1024) // 10MB global, 100KB per stream
-	
+
 	var wg sync.WaitGroup
 	var successCount atomic.Int32
 	var failureCount atomic.Int32
-	
+
 	// Multiple goroutines trying to exceed stream limits simultaneously
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(streamNum int) {
 			defer wg.Done()
-			
+
 			streamID := fmt.Sprintf("stream-%d", streamNum)
-			
+
 			// First allocation should succeed (90KB < 100KB limit)
 			if err := ctrl.RequestMemory(streamID, 90*1024); err == nil {
 				successCount.Add(1)
-				
+
 				// Second allocation should fail (90KB + 20KB > 100KB limit)
 				if err := ctrl.RequestMemory(streamID, 20*1024); err != nil {
 					failureCount.Add(1)
@@ -354,19 +354,19 @@ func TestController_SimultaneousStreamLimitFailures(t *testing.T) {
 			}
 		}(i)
 	}
-	
+
 	wg.Wait()
-	
+
 	// All streams should have succeeded with first allocation
 	assert.Equal(t, int32(10), successCount.Load(), "All first allocations should succeed")
-	
+
 	// All second allocations should have failed
 	assert.Equal(t, int32(10), failureCount.Load(), "All second allocations should fail")
-	
+
 	// Global usage should be exactly 10 * 90KB = 900KB
 	expectedGlobalUsage := int64(10 * 90 * 1024)
 	assert.Equal(t, expectedGlobalUsage, ctrl.usage.Load(), "Global usage should be exactly sum of successful allocations")
-	
+
 	// Each stream should have exactly 90KB
 	for i := 0; i < 10; i++ {
 		streamID := fmt.Sprintf("stream-%d", i)

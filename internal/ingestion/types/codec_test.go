@@ -319,11 +319,11 @@ func TestGetClockRateForPayloadType_EdgeCases(t *testing.T) {
 func TestCodecType_RealWorldScenarios(t *testing.T) {
 	// Test common real-world codec combinations
 	tests := []struct {
-		name         string
-		videoCodec   CodecType
-		audioCodec   CodecType
-		expectedVCR  uint32 // Video clock rate
-		expectedACR  uint32 // Audio clock rate
+		name        string
+		videoCodec  CodecType
+		audioCodec  CodecType
+		expectedVCR uint32 // Video clock rate
+		expectedACR uint32 // Audio clock rate
 	}{
 		{
 			name:        "H.264 + AAC",
@@ -369,7 +369,7 @@ func TestCodecType_RealWorldScenarios(t *testing.T) {
 			assert.False(t, tt.videoCodec.IsAudio(), "Video codec should not be audio")
 			assert.Equal(t, tt.expectedVCR, tt.videoCodec.GetClockRate(), "Video codec clock rate")
 
-			// Verify audio codec properties  
+			// Verify audio codec properties
 			assert.True(t, tt.audioCodec.IsAudio(), "Audio codec should be audio")
 			assert.False(t, tt.audioCodec.IsVideo(), "Audio codec should not be video")
 			assert.Equal(t, tt.expectedACR, tt.audioCodec.GetClockRate(), "Audio codec clock rate")

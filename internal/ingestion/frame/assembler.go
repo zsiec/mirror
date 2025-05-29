@@ -109,7 +109,7 @@ func (a *Assembler) Stop() error {
 		"packets_dropped":  a.packetsDropped,
 	}
 	a.mu.Unlock()
-	
+
 	a.logger.WithFields(stats).Info("Frame assembler stopped")
 
 	return nil
@@ -123,7 +123,7 @@ func (a *Assembler) AddPacket(pkt types.TimestampedPacket) error {
 		return a.ctx.Err()
 	default:
 	}
-	
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
