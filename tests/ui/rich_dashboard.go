@@ -1762,7 +1762,7 @@ func (m *RichDashboardModel) getAnimatedValue(value string, tick int) string {
 }
 
 // getGoroutineIcon creates animated goroutine indicators
-func (m *RichDashboardModel) getGoroutineIcon(count int, tick int) string {
+func (m *RichDashboardModel) getGoroutineIcon(count, tick int) string {
 	if count < 50 {
 		return "🧵"
 	} else if count < 100 {

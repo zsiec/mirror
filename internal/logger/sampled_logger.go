@@ -111,7 +111,7 @@ func (s *SampledLogger) shouldLog(category string) bool {
 }
 
 // VideoFrameLog logs video frame processing events with sampling
-func (s *SampledLogger) VideoFrameLog(level logrus.Level, category string, msg string, fields map[string]interface{}) {
+func (s *SampledLogger) VideoFrameLog(level logrus.Level, category, msg string, fields map[string]interface{}) {
 	if !s.shouldLog(category) {
 		return
 	}

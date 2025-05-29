@@ -222,7 +222,7 @@ func (l *LinearBackoff) Reset() {
 }
 
 // Helper function to calculate exponential backoff with maximum
-func calculateBackoff(attempt int, base time.Duration, max time.Duration) time.Duration {
+func calculateBackoff(attempt int, base, max time.Duration) time.Duration {
 	if attempt <= 0 {
 		return base
 	}

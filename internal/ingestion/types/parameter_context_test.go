@@ -339,7 +339,7 @@ func getSessionChangeCount(stats map[string]interface{}) uint64 {
 	return 0
 }
 
-func containsPattern(data []byte, pattern []byte) bool {
+func containsPattern(data, pattern []byte) bool {
 	if len(pattern) > len(data) {
 		return false
 	}

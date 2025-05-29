@@ -105,7 +105,7 @@ var (
 )
 
 // UpdateStreamMetrics updates metrics for a stream
-func UpdateStreamMetrics(streamID string, protocol string, bytesReceived, packetsReceived, packetsLost int64, bitrate float64) {
+func UpdateStreamMetrics(streamID, protocol string, bytesReceived, packetsReceived, packetsLost int64, bitrate float64) {
 	streamBytesTotal.WithLabelValues(streamID, protocol).Add(float64(bytesReceived))
 	streamPacketsTotal.WithLabelValues(streamID, protocol).Add(float64(packetsReceived))
 	streamPacketsLostTotal.WithLabelValues(streamID, protocol).Add(float64(packetsLost))

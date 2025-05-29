@@ -609,7 +609,7 @@ func (ctx *ParameterSetContext) createRemappedSPS(originalSPS *ParameterSet, new
 }
 
 // createRemappedPPS creates a new PPS with the specified ID and SPS reference
-func (ctx *ParameterSetContext) createRemappedPPS(originalPPS *PPSContext, newID uint8, referencedSPSID uint8) []byte {
+func (ctx *ParameterSetContext) createRemappedPPS(originalPPS *PPSContext, newID, referencedSPSID uint8) []byte {
 	if originalPPS == nil || len(originalPPS.Data) < 3 {
 		return nil
 	}

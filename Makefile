@@ -216,7 +216,7 @@ fmt:
 	@echo "Formatting code..."
 	@go fmt ./...
 	@gofmt -l -s -w $(GO_FILES)
-	@gofumpt -l -w $(GO_FILES)
+	@gofumpt -l -w -extra $(GO_FILES)
 
 ## lint: Run linters
 lint:
