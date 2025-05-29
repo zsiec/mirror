@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sirupsen/logrus"
+
 	"github.com/zsiec/mirror/internal/ingestion/mpegts"
 	"github.com/zsiec/mirror/internal/ingestion/srt"
 	"github.com/zsiec/mirror/internal/logger"

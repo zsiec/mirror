@@ -7,6 +7,7 @@ import (
 
 	"github.com/natefinch/lumberjack"
 	"github.com/sirupsen/logrus"
+
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/pkg/version"
 )

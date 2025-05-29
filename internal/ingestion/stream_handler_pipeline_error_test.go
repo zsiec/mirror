@@ -7,6 +7,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+
 	"github.com/zsiec/mirror/internal/ingestion/pipeline"
 	"github.com/zsiec/mirror/internal/ingestion/types"
 	"github.com/zsiec/mirror/internal/logger"
