@@ -1,15 +1,12 @@
+---
 # golangci-lint configuration
-# https://golangci-lint.run/usage/configuration/
+# https://golangci.github.io/legacy-v1-doc/usage/configuration/
 
 # Options for analysis running
+
 run:
   timeout: 5m
   tests: true
-  skip-dirs:
-    - vendor
-    - third_party
-  skip-files:
-    - ".*\\.pb\\.go$"
   modules-download-mode: readonly
 
 linters:
@@ -22,17 +19,24 @@ linters:
 
 linters-settings:
   govet:
-    check-shadowing: true
+    settings:
+      shadow: {}
   errcheck:
     check-type-assertions: true
     check-blank: false
 
 issues:
+  exclude-dirs:
+    - vendor
+    - third_party
+  exclude-files:
+    - ".*\\.pb\\.go$"
+
   # Exclude typecheck errors - these are false positives in v1.55.2
   exclude:
     - "undefined: redis"
     - "undefined: quic"
-  
+
   exclude-rules:
     # Be more lenient with test files
     - path: _test\.go
