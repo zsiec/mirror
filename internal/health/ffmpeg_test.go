@@ -13,9 +13,9 @@ import (
 
 func TestNewFFmpegChecker(t *testing.T) {
 	tests := []struct {
-		name         string
-		binaryPath   string
-		description  string
+		name        string
+		binaryPath  string
+		description string
 	}{
 		{
 			name:        "with explicit path",
@@ -34,7 +34,7 @@ func TestNewFFmpegChecker(t *testing.T) {
 			checker := NewFFmpegChecker(tt.binaryPath)
 			assert.NotNil(t, checker, tt.description)
 			assert.Equal(t, 5*time.Second, checker.timeout, "timeout should be 5 seconds")
-			
+
 			if tt.binaryPath != "" {
 				assert.Equal(t, tt.binaryPath, checker.binaryPath, "binary path should match")
 			}
@@ -159,7 +159,7 @@ func TestFFmpegChecker_GetFFmpegInfo(t *testing.T) {
 	// Should not return an error, but info should contain basic data
 	assert.NoError(t, err, "GetFFmpegInfo should not return error")
 	assert.NotNil(t, info, "info should not be nil")
-	
+
 	// Check basic fields
 	assert.Equal(t, "/nonexistent/ffmpeg", info["binary_path"], "binary path should be set")
 	assert.Equal(t, true, info["ffmpeg_available"], "ffmpeg_available is true when binary path is set")
@@ -209,7 +209,7 @@ func TestFFmpegChecker_WithMockBinary(t *testing.T) {
 	// Create a temporary mock ffmpeg script
 	tempDir := t.TempDir()
 	mockFFmpeg := filepath.Join(tempDir, "ffmpeg")
-	
+
 	// Create a simple shell script that mimics ffmpeg behavior
 	mockScript := `#!/bin/bash
 case "$1" in
@@ -240,7 +240,7 @@ case "$1" in
         ;;
 esac`
 
-	err := os.WriteFile(mockFFmpeg, []byte(mockScript), 0755)
+	err := os.WriteFile(mockFFmpeg, []byte(mockScript), 0o755)
 	if err != nil {
 		t.Skip("Cannot create mock ffmpeg script:", err)
 	}
@@ -327,7 +327,7 @@ func TestFFmpegChecker_PathLookup(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	
+
 	// This should pass the binary check but fail at version check
 	// because echo won't output "ffmpeg version"
 	err := checker.checkBinary(ctx)

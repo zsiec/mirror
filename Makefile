@@ -1,4 +1,4 @@
-.PHONY: build test clean run docker help fmt lint generate-certs deps dev setup docker-run docker-compose docker-compose-logs docker-compose-down docker-compose-restart docker-compose-monitoring docker-clean srt-check srt-setup test-coverage ffmpeg-check ffmpeg-setup deps-check b r l
+.PHONY: build test clean run docker help fmt fmt-check lint generate-certs deps dev setup docker-run docker-compose docker-compose-logs docker-compose-down docker-compose-restart docker-compose-monitoring docker-clean srt-check srt-setup test-coverage ffmpeg-check ffmpeg-setup deps-check b r l
 
 # Variables
 BINARY_NAME=mirror
@@ -211,11 +211,33 @@ docker-clean:
 	@docker rm -f mirror 2>/dev/null || true
 	@docker rmi mirror:latest 2>/dev/null || true
 
+GOFUMPT_AVAILABLE := $(shell command -v gofumpt >/dev/null 2>&1 && echo "yes" || echo "no")
+GOIMPORTS_AVAILABLE := $(shell command -v goimports >/dev/null 2>&1 && echo "yes" || echo "no")
+
+## fmt-check: verify dependencies
+fmt-check:
+ifeq ($(GOFUMPT_AVAILABLE),no)
+	@echo ""
+	@echo "⚠️  gofumpt not found"
+	@echo "Install SRT library with: go install mvdan.cc/gofumpt@latest"
+	@echo ""
+	@exit 1
+endif
+ifeq ($(GOIMPORTS_AVAILABLE),no)
+	@echo ""
+	@echo "⚠️  goimports not found"
+	@echo "Install SRT library with: go install golang.org/x/tools/cmd/goimports@latest"
+	@echo ""
+	@exit 1
+endif
+
 ## fmt: Format Go code
-fmt:
+fmt: fmt-check
 	@echo "Formatting code..."
 	@go fmt ./...
-	@gofmt -s -w $(GO_FILES)
+	@gofmt -l -s -w $(GO_FILES)
+	@gofumpt -l -w -extra $(GO_FILES)
+	@goimports -e -l -w -local github.com/zsiec/mirror $(GO_FILES)
 
 ## lint: Run linters
 lint:

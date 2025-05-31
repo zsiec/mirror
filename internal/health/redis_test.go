@@ -31,7 +31,7 @@ func TestRedisChecker_Check_NilClient(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	
+
 	// This should panic with nil client, so we expect a panic
 	assert.Panics(t, func() {
 		checker.Check(ctx)
@@ -102,10 +102,10 @@ func TestDiskChecker_Integration(t *testing.T) {
 		for _, path := range paths {
 			t.Run(fmt.Sprintf("path_%s_threshold_%.1f", path, threshold), func(t *testing.T) {
 				checker := NewDiskChecker(path, threshold)
-				
+
 				ctx := context.Background()
 				err := checker.Check(ctx)
-				
+
 				// Should not error with current stub implementation
 				assert.NoError(t, err, "disk check should not error")
 				assert.Equal(t, "disk", checker.Name(), "name should be disk")
@@ -123,10 +123,10 @@ func TestMemoryChecker_Integration(t *testing.T) {
 	for _, threshold := range thresholds {
 		t.Run(fmt.Sprintf("threshold_%.1f", threshold), func(t *testing.T) {
 			checker := NewMemoryChecker(threshold)
-			
+
 			ctx := context.Background()
 			err := checker.Check(ctx)
-			
+
 			// Should not error with current stub implementation
 			assert.NoError(t, err, "memory check should not error")
 			assert.Equal(t, "memory", checker.Name(), "name should be memory")
@@ -140,7 +140,7 @@ func TestCheckers_EdgeCases(t *testing.T) {
 	t.Run("disk checker with zero threshold", func(t *testing.T) {
 		checker := NewDiskChecker("/tmp", 0.0)
 		assert.Equal(t, 0.0, checker.threshold, "should accept zero threshold")
-		
+
 		ctx := context.Background()
 		err := checker.Check(ctx)
 		assert.NoError(t, err, "should not error with zero threshold")
@@ -149,7 +149,7 @@ func TestCheckers_EdgeCases(t *testing.T) {
 	t.Run("disk checker with threshold over 1.0", func(t *testing.T) {
 		checker := NewDiskChecker("/tmp", 1.5)
 		assert.Equal(t, 1.5, checker.threshold, "should accept threshold over 1.0")
-		
+
 		ctx := context.Background()
 		err := checker.Check(ctx)
 		assert.NoError(t, err, "should not error with high threshold")
@@ -158,7 +158,7 @@ func TestCheckers_EdgeCases(t *testing.T) {
 	t.Run("memory checker with negative threshold", func(t *testing.T) {
 		checker := NewMemoryChecker(-0.1)
 		assert.Equal(t, -0.1, checker.threshold, "should accept negative threshold")
-		
+
 		ctx := context.Background()
 		err := checker.Check(ctx)
 		assert.NoError(t, err, "should not error with negative threshold")
@@ -167,10 +167,9 @@ func TestCheckers_EdgeCases(t *testing.T) {
 	t.Run("disk checker with empty path", func(t *testing.T) {
 		checker := NewDiskChecker("", 0.9)
 		assert.Equal(t, "", checker.path, "should accept empty path")
-		
+
 		ctx := context.Background()
 		err := checker.Check(ctx)
 		assert.NoError(t, err, "should not error with empty path (stub)")
 	})
 }
-

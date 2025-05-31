@@ -8,13 +8,13 @@ import (
 )
 
 // GenerateTestHEVCStream generates a test HEVC stream for the specified duration
-func GenerateTestHEVCStream(width, height, fps int, durationMs int) []byte {
+func GenerateTestHEVCStream(width, height, fps, durationMs int) []byte {
 	gen := NewHEVCGenerator(width, height, fps)
 	return gen.GenerateStreamSegment(durationMs)
 }
 
 // GenerateTestRTPPackets generates test RTP packets containing HEVC data
-func GenerateTestRTPPackets(width, height, fps int, durationMs int, ssrc uint32) []*rtp.Packet {
+func GenerateTestRTPPackets(width, height, fps, durationMs int, ssrc uint32) []*rtp.Packet {
 	gen := NewHEVCGenerator(width, height, fps)
 	customPackets := gen.GenerateRTPStream(durationMs, ssrc)
 

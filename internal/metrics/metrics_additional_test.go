@@ -246,10 +246,10 @@ func TestContextCancellationReasons(t *testing.T) {
 func TestLockContentionDifferentLocks(t *testing.T) {
 	component := "lock_test"
 	locks := map[string]float64{
-		"mutex_a":    0.001,
-		"mutex_b":    0.005,
-		"rwmutex_c":  0.010,
-		"channel_d":  0.002,
+		"mutex_a":   0.001,
+		"mutex_b":   0.005,
+		"rwmutex_c": 0.010,
+		"channel_d": 0.002,
 	}
 
 	for lockName, duration := range locks {

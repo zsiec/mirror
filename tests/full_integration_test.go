@@ -41,7 +41,7 @@ func TestFullIntegrationTest(t *testing.T) {
 	}
 
 	// Open /dev/null for writing (or NUL on Windows)
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0666)
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0o666)
 	if err != nil {
 		t.Fatalf("Failed to open dev/null: %v", err)
 	}

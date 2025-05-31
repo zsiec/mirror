@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/zsiec/mirror/internal/ingestion/types"
 )
 
@@ -62,9 +63,9 @@ func TestVideoPipelineErrorHandling(t *testing.T) {
 	t.Run("CriticalErrorDetection", func(t *testing.T) {
 		// Test that critical errors are properly detected
 		testCases := []struct {
-			name        string
-			err         error
-			shouldStop  bool
+			name       string
+			err        error
+			shouldStop bool
 		}{
 			{
 				name:       "OutOfMemoryError",
@@ -72,7 +73,7 @@ func TestVideoPipelineErrorHandling(t *testing.T) {
 				shouldStop: true,
 			},
 			{
-				name:       "CorruptedDataError", 
+				name:       "CorruptedDataError",
 				err:        errors.New("data corrupted"),
 				shouldStop: true,
 			},
@@ -202,7 +203,7 @@ func TestVideoPipelineResourceCleanupEnhanced(t *testing.T) {
 
 		stats := pipeline.GetStats()
 		assert.Greater(t, stats.PacketsProcessed, uint64(0), "Should have processed packets")
-		t.Logf("Processed %d packets, %d frames, %d errors", 
+		t.Logf("Processed %d packets, %d frames, %d errors",
 			stats.PacketsProcessed, stats.FramesOutput, stats.Errors)
 	})
 

@@ -843,7 +843,6 @@ func (b *Buffer) updateFrameIndicesAfterRemoval(gop *types.GOP, removedIndex int
 // ExtractParameterSetFromNAL extracts parameter sets from a single NAL unit (unified method)
 // Made public for reuse by StreamHandler session cache
 func (b *Buffer) ExtractParameterSetFromNAL(paramContext *types.ParameterSetContext, nalUnit types.NALUnit, nalType uint8, gopID uint64) bool {
-
 	switch nalType {
 	case 7: // H.264 SPS
 		// Construct proper NAL unit with header if needed

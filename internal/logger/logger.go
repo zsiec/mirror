@@ -7,6 +7,7 @@ import (
 
 	"github.com/natefinch/lumberjack"
 	"github.com/sirupsen/logrus"
+
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/pkg/version"
 )
@@ -140,7 +141,7 @@ func New(cfg *config.LoggingConfig) (*logrus.Logger, error) {
 		// File output with rotation
 		// Ensure directory exists
 		dir := filepath.Dir(cfg.Output)
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create log directory: %w", err)
 		}
 

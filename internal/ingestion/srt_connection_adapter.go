@@ -54,8 +54,10 @@ type SRTConnectionAdapter struct {
 }
 
 // Ensure it implements both interfaces
-var _ StreamConnection = (*SRTConnectionAdapter)(nil)
-var _ SRTConnection = (*SRTConnectionAdapter)(nil)
+var (
+	_ StreamConnection = (*SRTConnectionAdapter)(nil)
+	_ SRTConnection    = (*SRTConnectionAdapter)(nil)
+)
 
 // min returns the minimum of two integers
 func min(a, b int) int {
@@ -199,7 +201,6 @@ func (a *SRTConnectionAdapter) processData() {
 
 		// Blocking SRT read - should wait for next message
 		n, err := a.Connection.Read(buffer)
-
 		if err != nil {
 			a.logger.WithFields(map[string]interface{}{
 				"stream_id":      streamID,

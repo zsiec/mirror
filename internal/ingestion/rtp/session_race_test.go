@@ -9,6 +9,7 @@ import (
 
 	"github.com/pion/rtp"
 	"github.com/sirupsen/logrus"
+
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/internal/ingestion/codec"
 	"github.com/zsiec/mirror/internal/logger"

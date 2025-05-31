@@ -2,6 +2,7 @@ package sync
 
 import (
 	"github.com/sirupsen/logrus"
+
 	"github.com/zsiec/mirror/internal/logger"
 )
 

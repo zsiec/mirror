@@ -141,8 +141,10 @@ type RichDashboardModel struct {
 }
 
 // Messages
-type tickMsg time.Time
-type statsMsg dashboardStats
+type (
+	tickMsg  time.Time
+	statsMsg dashboardStats
+)
 
 // ResponsiveLayout defines the layout configuration for different screen sizes
 type ResponsiveLayout struct {
@@ -1760,7 +1762,7 @@ func (m *RichDashboardModel) getAnimatedValue(value string, tick int) string {
 }
 
 // getGoroutineIcon creates animated goroutine indicators
-func (m *RichDashboardModel) getGoroutineIcon(count int, tick int) string {
+func (m *RichDashboardModel) getGoroutineIcon(count, tick int) string {
 	if count < 50 {
 		return "🧵"
 	} else if count < 100 {

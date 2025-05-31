@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -18,7 +19,6 @@ import (
 	"github.com/zsiec/mirror/internal/logger"
 	"github.com/zsiec/mirror/internal/server"
 	"github.com/zsiec/mirror/pkg/version"
-	"net/http"
 )
 
 func main() {

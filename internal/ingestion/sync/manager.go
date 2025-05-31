@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
 	"github.com/zsiec/mirror/internal/ingestion/types"
 	"github.com/zsiec/mirror/internal/logger"
 )

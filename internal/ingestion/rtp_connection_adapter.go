@@ -8,6 +8,7 @@ import (
 
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
+
 	"github.com/zsiec/mirror/internal/ingestion/codec"
 	rtpPkg "github.com/zsiec/mirror/internal/ingestion/rtp"
 	"github.com/zsiec/mirror/internal/ingestion/timestamp"
@@ -51,8 +52,10 @@ type RTPConnectionAdapter struct {
 }
 
 // Ensure it implements both interfaces
-var _ StreamConnection = (*RTPConnectionAdapter)(nil)
-var _ RTPConnection = (*RTPConnectionAdapter)(nil)
+var (
+	_ StreamConnection = (*RTPConnectionAdapter)(nil)
+	_ RTPConnection    = (*RTPConnectionAdapter)(nil)
+)
 
 // NewRTPConnectionAdapter creates a new adapter
 func NewRTPConnectionAdapter(session *rtpPkg.Session, codecType types.CodecType) *RTPConnectionAdapter {

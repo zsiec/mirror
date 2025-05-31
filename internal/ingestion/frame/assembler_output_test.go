@@ -96,11 +96,11 @@ func TestFrameAssemblerOutputChannelTimeout(t *testing.T) {
 
 			// Basic validations
 			assert.LessOrEqual(t, framesReceived, tt.bufferSize+1) // Allow slight variance
-			
+
 			if tt.expectDrops {
 				assert.Greater(t, stats.FramesDropped, uint64(0), "Expected frame drops with small buffer")
 			}
-			
+
 			// Total frames processed should equal assembled + dropped
 			totalProcessed := stats.FramesAssembled + stats.FramesDropped
 			assert.Equal(t, totalProcessed, uint64(framesAdded), "Total processed should equal frames added")
@@ -113,7 +113,7 @@ func TestFrameAssemblerOutputChannelTimeout(t *testing.T) {
 func TestFrameAssemblerOutputChannelConcurrentAccess(t *testing.T) {
 	assembler := NewAssembler("test-stream", types.CodecH264, 2) // Small buffer
 	require.NotNil(t, assembler)
-	
+
 	assembler.SetFrameTimeout(100 * time.Millisecond)
 	err := assembler.Start()
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestFrameAssemblerOutputChannelConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			count := 0
 			timeout := time.After(2 * time.Second)
-			
+
 			for {
 				select {
 				case frame := <-assembler.GetOutput():
@@ -156,19 +156,19 @@ func TestFrameAssemblerOutputChannelConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(producerID int) {
 			defer wg.Done()
-			
+
 			for j := 0; j < framesPerProducer; j++ {
 				pkt := types.TimestampedPacket{
 					Data:        []byte{0x00, 0x00, 0x00, 0x01, 0x65}, // IDR
-					PTS:         int64((producerID*1000) + (j * 100)),
-					DTS:         int64((producerID*1000) + (j * 100)),
+					PTS:         int64((producerID * 1000) + (j * 100)),
+					DTS:         int64((producerID * 1000) + (j * 100)),
 					Flags:       types.PacketFlagFrameStart | types.PacketFlagFrameEnd,
 					CaptureTime: time.Now(),
 				}
-				
+
 				// Ignore errors from timeout (expected with small buffer)
 				_ = assembler.AddPacket(pkt)
-				
+
 				// Small delay between frames
 				time.Sleep(10 * time.Millisecond)
 			}
@@ -198,28 +198,28 @@ func TestFrameAssemblerOutputChannelConcurrentAccess(t *testing.T) {
 // TestFrameAssemblerTimeoutBounds tests the timeout bounds logic
 func TestFrameAssemblerTimeoutBounds(t *testing.T) {
 	tests := []struct {
-		name                string
-		frameTimeout        time.Duration
-		expectedMinTimeout  time.Duration
-		expectedMaxTimeout  time.Duration
+		name               string
+		frameTimeout       time.Duration
+		expectedMinTimeout time.Duration
+		expectedMaxTimeout time.Duration
 	}{
 		{
-			name:                "very_short_timeout",
-			frameTimeout:        10 * time.Millisecond,
-			expectedMinTimeout:  50 * time.Millisecond,
-			expectedMaxTimeout:  50 * time.Millisecond,
+			name:               "very_short_timeout",
+			frameTimeout:       10 * time.Millisecond,
+			expectedMinTimeout: 50 * time.Millisecond,
+			expectedMaxTimeout: 50 * time.Millisecond,
 		},
 		{
-			name:                "normal_timeout", 
-			frameTimeout:        200 * time.Millisecond,
-			expectedMinTimeout:  200 * time.Millisecond,
-			expectedMaxTimeout:  200 * time.Millisecond,
+			name:               "normal_timeout",
+			frameTimeout:       200 * time.Millisecond,
+			expectedMinTimeout: 200 * time.Millisecond,
+			expectedMaxTimeout: 200 * time.Millisecond,
 		},
 		{
-			name:                "very_long_timeout",
-			frameTimeout:        1000 * time.Millisecond,
-			expectedMinTimeout:  500 * time.Millisecond,
-			expectedMaxTimeout:  500 * time.Millisecond,
+			name:               "very_long_timeout",
+			frameTimeout:       1000 * time.Millisecond,
+			expectedMinTimeout: 500 * time.Millisecond,
+			expectedMaxTimeout: 500 * time.Millisecond,
 		},
 	}
 
@@ -227,7 +227,7 @@ func TestFrameAssemblerTimeoutBounds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assembler := NewAssembler("test-stream", types.CodecH264, 1)
 			require.NotNil(t, assembler)
-			
+
 			assembler.SetFrameTimeout(tt.frameTimeout)
 			err := assembler.Start()
 			require.NoError(t, err)
@@ -254,14 +254,14 @@ func TestFrameAssemblerTimeoutBounds(t *testing.T) {
 			pkt.PTS = 2000
 			pkt.DTS = 2000
 			err = assembler.AddPacket(pkt) // This should succeed (buffer has room)
-			
+
 			// Now add a frame that will definitely block
 			start := time.Now()
 			pkt.PTS = 3000
 			pkt.DTS = 3000
 			err = assembler.AddPacket(pkt)
 			elapsed := time.Since(start)
-			
+
 			// The timeout behavior should be within expected bounds if it occurred
 			if err == ErrOutputBlocked {
 				assert.GreaterOrEqual(t, elapsed, tt.expectedMinTimeout-20*time.Millisecond)
@@ -278,7 +278,7 @@ func TestFrameAssemblerTimeoutBounds(t *testing.T) {
 func TestFrameAssemblerContextCancellation(t *testing.T) {
 	assembler := NewAssembler("test-stream", types.CodecH264, 1)
 	require.NotNil(t, assembler)
-	
+
 	assembler.SetFrameTimeout(1 * time.Second) // Long timeout
 	err := assembler.Start()
 	require.NoError(t, err)
@@ -297,7 +297,7 @@ func TestFrameAssemblerContextCancellation(t *testing.T) {
 	// Stop the assembler
 	err = assembler.Stop()
 	assert.NoError(t, err)
-	
+
 	// Now try to add another packet - should return context canceled
 	pkt.PTS = 2000
 	pkt.DTS = 2000
@@ -313,7 +313,7 @@ func TestFrameAssemblerContextCancellation(t *testing.T) {
 func TestFrameAssemblerSendFrameToOutputDirectly(t *testing.T) {
 	assembler := NewAssembler("test-stream", types.CodecH264, 2)
 	require.NotNil(t, assembler)
-	
+
 	assembler.SetFrameTimeout(100 * time.Millisecond)
 	err := assembler.Start()
 	require.NoError(t, err)
@@ -331,7 +331,7 @@ func TestFrameAssemblerSendFrameToOutputDirectly(t *testing.T) {
 	// Test successful send
 	err = assembler.sendFrameToOutput(frame)
 	assert.NoError(t, err)
-	
+
 	// Verify frame was received
 	receivedFrame := <-assembler.GetOutput()
 	assert.Equal(t, frame.ID, receivedFrame.ID)
@@ -339,7 +339,7 @@ func TestFrameAssemblerSendFrameToOutputDirectly(t *testing.T) {
 	// Fill buffer to test timeout
 	frame2 := &types.VideoFrame{
 		ID:          2,
-		StreamID:    "test-stream", 
+		StreamID:    "test-stream",
 		PTS:         2000,
 		DTS:         2000,
 		CaptureTime: time.Now(),

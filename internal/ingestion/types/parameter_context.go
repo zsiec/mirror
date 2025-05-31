@@ -10,7 +10,7 @@ const (
 	MaxParameterSetsPerSession  = 1000
 	ParameterSetCleanupInterval = 1 * time.Hour
 	MaxParameterSetAge          = 24 * time.Hour
-	
+
 	// Error code thresholds for CopyParameterSetsFrom return values
 	// Negative return values indicate different error severities:
 	ErrorCodeCriticalFailure = -1000 - MaxParameterSetsPerSession // -2000: Emergency cleanup failed completely
@@ -609,7 +609,7 @@ func (ctx *ParameterSetContext) createRemappedSPS(originalSPS *ParameterSet, new
 }
 
 // createRemappedPPS creates a new PPS with the specified ID and SPS reference
-func (ctx *ParameterSetContext) createRemappedPPS(originalPPS *PPSContext, newID uint8, referencedSPSID uint8) []byte {
+func (ctx *ParameterSetContext) createRemappedPPS(originalPPS *PPSContext, newID, referencedSPSID uint8) []byte {
 	if originalPPS == nil || len(originalPPS.Data) < 3 {
 		return nil
 	}
@@ -964,18 +964,18 @@ func (ctx *ParameterSetContext) CopyParameterSetsFrom(sourceCtx *ParameterSetCon
 
 	// Check current size and enforce hard limits
 	currentTotal := len(ctx.spsMap) + len(ctx.ppsMap) + len(ctx.vpsMap) + len(ctx.hevcSpsMap) + len(ctx.hevcPpsMap)
-	
+
 	// CRITICAL: If we're over the limit, this is a serious memory leak issue
 	if currentTotal >= MaxParameterSetsPerSession {
 		// Try emergency cleanup once
 		cleanedCount := ctx.performEmergencyCleanupUnsafe()
 		currentTotal = len(ctx.spsMap) + len(ctx.ppsMap) + len(ctx.vpsMap) + len(ctx.hevcSpsMap) + len(ctx.hevcPpsMap)
-		
+
 		if currentTotal >= MaxParameterSetsPerSession {
 			// CRITICAL ERROR: Emergency cleanup failed, system is in dangerous state
 			return ErrorCodeCriticalFailure - currentTotal // Shows actual count beyond limit
 		}
-		
+
 		// Partial recovery - log warning but continue with reduced capacity
 		if cleanedCount == 0 {
 			// Cleanup didn't free anything - this indicates a serious problem
@@ -992,7 +992,7 @@ func (ctx *ParameterSetContext) CopyParameterSetsFrom(sourceCtx *ParameterSetCon
 			// Hit our safety limit - return negative to signal truncation
 			return -(copiedCount + 1) // Negative indicates partial copy due to limits
 		}
-		
+
 		if sps.Valid {
 			// Create a deep copy of the SPS
 			spsCopy := &ParameterSet{
@@ -1034,7 +1034,7 @@ func (ctx *ParameterSetContext) CopyParameterSetsFrom(sourceCtx *ParameterSetCon
 			// Hit our safety limit - return negative to signal truncation
 			return -(copiedCount + 1) // Negative indicates partial copy due to limits
 		}
-		
+
 		if pps.Valid {
 			// Create a deep copy of the PPS
 			ppsCopy := &PPSContext{
@@ -1062,7 +1062,7 @@ func (ctx *ParameterSetContext) CopyParameterSetsFrom(sourceCtx *ParameterSetCon
 			if copiedCount >= maxToCopy {
 				return -(copiedCount + 1) // Truncated due to limits
 			}
-			
+
 			if vps.Valid {
 				vpsCopy := &ParameterSet{
 					ID:          vps.ID,
@@ -1083,7 +1083,7 @@ func (ctx *ParameterSetContext) CopyParameterSetsFrom(sourceCtx *ParameterSetCon
 			if copiedCount >= maxToCopy {
 				return -(copiedCount + 1) // Truncated due to limits
 			}
-			
+
 			if sps.Valid {
 				spsCopy := &ParameterSet{
 					ID:          sps.ID,
@@ -1104,7 +1104,7 @@ func (ctx *ParameterSetContext) CopyParameterSetsFrom(sourceCtx *ParameterSetCon
 			if copiedCount >= maxToCopy {
 				return -(copiedCount + 1) // Truncated due to limits
 			}
-			
+
 			if pps.Valid {
 				ppsCopy := &ParameterSet{
 					ID:          pps.ID,
@@ -1453,10 +1453,10 @@ func (ctx *ParameterSetContext) clearOldestUnsafe(count int) int {
 func (ctx *ParameterSetContext) performEmergencyCleanupUnsafe() int {
 	now := time.Now()
 	removed := 0
-	
+
 	// Emergency cleanup is more aggressive - remove anything older than 1 hour
 	emergencyAge := 1 * time.Hour
-	
+
 	// Clean H.264 parameter sets
 	for id, sps := range ctx.spsMap {
 		if now.Sub(sps.ParsedAt) > emergencyAge {
@@ -1464,14 +1464,14 @@ func (ctx *ParameterSetContext) performEmergencyCleanupUnsafe() int {
 			removed++
 		}
 	}
-	
+
 	for id, pps := range ctx.ppsMap {
 		if now.Sub(pps.ParsedAt) > emergencyAge {
 			delete(ctx.ppsMap, id)
 			removed++
 		}
 	}
-	
+
 	// Clean HEVC parameter sets
 	for id, vps := range ctx.vpsMap {
 		if now.Sub(vps.ParsedAt) > emergencyAge {
@@ -1479,30 +1479,30 @@ func (ctx *ParameterSetContext) performEmergencyCleanupUnsafe() int {
 			removed++
 		}
 	}
-	
+
 	for id, sps := range ctx.hevcSpsMap {
 		if now.Sub(sps.ParsedAt) > emergencyAge {
 			delete(ctx.hevcSpsMap, id)
 			removed++
 		}
 	}
-	
+
 	for id, pps := range ctx.hevcPpsMap {
 		if now.Sub(pps.ParsedAt) > emergencyAge {
 			delete(ctx.hevcPpsMap, id)
 			removed++
 		}
 	}
-	
+
 	// If still not enough, remove oldest 50% regardless of age
 	currentTotal := len(ctx.spsMap) + len(ctx.ppsMap) + len(ctx.vpsMap) + len(ctx.hevcSpsMap) + len(ctx.hevcPpsMap)
 	if currentTotal >= MaxParameterSetsPerSession {
 		additionalRemoved := ctx.clearOldestUnsafe(currentTotal / 2)
 		removed += additionalRemoved
 	}
-	
+
 	ctx.totalSets -= removed
 	ctx.lastCleanup = now
-	
+
 	return removed
 }

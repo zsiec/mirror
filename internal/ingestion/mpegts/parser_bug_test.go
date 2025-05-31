@@ -1,8 +1,9 @@
 package mpegts
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // TestExtractTimestampPanic demonstrates the buffer overflow bug is fixed

@@ -181,7 +181,6 @@ func (p *Parser) parsePacket(data []byte) (*Packet, error) {
 	// Extract payload
 	if pkt.PayloadExists && offset < PacketSize {
 		pkt.Payload = data[offset:]
-
 	}
 
 	return pkt, nil

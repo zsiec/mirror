@@ -113,7 +113,6 @@ func (fpm *FallbackParameterManager) findApproximateMatch(
 	availableSets map[string]*ParameterSet,
 	result *FallbackResult,
 ) *FallbackResult {
-
 	// For H.264, try to find approximate SPS/PPS matches
 	if fpm.codec == CodecH264 {
 		result = fpm.findApproximateH264Match(requiredSets, availableSets, result)
@@ -138,7 +137,6 @@ func (fpm *FallbackParameterManager) findCompatibleMatch(
 	availableSets map[string]*ParameterSet,
 	result *FallbackResult,
 ) *FallbackResult {
-
 	// Check compatibility rules for each required parameter set
 	for setType, requiredID := range requiredSets {
 		ruleKey := fmt.Sprintf("%s_%d", setType, requiredID)
@@ -175,7 +173,6 @@ func (fpm *FallbackParameterManager) findGenericMatch(
 	requiredSets map[string]uint32,
 	result *FallbackResult,
 ) *FallbackResult {
-
 	// Use generic parameter sets based on codec
 	switch fpm.codec {
 	case CodecH264:
@@ -220,7 +217,6 @@ func (fpm *FallbackParameterManager) findApproximateH264Match(
 	availableSets map[string]*ParameterSet,
 	result *FallbackResult,
 ) *FallbackResult {
-
 	// Simple heuristic: use any available SPS/PPS if they exist
 	// In production, this would analyze profile/level compatibility
 
@@ -258,7 +254,6 @@ func (fpm *FallbackParameterManager) findApproximateHEVCMatch(
 	availableSets map[string]*ParameterSet,
 	result *FallbackResult,
 ) *FallbackResult {
-
 	// Similar logic for HEVC - use any available VPS/SPS/PPS
 	parameterSetFound := make(map[string]bool)
 
@@ -322,7 +317,6 @@ func (fpm *FallbackParameterManager) findCompatibleParameterSet(
 	rule CompatibilityRule,
 	availableSets map[string]*ParameterSet,
 ) *ParameterSet {
-
 	// Simple compatibility check - in production this would be more sophisticated
 	for _, paramSet := range availableSets {
 		if fpm.isParameterSetCompatible(paramSet, setType, rule) {
@@ -339,7 +333,6 @@ func (fpm *FallbackParameterManager) isParameterSetCompatible(
 	setType string,
 	rule CompatibilityRule,
 ) bool {
-
 	// Basic compatibility checks
 	if !paramSet.Valid {
 		return false

@@ -10,6 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/internal/ingestion/backpressure"
 	"github.com/zsiec/mirror/internal/ingestion/memory"

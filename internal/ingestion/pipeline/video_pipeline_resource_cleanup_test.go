@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/zsiec/mirror/internal/ingestion/types"
 )
 
@@ -16,7 +17,7 @@ func TestVideoPipelineResourceCleanup(t *testing.T) {
 	input := make(chan types.TimestampedPacket, 10)
 
 	cfg := Config{
-		StreamID:         "test-cleanup",
+		StreamID:        "test-cleanup",
 		Codec:           types.CodecH264,
 		FrameBufferSize: 5,
 	}
@@ -69,7 +70,7 @@ func TestVideoPipelineShutdownTimeout(t *testing.T) {
 	input := make(chan types.TimestampedPacket, 100)
 
 	cfg := Config{
-		StreamID:         "test-timeout",
+		StreamID:        "test-timeout",
 		Codec:           types.CodecH264,
 		FrameBufferSize: 1, // Small buffer to create potential blockage
 	}
@@ -113,7 +114,7 @@ func TestVideoPipelineFrameFlushDuringShutdown(t *testing.T) {
 	input := make(chan types.TimestampedPacket, 10)
 
 	cfg := Config{
-		StreamID:         "test-flush",
+		StreamID:        "test-flush",
 		Codec:           types.CodecH264,
 		FrameBufferSize: 10,
 	}
@@ -126,10 +127,10 @@ func TestVideoPipelineFrameFlushDuringShutdown(t *testing.T) {
 
 	// Send packets that will create some frames
 	testPackets := []types.TimestampedPacket{
-		createH264Packet(0, types.PacketTypeVideo),      // I-frame
-		createH264Packet(3000, types.PacketTypeVideo),   // P-frame
-		createH264Packet(6000, types.PacketTypeVideo),   // P-frame
-		createH264Packet(9000, types.PacketTypeVideo),   // P-frame
+		createH264Packet(0, types.PacketTypeVideo),    // I-frame
+		createH264Packet(3000, types.PacketTypeVideo), // P-frame
+		createH264Packet(6000, types.PacketTypeVideo), // P-frame
+		createH264Packet(9000, types.PacketTypeVideo), // P-frame
 	}
 
 	for _, pkt := range testPackets {
@@ -166,7 +167,7 @@ func TestVideoPipelineContextCancellation(t *testing.T) {
 	input := make(chan types.TimestampedPacket, 10)
 
 	cfg := Config{
-		StreamID:         "test-context",
+		StreamID:        "test-context",
 		Codec:           types.CodecH264,
 		FrameBufferSize: 5,
 	}
@@ -204,7 +205,7 @@ func TestVideoPipelineNilSafety(t *testing.T) {
 	input := make(chan types.TimestampedPacket, 10)
 
 	cfg := Config{
-		StreamID:         "test-nil-safety",
+		StreamID:        "test-nil-safety",
 		Codec:           types.CodecH264,
 		FrameBufferSize: 5,
 	}
@@ -236,7 +237,7 @@ func TestVideoPipelineOutputChannelCleanup(t *testing.T) {
 	input := make(chan types.TimestampedPacket, 10)
 
 	cfg := Config{
-		StreamID:         "test-output-cleanup",
+		StreamID:        "test-output-cleanup",
 		Codec:           types.CodecH264,
 		FrameBufferSize: 5,
 	}
