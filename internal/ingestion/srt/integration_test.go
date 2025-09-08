@@ -19,6 +19,7 @@ import (
 	"github.com/zsiec/mirror/internal/ingestion/registry"
 	"github.com/zsiec/mirror/internal/ingestion/srt"
 	"github.com/zsiec/mirror/internal/ingestion/testdata"
+	"github.com/zsiec/mirror/internal/logger"
 	"github.com/zsiec/mirror/tests"
 )
 
@@ -29,15 +30,15 @@ func TestSRTIntegration_StreamIngestion(t *testing.T) {
 
 	// Setup
 	ctx := context.Background()
-	logger := logrus.New()
-	logger.SetLevel(logrus.DebugLevel)
+	logrusLogger := logrus.New()
+	logrusLogger.SetLevel(logrus.DebugLevel)
 
 	// Create test Redis registry
 	redisClient := tests.SetupTestRedis(t)
-	reg := registry.NewRedisRegistry(redisClient, logger)
+	reg := registry.NewRedisRegistry(redisClient, logrusLogger)
 
 	// Create buffer pool
-	bufferPool := buffer.NewBufferPool(1024*1024, 10, logger) // 1MB buffers
+	bufferPool := buffer.NewBufferPool(1024*1024, 10, logrusLogger) // 1MB buffers
 
 	// Create SRT listener config
 	cfg := &config.SRTConfig{
@@ -57,9 +58,12 @@ func TestSRTIntegration_StreamIngestion(t *testing.T) {
 		Supported: []string{"h264", "hevc"},
 		Preferred: "hevc",
 	}
-	listener := srt.NewListener(cfg, codecsCfg, reg, bufferPool, logger)
-	// Set faster stats update for testing (500ms instead of 5s)
-	listener.SetTestStatsInterval(500 * time.Millisecond)
+
+	adapter := srt.NewHaivisionAdapter()
+
+	log := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
+	listener := srt.NewListenerWithAdapter(cfg, codecsCfg, reg, adapter, log)
+
 	err := listener.Start()
 	require.NoError(t, err)
 	defer listener.Stop()
@@ -277,14 +281,11 @@ func TestSRTIntegration_Metrics(t *testing.T) {
 
 	// Setup
 	ctx := context.Background()
-	logger := logrus.New()
+	logrusLogger := logrus.New()
 
 	// Create test Redis registry
 	redisClient := tests.SetupTestRedis(t)
-	reg := registry.NewRedisRegistry(redisClient, logger)
-
-	// Create buffer pool
-	bufferPool := buffer.NewBufferPool(1024*1024, 10, logger)
+	reg := registry.NewRedisRegistry(redisClient, logrusLogger)
 
 	// Create SRT listener
 	cfg := &config.SRTConfig{
@@ -303,9 +304,11 @@ func TestSRTIntegration_Metrics(t *testing.T) {
 		Supported: []string{"h264", "hevc"},
 		Preferred: "hevc",
 	}
-	listener := srt.NewListener(cfg, codecsCfg, reg, bufferPool, logger)
-	// Set faster stats update for testing (500ms instead of 5s)
-	listener.SetTestStatsInterval(500 * time.Millisecond)
+	adapter := srt.NewHaivisionAdapter()
+
+	log := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
+	listener := srt.NewListenerWithAdapter(cfg, codecsCfg, reg, adapter, log)
+
 	err := listener.Start()
 	require.NoError(t, err)
 	defer listener.Stop()
@@ -353,6 +356,7 @@ func TestSRTIntegration_Metrics(t *testing.T) {
 		assert.Greater(t, stream.PacketsReceived, int64(0))
 
 		// Check listener metrics
-		assert.Equal(t, 1, listener.GetActiveSessions())
+		assert.Equal(t, 1, listener.GetActiveConnections())
+
 	})
 }
