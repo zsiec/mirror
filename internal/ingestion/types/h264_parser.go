@@ -194,11 +194,6 @@ func (br *BitReader) ReadUE() (uint32, error) {
 		return 0, nil
 	}
 
-	// Safety check for overflow prevention
-	if leadingZeros > 31 {
-		return 0, fmt.Errorf("exponential Golomb value would overflow uint32")
-	}
-
 	// Read the value bits directly into result
 	value, err := br.ReadBits(leadingZeros)
 	if err != nil {
@@ -297,8 +292,8 @@ func (ctx *ParameterSetContext) parseSPS(data []byte) (*ParameterSet, error) {
 	// Unknown profiles are allowed - the stream might use a profile we don't recognize
 	_ = validProfiles[profileIDC]
 
-	// Skip constraint flags (8 bits)
-	_, err = br.ReadBits(8)
+	// Read constraint_set0..5_flag + reserved_zero_2bits (8 bits total)
+	constraintFlags, err := br.ReadBits(8)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read constraint flags: %w", err)
 	}
@@ -357,16 +352,14 @@ func (ctx *ParameterSetContext) parseSPS(data []byte) (*ParameterSet, error) {
 
 	// Store parsed values
 	profileU8 := uint8(profileIDC)
+	constraintU8 := uint8(constraintFlags)
 	levelU8 := uint8(levelIDC)
 	sps.ProfileIDC = &profileU8
+	sps.ConstraintFlags = &constraintU8
 	sps.LevelIDC = &levelU8
 
-	// For basic streams, try to parse resolution (simplified)
-	width, height := ctx.parseResolutionFromSPS(br, uint8(profileIDC))
-	if width > 0 && height > 0 {
-		sps.Width = &width
-		sps.Height = &height
-	}
+	// Parse remaining SPS fields including resolution
+	ctx.parseResolutionFromSPS(br, uint8(profileIDC), sps)
 
 	return sps, nil
 }
@@ -517,11 +510,34 @@ func (ctx *ParameterSetContext) parseSliceHeader(data []byte, isIDR bool) (*Fram
 		IsIDR:         isIDR,
 	}
 
+	// Parse frame_num if the referenced SPS has Log2MaxFrameNumMinus4
+	ctx.mu.RLock()
+	sps, hasSPS := ctx.spsMap[pps.ReferencedSPSID]
+	ctx.mu.RUnlock()
+
+	if hasSPS && sps.Log2MaxFrameNumMinus4 != nil {
+		frameNumBits := int(*sps.Log2MaxFrameNumMinus4) + 4
+		frameNum, err := br.ReadBits(frameNumBits)
+		if err == nil {
+			requirements.FrameNum = frameNum
+			requirements.HasFrameNum = true
+		}
+	}
+
 	return requirements, nil
 }
 
-// parseResolutionFromSPS attempts to parse resolution from SPS
-func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC uint8) (int, int) {
+// parseResolutionFromSPS parses resolution and other fields from SPS into the ParameterSet.
+func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC uint8, sps *ParameterSet) {
+	// Local resolution tracking — stored to sps on any return path
+	var width, height int
+	defer func() {
+		if width > 0 && height > 0 {
+			sps.Width = &width
+			sps.Height = &height
+		}
+	}()
+
 	// Track chroma_format_idc for crop calculation (default 1 = 4:2:0 for non-high profiles)
 	// ChromaArrayType is used for cropping and may differ when separate_colour_plane_flag == 1
 	chromaFormatIDC := uint32(1)
@@ -536,12 +552,12 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 		var err error
 		chromaFormatIDC, err = br.ReadUE()
 		if err != nil {
-			return 0, 0
+			return
 		}
 
 		// H.264 spec: chroma_format_idc shall be in the range 0 to 3
 		if chromaFormatIDC > 3 {
-			return 0, 0
+			return
 		}
 
 		// ChromaArrayType governs cropping units and is derived from chroma_format_idc.
@@ -553,7 +569,7 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 			// when this flag is 1, ChromaArrayType is set to 0
 			separateColourPlaneFlag, err := br.ReadBit()
 			if err != nil {
-				return 0, 0
+				return
 			}
 			if separateColourPlaneFlag == 1 {
 				// Per spec: ChromaArrayType = 0 when separate_colour_plane_flag == 1
@@ -566,23 +582,23 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 		// Skip bit_depth fields
 		_, err = br.ReadUE() // bit_depth_luma_minus8
 		if err != nil {
-			return 0, 0
+			return
 		}
 		_, err = br.ReadUE() // bit_depth_chroma_minus8
 		if err != nil {
-			return 0, 0
+			return
 		}
 
 		// Skip other fields...
 		_, err = br.ReadBit() // qpprime_y_zero_transform_bypass_flag
 		if err != nil {
-			return 0, 0
+			return
 		}
 
 		// seq_scaling_matrix_present_flag
 		scalingMatrixPresent, err := br.ReadBit()
 		if err != nil {
-			return 0, 0
+			return
 		}
 
 		if scalingMatrixPresent == 1 {
@@ -595,11 +611,11 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 			for i := 0; i < maxMatrices; i++ {
 				present, err := br.ReadBit()
 				if err != nil {
-					return 0, 0
+					return
 				}
 				if present == 1 {
 					if err := skipScalingList(br, i); err != nil {
-						return 0, 0
+						return
 					}
 				}
 			}
@@ -609,67 +625,68 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 	// Parse log2_max_frame_num_minus4
 	log2MaxFrameNumMinus4, err := br.ReadUE()
 	if err != nil {
-		return 0, 0
+		return
 	}
 	// H.264 spec: log2_max_frame_num_minus4 shall be in the range of 0 to 12
 	if log2MaxFrameNumMinus4 > 12 {
-		// Invalid value, abort parsing
-		return 0, 0
+		return
 	}
+	l2mfn := uint8(log2MaxFrameNumMinus4)
+	sps.Log2MaxFrameNumMinus4 = &l2mfn
 
 	// Parse pic_order_cnt_type
 	pocType, err := br.ReadUE()
 	if err != nil {
-		return 0, 0
+		return
 	}
 
 	// H.264 spec: pic_order_cnt_type shall be in the range of 0 to 2
 	if pocType > 2 {
 		// Invalid POC type, abort parsing
-		return 0, 0
+		return
 	}
 
 	// Handle different POC types
 	if pocType == 0 {
 		log2MaxPicOrderCntLsbMinus4, err := br.ReadUE()
 		if err != nil {
-			return 0, 0
+			return
 		}
 		// H.264 spec: log2_max_pic_order_cnt_lsb_minus4 shall be in the range of 0 to 12
 		if log2MaxPicOrderCntLsbMinus4 > 12 {
-			return 0, 0
+			return
 		}
 	} else if pocType == 1 {
 		// Parse POC type 1 fields per ITU-T H.264 Section 7.4.2.1
 		// delta_pic_order_always_zero_flag
 		_, err := br.ReadBit()
 		if err != nil {
-			return 0, 0
+			return
 		}
 		// offset_for_non_ref_pic
 		_, err = br.ReadSE()
 		if err != nil {
-			return 0, 0
+			return
 		}
 		// offset_for_top_to_bottom_field
 		_, err = br.ReadSE()
 		if err != nil {
-			return 0, 0
+			return
 		}
 		// num_ref_frames_in_pic_order_cnt_cycle
 		numRefFrames, err := br.ReadUE()
 		if err != nil {
-			return 0, 0
+			return
 		}
 		// H.264 spec: num_ref_frames_in_pic_order_cnt_cycle shall be in range 0 to 255
 		if numRefFrames > 255 {
-			return 0, 0
+			return
 		}
 		// Skip offset_for_ref_frame array
 		for i := uint32(0); i < numRefFrames; i++ {
 			_, err = br.ReadSE()
 			if err != nil {
-				return 0, 0
+				return
 			}
 		}
 	}
@@ -677,7 +694,7 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 	// Parse max_num_ref_frames
 	maxNumRefFrames, err := br.ReadUE()
 	if err != nil {
-		return 0, 0
+		return
 	}
 
 	// max_num_ref_frames typically <= 16; allow higher values but they may indicate corruption
@@ -686,85 +703,89 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 	// Parse gaps_in_frame_num_value_allowed_flag
 	_, err = br.ReadBit()
 	if err != nil {
-		return 0, 0
+		return
 	}
 
 	// Parse pic_width_in_mbs_minus1
 	widthInMBs, err := br.ReadUE()
 	if err != nil {
-		return 0, 0
+		return
 	}
 
 	// Validate width is reasonable (max 512 MBs = 8192 pixels)
 	if widthInMBs > 511 {
-		return 0, 0
+		return
 	}
 
 	// Parse pic_height_in_map_units_minus1
 	heightInMapUnits, err := br.ReadUE()
 	if err != nil {
-		return 0, 0
+		return
 	}
 
 	// Validate height is reasonable (max 512 map units = 8192 pixels)
 	if heightInMapUnits > 511 {
-		return 0, 0
+		return
 	}
 
 	// Calculate actual resolution
-	width := int(widthInMBs+1) * 16
-	height := int(heightInMapUnits+1) * 16
+	width = int(widthInMBs+1) * 16
+	height = int(heightInMapUnits+1) * 16
 
 	// Final sanity check
 	if width < 16 || height < 16 || width > 8192 || height > 8192 {
-		return 0, 0
+		return
 	}
 
 	// Parse frame_mbs_only_flag
 	frameMBSOnlyFlagBit, err := br.ReadBit()
 	if err != nil {
-		return width, height
+		return
 	}
 	frameMBSOnlyFlag := uint32(frameMBSOnlyFlagBit)
 
 	if frameMBSOnlyFlag == 0 {
-		height *= 2 // Field coding (interlaced)
+		// Interlaced: pic_height_in_map_units represents field height, not frame height.
+		// Per ITU-T H.264 Section 7.4.2.1.1:
+		//   FrameHeightInMbs = (2 - frame_mbs_only_flag) * PicHeightInMapUnits
+		// So for interlaced (frame_mbs_only_flag == 0), frame height = map_units * 16 * 2.
+		height *= 2
 		// mb_adaptive_frame_field_flag
 		_, err = br.ReadBit()
 		if err != nil {
-			return width, height
+			return
 		}
 	}
 
 	// Parse direct_8x8_inference_flag
 	_, err = br.ReadBit()
 	if err != nil {
-		return width, height
+		return
 	}
 
 	// Parse frame_cropping_flag
 	frameCroppingFlag, err := br.ReadBit()
 	if err != nil {
-		return width, height
+		return
 	}
 
 	if frameCroppingFlag == 1 {
 		// Parse crop values
 		cropLeft, err := br.ReadUE()
 		if err != nil {
-			return width, height
+			return
 		}
 		cropRight, err := br.ReadUE()
 		if err != nil {
-			return width, height
+			return
 		}
 		cropTop, err := br.ReadUE()
 		if err != nil {
-			return width, height
+			return
 		}
 		cropBottom, err := br.ReadUE()
 		if err != nil {
-			return width, height
+			return
 		}
 
 		// Apply crop values per ITU-T H.264 Table 6-1 and Section 7.4.2.1.1
@@ -791,7 +812,7 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 		// Validate crop values
 		if cropLeft*cropUnitX >= uint32(width) || cropRight*cropUnitX >= uint32(width) ||
 			cropTop*cropUnitY >= uint32(height) || cropBottom*cropUnitY >= uint32(height) {
-			return width, height
+			return
 		}
 
 		// Calculate actual display dimensions
@@ -799,7 +820,7 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 		height = height - int(cropTop*cropUnitY) - int(cropBottom*cropUnitY)
 	}
 
-	return width, height
+	return
 }
 
 // skipScalingList skips a scaling list in the SPS per ITU-T H.264 Section 7.3.2.1.1

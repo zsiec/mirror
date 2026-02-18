@@ -67,8 +67,8 @@ func TestSTAPAVulnerability(t *testing.T) {
 				data = append(data, 0x41, 0x42)
 				return data
 			}(),
-			expectError: false,
-			desc:        "STAP-A with zero-size NAL should skip it",
+			expectError: true,
+			desc:        "STAP-A with zero-size NAL should be rejected per RFC 6184",
 		},
 		{
 			name: "stap_a_oversized_nal",

@@ -80,10 +80,12 @@ type ParameterSet struct {
 	ErrorReason string    `json:"error_reason,omitempty"`
 
 	// H.264 SPS specific fields
-	ProfileIDC *uint8 `json:"profile_idc,omitempty"`
-	LevelIDC   *uint8 `json:"level_idc,omitempty"`
-	Width      *int   `json:"width,omitempty"`
-	Height     *int   `json:"height,omitempty"`
+	ProfileIDC            *uint8 `json:"profile_idc,omitempty"`
+	ConstraintFlags       *uint8 `json:"constraint_flags,omitempty"` // constraint_set0..5_flag + reserved_zero_2bits
+	LevelIDC              *uint8 `json:"level_idc,omitempty"`
+	Log2MaxFrameNumMinus4 *uint8 `json:"log2_max_frame_num_minus4,omitempty"`
+	Width                 *int   `json:"width,omitempty"`
+	Height                *int   `json:"height,omitempty"`
 }
 
 // PPSContext represents a PPS with its SPS dependency
@@ -94,10 +96,12 @@ type PPSContext struct {
 
 // FrameDecodingRequirements represents what parameter sets a frame needs
 type FrameDecodingRequirements struct {
-	RequiredPPSID uint8 `json:"required_pps_id"`
-	RequiredSPSID uint8 `json:"required_sps_id"`
-	SliceType     uint8 `json:"slice_type"`
-	IsIDR         bool  `json:"is_idr"`
+	RequiredPPSID uint8  `json:"required_pps_id"`
+	RequiredSPSID uint8  `json:"required_sps_id"`
+	SliceType     uint8  `json:"slice_type"`
+	IsIDR         bool   `json:"is_idr"`
+	FrameNum      uint32 `json:"frame_num"`     // H.264 frame_num from slice header
+	HasFrameNum   bool   `json:"has_frame_num"` // Whether frame_num was successfully parsed
 }
 
 // NewParameterSetContext creates a new parameter set context manager

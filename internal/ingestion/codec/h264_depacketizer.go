@@ -123,8 +123,7 @@ func (d *H264Depacketizer) handleSTAPA(payload []byte) ([][]byte, error) {
 		offset += 2
 
 		if nalSize == 0 {
-			// Skip zero-size NAL units
-			continue
+			return nalUnits, fmt.Errorf("STAP-A contains zero-size NAL unit at offset %d", offset-2)
 		}
 
 		if int(nalSize) > security.MaxNALUnitSize {

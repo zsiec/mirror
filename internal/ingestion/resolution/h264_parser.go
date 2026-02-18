@@ -162,9 +162,7 @@ func (d *Detector) parseH264SPSFull(spsData []byte) (Resolution, error) {
 		if sps.SeqScalingMatrixPresent {
 			// Skip scaling matrices for now (complex parsing)
 			maxMatrices := 8
-			if sps.ChromaFormatIdc != 3 {
-				maxMatrices = 8
-			} else {
+			if sps.ChromaFormatIdc == 3 {
 				maxMatrices = 12
 			}
 
