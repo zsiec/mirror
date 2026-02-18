@@ -124,7 +124,7 @@ func (v *PTSDTSValidator) ValidateTimestamps(pts, dts int64) *ValidationResult {
 			fmt.Sprintf("PTS wraparound detected: %d -> %d (wrap #%d)", v.lastPTS, pts, v.ptsWrapCount))
 
 		// Correct the PTS for internal tracking
-		result.CorrectedPTS = pts + int64(v.ptsWrapCount)*MaxPTSValue
+		result.CorrectedPTS = pts + int64(v.ptsWrapCount)*(MaxPTSValue+1)
 	} else if ptsDiff > MaxTimestampJump {
 		// Large forward jump - might be a discontinuity
 		result.Warnings = append(result.Warnings,
@@ -146,7 +146,7 @@ func (v *PTSDTSValidator) ValidateTimestamps(pts, dts int64) *ValidationResult {
 				fmt.Sprintf("DTS wraparound detected: %d -> %d (wrap #%d)", v.lastDTS, dts, v.dtsWrapCount))
 
 			// Correct the DTS for internal tracking
-			result.CorrectedDTS = dts + int64(v.dtsWrapCount)*MaxPTSValue
+			result.CorrectedDTS = dts + int64(v.dtsWrapCount)*(MaxPTSValue+1)
 		} else if dtsDiff < 0 && dtsDiff > -MaxTimestampJump {
 			// DTS should always be monotonic
 			result.Valid = false

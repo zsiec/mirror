@@ -197,13 +197,7 @@ func (t *TrackSyncManager) estimateFrameDuration() int64 {
 			// Use precise calculations for standard rates
 			if t.sync.TimeBase.Den == 90000 && t.sync.TimeBase.Num == 1 {
 				// Standard 90kHz timebase - use exact values
-				return 3000 // 30fps: 90000/30 = 3000
-			}
-
-			// For NTSC 29.97fps: 90000 * 1001 / 30000 = 3003
-			if t.sync.TimeBase.Den == 90000 && t.sync.TimeBase.Num == 1 {
-				// Check if this might be NTSC by looking at recent frame timing
-				// For now, default to 30fps exact
+				// 30fps: 90000/30 = 3000, NTSC 29.97fps would be 3003
 				return 3000
 			}
 

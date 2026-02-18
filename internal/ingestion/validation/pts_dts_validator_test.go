@@ -139,8 +139,9 @@ func TestPTSDTSValidator_Wraparound(t *testing.T) {
 	assert.Contains(t, result.Warnings[1], "DTS wraparound detected")
 
 	// Verify corrected values account for wraparound
-	assert.Equal(t, int64(1000)+MaxPTSValue, result.CorrectedPTS)
-	assert.Equal(t, int64(1000)+MaxPTSValue, result.CorrectedDTS)
+	// Wrap period is MaxPTSValue+1 = 2^33, not MaxPTSValue = 2^33-1
+	assert.Equal(t, int64(1000)+(MaxPTSValue+1), result.CorrectedPTS)
+	assert.Equal(t, int64(1000)+(MaxPTSValue+1), result.CorrectedDTS)
 }
 
 func TestPTSDTSValidator_LargeJump(t *testing.T) {

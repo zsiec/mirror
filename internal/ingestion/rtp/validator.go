@@ -136,7 +136,7 @@ func (v *Validator) ValidatePacket(packet *rtp.Packet) error {
 	if absGap < 0 {
 		absGap = -absGap
 	}
-	if absGap > 1 && absGap >= v.config.MaxSequenceGap {
+	if absGap > 1 && absGap > v.config.MaxSequenceGap {
 		v.mu.Unlock()
 		return ErrSequenceGap
 	}

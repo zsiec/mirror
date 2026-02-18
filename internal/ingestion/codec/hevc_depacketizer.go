@@ -7,6 +7,7 @@ import (
 
 	"github.com/pion/rtp"
 	"github.com/zsiec/mirror/internal/ingestion/memory"
+	"github.com/zsiec/mirror/internal/ingestion/security"
 )
 
 // HEVCDepacketizer handles depacketization of HEVC (H.265) RTP streams
@@ -117,6 +118,14 @@ func (d *HEVCDepacketizer) handleAggregationPacket(payload []byte) ([][]byte, er
 		nalSize := int(payload[offset])<<8 | int(payload[offset+1])
 		offset += 2
 
+		if nalSize == 0 {
+			return nalUnits, fmt.Errorf("AP contains zero-size NAL unit at offset %d", offset-2)
+		}
+
+		if nalSize > security.MaxNALUnitSize {
+			return nalUnits, fmt.Errorf(security.ErrMsgNALUnitTooLarge, nalSize, security.MaxNALUnitSize)
+		}
+
 		if offset+nalSize > len(payload) {
 			// Truncated AP packet — return what we have with error
 			if len(nalUnits) > 0 {
@@ -194,8 +203,19 @@ func (d *HEVCDepacketizer) handleFragmentationUnit(payload []byte, sequenceNumbe
 		}
 	}
 
-	// Add fragment payload
+	// Add fragment payload with size limit check
 	if len(d.fragments) > 0 {
+		// Check accumulated size before adding
+		currentSize := 0
+		for _, frag := range d.fragments {
+			currentSize += len(frag)
+		}
+		if currentSize+len(fuPayload) > security.MaxNALUnitSize {
+			d.fragments = [][]byte{}
+			d.fuInProgress = false
+			return nil, false
+		}
+
 		fragment := make([]byte, len(fuPayload))
 		copy(fragment, fuPayload)
 		d.fragments = append(d.fragments, fragment)
@@ -206,6 +226,12 @@ func (d *HEVCDepacketizer) handleFragmentationUnit(payload []byte, sequenceNumbe
 		totalSize := 0
 		for _, frag := range d.fragments {
 			totalSize += len(frag)
+		}
+
+		if totalSize > security.MaxNALUnitSize {
+			d.fragments = [][]byte{}
+			d.fuInProgress = false
+			return nil, false
 		}
 
 		nalUnit := make([]byte, 0, totalSize)

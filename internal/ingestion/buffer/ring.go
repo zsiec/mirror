@@ -188,27 +188,67 @@ func (rb *RingBuffer) Read(data []byte) (int, error) {
 	return int(read), nil
 }
 
-// ReadTimeout reads with a timeout
+// ReadTimeout reads with a timeout. Unlike the goroutine-based approach,
+// this uses a timer to broadcast on the condition variable, avoiding
+// goroutine leaks that can steal data from subsequent reads.
 func (rb *RingBuffer) ReadTimeout(data []byte, timeout time.Duration) (int, error) {
 	if timeout <= 0 {
 		return rb.Read(data)
 	}
 
-	done := make(chan struct{})
-	var n int
-	var err error
-
-	go func() {
-		n, err = rb.Read(data)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return n, err
-	case <-time.After(timeout):
-		return 0, ErrTimeout
+	if atomic.LoadInt32(&rb.closed) == 1 {
+		rb.mu.Lock()
+		if rb.written == rb.read {
+			rb.mu.Unlock()
+			return 0, ErrBufferClosed
+		}
+		rb.mu.Unlock()
 	}
+
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	// Wait for data with timeout using timer-driven broadcast
+	deadline := time.Now().Add(timeout)
+	for rb.written == rb.read && atomic.LoadInt32(&rb.closed) == 0 {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return 0, ErrTimeout
+		}
+
+		// Schedule a broadcast to wake us up when the timeout expires
+		timer := time.AfterFunc(remaining, func() {
+			rb.readCond.Broadcast()
+		})
+		rb.readCond.Wait()
+		timer.Stop()
+
+		// Check if we timed out
+		if time.Now().After(deadline) {
+			return 0, ErrTimeout
+		}
+	}
+
+	if rb.written == rb.read {
+		return 0, ErrBufferClosed
+	}
+
+	// Read available data
+	available := rb.written - rb.read
+	toRead := minInt64(int64(len(data)), available)
+
+	read := int64(0)
+	for read < toRead {
+		readSize := minInt64(toRead-read, rb.size-rb.readPos)
+		copy(data[read:read+readSize], rb.data[rb.readPos:rb.readPos+readSize])
+		rb.readPos = (rb.readPos + readSize) % rb.size
+		read += readSize
+	}
+
+	rb.read += read
+	rb.writeCond.Broadcast()
+
+	return int(read), nil
 }
 
 // Close closes the buffer and wakes up any blocked readers/writers
