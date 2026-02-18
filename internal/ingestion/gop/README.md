@@ -1,135 +1,172 @@
 # GOP Package
 
-The `gop` package manages Group of Pictures (GOP) buffering and processing for the Mirror platform. It maintains complete GOPs in memory for clean stream switching, quality adaptation, and efficient transcoding decisions.
+The `gop` package provides GOP (Group of Pictures) buffering and boundary detection for the stream ingestion system.
 
-## Overview
+## Architecture
 
-Key components:
-- **GOP Buffer**: Maintains multiple complete GOPs
-- **GOP Detector**: Identifies GOP boundaries
-- **GOP Analytics**: Provides GOP statistics
-
-## GOP Buffer
-
-Efficient GOP management:
-
-```go
-// Create buffer for 3 GOPs
-gopBuffer := gop.NewBuffer(gop.Config{
-    MaxGOPs:      3,
-    MaxGOPSize:   300,  // frames
-    MaxDuration:  10 * time.Second,
-})
-
-// Add frames
-gopBuffer.AddFrame(frame, frameInfo)
-
-// Get current GOP
-currentGOP := gopBuffer.GetCurrent()
-
-// Get all buffered GOPs
-allGOPs := gopBuffer.GetAll()
-
-// Get specific GOP by index
-gop := gopBuffer.GetGOP(0)
+```
+VideoFrames → Detector (boundary detection) → closed GOP
+                                                  ↓
+                                           Buffer (indexed storage)
+                                                  ↓
+                                     Pressure-based frame dropping
 ```
 
-## GOP Detection
+## Detector
 
-Identify GOP boundaries:
+The `Detector` tracks GOP boundaries by watching for keyframes.
 
 ```go
-detector := gop.NewDetector()
+detector := gop.NewDetector(streamID)
 
-// Check if frame starts new GOP
-if detector.IsGOPStart(frame) {
-    // New GOP boundary
-    gopBuffer.StartNewGOP()
-}
+// Returns the *closed* previous GOP when a new keyframe starts a new GOP.
+// Returns nil for non-keyframe frames.
+closedGOP := detector.ProcessFrame(frame)
 
-// Get GOP structure
-structure := detector.AnalyzeGOP(frames)
-fmt.Printf("GOP size: %d, I: %d, P: %d, B: %d\n",
-    structure.Size,
-    structure.IFrames,
-    structure.PFrames,
-    structure.BFrames,
-)
+currentGOP := detector.GetCurrentGOP()
+recentGOPs := detector.GetRecentGOPs()    // last 10 GOPs (copy)
+stats := detector.GetStatistics()          // GOPStatistics
 ```
 
-## GOP Types
+### GOP Completion Criteria
+
+A GOP is marked complete when any of:
+1. **Temporal duration** reaches 0.5s-2s (PTS-based, 90kHz clock)
+2. **Structure size** is met (if `GOP.Structure.Size` is set)
+3. **Frame count** reaches 120 (safety threshold, also forces closure)
+
+A GOP is **closed** when the next keyframe arrives (via `ProcessFrame`).
+
+### GOPStatistics
 
 ```go
-type GOPType int
-
-const (
-    GOPTypeClosed GOPType = iota // Closed GOP (independent)
-    GOPTypeOpen                  // Open GOP (references previous)
-)
-
-type GOP struct {
-    ID        string
-    Type      GOPType
-    Frames    []*Frame
-    Duration  time.Duration
-    StartPTS  int64
-    EndPTS    int64
-    Keyframe  *Frame
+type GOPStatistics struct {
+    StreamID         string
+    TotalGOPs        uint64
+    CurrentGOPFrames int
+    CurrentGOPSize   int64
+    AverageGOPSize   float64
+    AverageDuration  time.Duration
+    IFrameRatio      float64
+    PFrameRatio      float64
+    BFrameRatio      float64
 }
 ```
 
-## GOP Analytics
+## Buffer
 
-Analyze GOP characteristics:
+The `Buffer` maintains an indexed collection of complete GOPs with configurable limits.
 
 ```go
-analytics := gop.NewAnalytics(gopBuffer)
+buf := gop.NewBuffer(streamID, gop.BufferConfig{
+    MaxGOPs:     15,
+    MaxBytes:    100 * 1024 * 1024,  // 100MB
+    MaxDuration: 5 * time.Second,
+    Codec:       types.CodecH264,
+}, logger)
+```
 
-// Get average GOP size
-avgSize := analytics.AverageGOPSize()
+### BufferConfig
 
-// Get keyframe interval
-interval := analytics.KeyframeInterval()
-
-// Check for irregular GOPs
-irregular := analytics.FindIrregularGOPs()
-for _, g := range irregular {
-    log.Warnf("Irregular GOP: %s, size: %d", g.ID, len(g.Frames))
+```go
+type BufferConfig struct {
+    MaxGOPs     int             // Maximum number of GOPs to buffer
+    MaxBytes    int64           // Maximum buffer size in bytes
+    MaxDuration time.Duration   // Maximum time span of buffered content
+    Codec       types.CodecType // Video codec for parameter set parsing
 }
 ```
 
-## Features
+### Buffer API
 
-- **Complete GOP buffering** for clean switching
-- **GOP boundary detection** across all codecs
-- **Duration tracking** for timing accuracy
-- **Memory efficient** with configurable limits
-- **Analytics support** for quality monitoring
-
-## Usage Patterns
-
-### Stream Switching
 ```go
-// Wait for GOP boundary before switching
-if detector.IsGOPStart(frame) {
-    // Safe to switch streams
-    switcher.SwitchStream(newStreamID)
+buf.AddGOP(gop)                               // Add a complete/closed GOP
+buf.GetGOP(gopID uint64) *types.GOP            // Lookup by GOP ID
+buf.GetFrame(frameID uint64) *types.VideoFrame // Lookup by frame ID
+buf.GetRecentGOPs(limit int) []*types.GOP      // Most recent GOPs (chronological)
+buf.GetLatestIFrame() *types.VideoFrame        // Most recent keyframe
+buf.Clear()                                     // Remove all GOPs
+
+// Pressure-based frame dropping
+dropped := buf.DropFramesForPressure(pressure float64)
+dropped := buf.DropFramesFromGOP(gopID uint64, startIndex int)
+
+// Callbacks
+buf.SetGOPDropCallback(func(*types.GOP, *types.ParameterSetContext))
+
+// Statistics
+stats := buf.GetStatistics()  // BufferStatistics
+```
+
+### Pressure-Based Dropping Strategy
+
+`DropFramesForPressure(pressure)` uses tiered strategies:
+
+| Pressure | Action |
+|----------|--------|
+| < 0.5 | No dropping |
+| 0.5-0.7 | Drop B-frames from 2 oldest GOPs |
+| 0.7-0.85 | Drop all B-frames + P-frames from oldest GOP |
+| 0.85-0.95 | Drop entire old GOPs (keep keyframes) |
+| >= 0.95 | Drop entire old GOPs including keyframes (keep at least 1 GOP) |
+
+### BufferStatistics
+
+```go
+type BufferStatistics struct {
+    StreamID      string
+    GOPCount      int
+    FrameCount    int
+    IFrames       int
+    PFrames       int
+    BFrames       int
+    TotalBytes    int64
+    Duration      time.Duration
+    OldestTime    time.Time
+    NewestTime    time.Time
+    TotalGOPs     uint64
+    DroppedGOPs   uint64
+    DroppedFrames uint64
 }
 ```
 
-### Quality Adaptation
+### Buffer Limits Enforcement
+
+When a GOP is added, limits are enforced in order:
+1. GOP count (`MaxGOPs`)
+2. Byte size (`MaxBytes`) - keeps at least 1 GOP
+3. Duration (`MaxDuration`) - removes GOPs older than cutoff
+
+Before dropping a GOP, the `onGOPDrop` callback fires (used for parameter set preservation).
+
+## Parameter Set Extraction
+
+The buffer automatically extracts H.264 parameter sets (SPS/PPS) from NAL units in each added GOP. These are cached in a `types.ParameterSetContext` for use during stream recovery.
+
+### Exported Utilities
+
 ```go
-// Buffer GOPs for quality decisions
-if gopBuffer.Count() >= 2 {
-    // Analyze GOPs for quality adaptation
-    quality := analyzer.DetermineQuality(gopBuffer.GetAll())
-    transcoder.SetQuality(quality)
+gop.ExtractNALTypeFromData(data []byte) uint8  // Extract NAL type, handling start codes
+buf.ExtractParameterSetFromNAL(paramContext, nalUnit, nalType, gopID) bool
+```
+
+## FrameLocation
+
+```go
+type FrameLocation struct {
+    GOP      *types.GOP
+    Position int
 }
 ```
 
-## Related Documentation
+Used internally for O(1) frame lookups by frame ID.
 
-- [Frame Processing](../frame/README.md)
-- [Codec Support](../codec/README.md)
-- [Ingestion Overview](../README.md)
-- [Main Documentation](../../../README.md)
+## Files
+
+- `buffer.go`: Buffer, BufferConfig, BufferStatistics, FrameLocation, parameter set extraction
+- `detector.go`: Detector, GOPStatistics, GOP completion logic
+- `buffer_test.go`, `detector_test.go`: Core tests
+- `buffer_duration_test.go`: Duration limit tests
+- `buffer_frame_index_test.go`: Frame index integrity tests
+- `buffer_nil_safety_test.go`: Nil safety tests
+- `gop_duration_test.go`: GOP duration calculation tests

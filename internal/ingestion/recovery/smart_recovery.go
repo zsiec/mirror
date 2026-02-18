@@ -384,7 +384,9 @@ func (h *SmartRecoveryHandler) UpdateRecoveryMetrics(duration time.Duration, suc
 
 	// Update success rate
 	totalAttempts := float64(h.recoveryCount.Load())
-	if success {
+	if totalAttempts == 0 {
+		// No attempts yet, nothing to update
+	} else if success {
 		h.successRate = (h.successRate*(totalAttempts-1) + 1) / totalAttempts
 	} else {
 		h.successRate = (h.successRate * (totalAttempts - 1)) / totalAttempts

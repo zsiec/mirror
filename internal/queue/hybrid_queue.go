@@ -137,18 +137,19 @@ func (q *HybridQueue) writeToDisk(data []byte) error {
 	q.diskMu.Lock()
 	defer q.diskMu.Unlock()
 
-	// Write length-prefixed message
-	length := uint32(len(data))
-	if err := binary.Write(q.diskWriter, binary.BigEndian, length); err != nil {
-		return fmt.Errorf("failed to write length: %w", err)
-	}
+	// Build complete record (length prefix + data) in a single buffer to prevent
+	// partial writes that leave the disk file in a corrupted state
+	recordSize := 4 + len(data)
+	record := make([]byte, recordSize)
+	binary.BigEndian.PutUint32(record[:4], uint32(len(data)))
+	copy(record[4:], data)
 
-	if _, err := q.diskWriter.Write(data); err != nil {
-		return fmt.Errorf("failed to write data: %w", err)
+	if _, err := q.diskWriter.Write(record); err != nil {
+		return fmt.Errorf("failed to write record: %w", err)
 	}
 
 	q.depth.Add(1)
-	q.diskBytes.Add(int64(len(data) + 4))
+	q.diskBytes.Add(int64(recordSize))
 
 	// Flush always for now to ensure data is available for reading
 	if err := q.diskWriter.Flush(); err != nil {
@@ -160,7 +161,18 @@ func (q *HybridQueue) writeToDisk(data []byte) error {
 
 // Dequeue removes and returns data from the queue
 func (q *HybridQueue) Dequeue() ([]byte, error) {
-	return q.DequeueTimeout(0) // Block indefinitely
+	// Use short internal timeout so we periodically check for disk data
+	// that may not have been pumped to memory yet (DequeueTimeout checks disk on timeout)
+	for {
+		if q.closed.Load() && q.depth.Load() == 0 {
+			return nil, ErrQueueClosed
+		}
+		data, err := q.DequeueTimeout(100 * time.Millisecond)
+		if err == nil {
+			return data, nil
+		}
+		// On timeout or other transient error, loop back and retry
+	}
 }
 
 // DequeueTimeout removes and returns data from the queue with timeout
@@ -320,6 +332,8 @@ func (q *HybridQueue) readFromDisk() ([]byte, error) {
 
 	// Sanity check
 	if length > 10*1024*1024 { // 10MB max message size
+		// Advance past the corrupted length header to avoid infinite retry loop
+		q.readOffset += 4
 		return nil, ErrCorruptedData
 	}
 

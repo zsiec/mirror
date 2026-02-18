@@ -12,6 +12,7 @@ const (
 	// Maximum counts to prevent infinite loops
 	MaxNALUnitsPerFrame = 1000 // Max NAL units in a single frame
 	MaxOBUsPerFrame     = 500  // Max OBUs in AV1 frame
+	MaxHEVCParamArrays  = 16   // Max parameter set arrays in HEVC descriptor (VPS+SPS+PPS+SEI+extras)
 
 	// Parsing limits
 	MaxParseDepth  = 10 // Max recursion depth for parsing

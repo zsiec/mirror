@@ -136,12 +136,12 @@ func (d *AV1Depacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 	} else if !zBit && !yBit {
 		// Non-fragmented packet: complete OBU element(s)
 		if wField == 0 {
-			// Single complete OBU
-			if len(payload) > 0 {
-				obu := make([]byte, len(payload))
-				copy(obu, payload)
-				d.temporalUnitBuf = append(d.temporalUnitBuf, obu)
+			// W=0: variable number of OBU elements, each prefixed with LEB128 length
+			obuList, err := d.processLEB128PrefixedOBUs(payload)
+			if err != nil {
+				return obus, err
 			}
+			d.temporalUnitBuf = append(d.temporalUnitBuf, obuList...)
 		} else {
 			// Multiple OBU elements (W=1,2,3)
 			// Per spec: first W-1 OBUs have LEB128 length prefix, last extends to end
@@ -155,17 +155,49 @@ func (d *AV1Depacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 
 	// If this is a complete temporal unit (not fragmented) and we have buffered OBUs
 	if !d.fragmentedOBU && len(d.temporalUnitBuf) > 0 {
-		// Check if we have a temporal delimiter
-		for _, obu := range d.temporalUnitBuf {
+		// Check if we have a temporal delimiter — it marks the START of a new TU
+		for i, obu := range d.temporalUnitBuf {
 			if len(obu) > 0 {
 				obuType, _ := d.parseOBUHeader(obu)
-				if obuType == obuTemporalDelimiter {
-					// Found temporal delimiter, flush buffer
-					obus = append(obus, d.temporalUnitBuf...)
-					d.temporalUnitBuf = [][]byte{}
+				if obuType == obuTemporalDelimiter && i > 0 {
+					// Flush OBUs before the TD (they belong to the previous TU)
+					obus = append(obus, d.temporalUnitBuf[:i]...)
+					// Start new buffer with the TD and everything after
+					remaining := make([][]byte, len(d.temporalUnitBuf[i:]))
+					copy(remaining, d.temporalUnitBuf[i:])
+					d.temporalUnitBuf = remaining
 					break
 				}
 			}
+		}
+	}
+
+	return obus, nil
+}
+
+// processLEB128PrefixedOBUs handles W=0 case: variable number of LEB128-prefixed OBU elements
+func (d *AV1Depacketizer) processLEB128PrefixedOBUs(payload []byte) ([][]byte, error) {
+	var obus [][]byte
+	offset := 0
+
+	for offset < len(payload) {
+		// Parse LEB128 encoded length
+		length, bytesRead, err := security.ReadLEB128(payload[offset:])
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse OBU length at offset %d: %w", offset, err)
+		}
+		offset += bytesRead
+
+		// Validate length fits in remaining payload
+		if length > uint64(len(payload)-offset) {
+			return nil, fmt.Errorf("OBU length %d exceeds remaining payload size %d", length, len(payload)-offset)
+		}
+
+		if length > 0 {
+			obu := make([]byte, length)
+			copy(obu, payload[offset:offset+int(length)])
+			obus = append(obus, obu)
+			offset += int(length)
 		}
 	}
 
@@ -181,15 +213,16 @@ func (d *AV1Depacketizer) processMultipleOBUs(payload []byte, count int) ([][]by
 
 	// First W-1 OBUs have length prefix
 	for i := 0; i < count-1 && offset < len(payload); i++ {
-		// Parse LEB128 encoded length
-		length, bytesRead, err := d.parseLEB128(payload[offset:])
+		// Parse LEB128 encoded length using security-hardened parser
+		length, bytesRead, err := security.ReadLEB128(payload[offset:])
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse OBU length: %w", err)
 		}
 		offset += bytesRead
 
-		if offset+int(length) > len(payload) {
-			return nil, fmt.Errorf("OBU length exceeds payload size")
+		// Validate length fits in remaining payload before int cast
+		if length > uint64(len(payload)-offset) {
+			return nil, fmt.Errorf("OBU length %d exceeds remaining payload size %d", length, len(payload)-offset)
 		}
 
 		// Extract OBU
@@ -227,25 +260,6 @@ func (d *AV1Depacketizer) parseOBUHeader(data []byte) (uint8, error) {
 
 	obuType := (header >> 3) & 0x0F
 	return obuType, nil
-}
-
-// parseLEB128 parses a LEB128 (Little Endian Base 128) encoded integer
-func (d *AV1Depacketizer) parseLEB128(data []byte) (uint64, int, error) {
-	var value uint64
-	var bytesRead int
-
-	for i := 0; i < 8 && i < len(data); i++ {
-		b := data[i]
-		value |= uint64(b&0x7F) << (i * 7)
-		bytesRead++
-
-		if (b & 0x80) == 0 {
-			// Most significant bit is 0, this is the last byte
-			return value, bytesRead, nil
-		}
-	}
-
-	return 0, 0, errors.New("LEB128 value too large or incomplete")
 }
 
 // Reset clears the depacketizer state
@@ -331,22 +345,17 @@ func (d *AV1DepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, e
 		return nil, err
 	}
 
-	// If we got complete OBUs, release fragment memory
+	// If we got complete OBUs, release all accumulated memory minus actual output size
 	if len(obus) > 0 {
-		// Calculate actual memory used
 		actualSize := int64(0)
 		for _, obu := range obus {
 			actualSize += int64(len(obu))
 		}
 
-		// Release excess memory
-		if estimatedSize > actualSize {
-			excessMemory := estimatedSize - actualSize
-			d.memController.ReleaseMemory(d.streamID, excessMemory)
-			d.currentUsage -= excessMemory
+		// Release the difference between what we requested and what we're actually using
+		if d.currentUsage > actualSize {
+			d.memController.ReleaseMemory(d.streamID, d.currentUsage-actualSize)
 		}
-
-		// Reset fragment memory tracking
 		d.currentUsage = 0
 	}
 

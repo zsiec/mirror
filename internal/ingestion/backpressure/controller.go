@@ -195,10 +195,11 @@ func (c *Controller) adjustRate() {
 		c.adjustmentCount.Add(1)
 		c.mu.Lock()
 		c.lastAdjustment = time.Now()
+		onRateChange := c.onRateChange // Snapshot callback under lock
 		c.mu.Unlock()
 
-		if c.onRateChange != nil {
-			c.onRateChange(newRate)
+		if onRateChange != nil {
+			onRateChange(newRate)
 		}
 
 		c.logger.WithFields(map[string]interface{}{
@@ -391,11 +392,15 @@ func (c *Controller) ShouldDropGOP(pressure float64) bool {
 
 // SetRateChangeCallback sets the callback for rate changes
 func (c *Controller) SetRateChangeCallback(callback func(newRate int64)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.onRateChange = callback
 }
 
 // SetGOPDropCallback sets the callback for GOP drops
 func (c *Controller) SetGOPDropCallback(callback func(gopID uint64)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.onDropGOP = callback
 }
 
@@ -426,7 +431,7 @@ func (c *Controller) GetStatistics() Statistics {
 		MaxRate:          c.maxRate,
 	}
 
-	if c.gopStats != nil {
+	if c.gopStats != nil && c.avgGOPSize > 0 {
 		stats.GOPsPerSecond = float64(c.currentRate.Load()) / float64(c.avgGOPSize)
 	}
 

@@ -23,33 +23,35 @@ type VideoFrame struct {
     ID          uint64
     StreamID    string
     FrameNumber uint64
-    
+
     // Frame data
     NALUnits  []NALUnit
     TotalSize int
-    
+
     // Timing information
-    PTS          int64     // Presentation timestamp
-    DTS          int64     // Decode timestamp  
-    Duration     int64     // Frame duration
-    CaptureTime  time.Time // Network reception time
-    CompleteTime time.Time // Assembly completion time
-    
+    PTS              int64     // Presentation timestamp
+    DTS              int64     // Decode timestamp
+    Duration         int64     // Frame duration
+    CaptureTime      time.Time // Network reception time
+    CompleteTime     time.Time // Assembly completion time
+    PresentationTime time.Time // Computed presentation wall-clock time
+
     // Frame classification
-    Type  FrameType  // I, P, B, IDR, SPS, PPS, etc.
+    Type  FrameType  // I, P, B, IDR, SPS, PPS, VPS, SEI, AUD, CRA, BLA
     Flags FrameFlags // Keyframe, reference, corrupted, etc.
-    
+
     // GOP context
     GOPId       uint64
     GOPPosition int
-    
+
     // Dependencies
     References   []uint64 // Frames this depends on
     ReferencedBy []uint64 // Frames that depend on this
-    
+
     // Quality metrics
-    QP   int     // Quantization parameter
-    PSNR float64 // Peak signal-to-noise ratio
+    QP        int         // Quantization parameter
+    PSNR      float64     // Peak signal-to-noise ratio
+    CodecData interface{} // Codec-specific data
 }
 ```
 
@@ -101,27 +103,30 @@ The `TimestampedPacket` struct represents network packets with full timing conte
 type TimestampedPacket struct {
     // Raw data
     Data []byte
-    
+
     // Timing
-    CaptureTime time.Time // Network arrival
-    PTS         int64     // Presentation timestamp
-    DTS         int64     // Decode timestamp
-    Duration    int64     // Packet duration
-    
+    CaptureTime      time.Time // Network arrival
+    PTS              int64     // Presentation timestamp
+    DTS              int64     // Decode timestamp
+    Duration         int64     // Packet duration
+    PresentationTime time.Time // Computed presentation wall-clock time
+
     // Network context
-    StreamID string
-    SSRC     uint32 // RTP SSRC
-    SeqNum   uint16 // RTP sequence number
-    
+    StreamID   string
+    SSRC       uint32 // RTP SSRC
+    SeqNum     uint16 // RTP sequence number
+    SourceAddr string // Source address
+
     // Classification
     Type  PacketType  // Video/Audio/Data
     Codec CodecType   // H.264, HEVC, etc.
     Flags PacketFlags // Frame boundaries, priority
-    
+
     // Frame context
     FrameNumber   uint64
     PacketInFrame int
     TotalPackets  int
+    ArrivalDelta  int64 // Delta from previous packet arrival
 }
 ```
 
@@ -140,6 +145,8 @@ const (
     FrameTypeVPS // Video Parameter Set (HEVC)
     FrameTypeSEI // Supplemental Enhancement Info
     FrameTypeAUD // Access Unit Delimiter
+    FrameTypeCRA // Clean Random Access (HEVC)
+    FrameTypeBLA // Broken Link Access (HEVC)
 )
 ```
 
@@ -166,22 +173,35 @@ The package defines comprehensive codec support:
 
 ```go
 const (
+    CodecUnknown // Undetected codec
+
     // Modern video codecs
     CodecH264   // Most widely supported
     CodecHEVC   // H.265, higher efficiency
     CodecAV1    // Next-generation, best compression
+    CodecVP8    // WebRTC video
+    CodecVP9    // WebRTC video
     CodecJPEGXS // Low-latency, high-quality
-    
+
     // Audio codecs
     CodecAAC    // Advanced Audio Coding
     CodecOpus   // Modern, efficient
+    CodecMP3    // MPEG-1 Audio Layer 3
+    CodecPCM    // Uncompressed PCM
     CodecG711   // Traditional telephony
     CodecG722   // Wideband audio
-    
-    // Legacy/specialized
-    CodecVP8, CodecVP9  // WebRTC
-    CodecH261, CodecH263 // Legacy video
-    CodecMP2T           // MPEG Transport Stream
+    CodecL16    // Linear 16-bit audio
+    CodecVorbis // Ogg Vorbis
+    CodecSpeex  // Speech codec
+
+    // Legacy video
+    CodecH261   // Legacy video
+    CodecH263   // Legacy video
+    CodecJPEG   // Motion JPEG
+    CodecMPV    // MPEG video
+
+    // Container formats
+    CodecMP2T   // MPEG Transport Stream
 )
 ```
 
@@ -255,7 +275,9 @@ const (
     PacketFlagFrameEnd    // Last packet of frame
     PacketFlagDiscardable // Can be dropped (B-frame)
     PacketFlagGOPStart    // Start of new GOP
+    PacketFlagFlush       // Flush signal
     PacketFlagCorrupted   // Corruption detected
+    PacketFlagPriority    // High priority packet
 )
 ```
 

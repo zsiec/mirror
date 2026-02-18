@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zsiec/mirror/internal/ingestion/security"
 	"github.com/zsiec/mirror/internal/ingestion/validation"
 )
 
@@ -522,11 +523,17 @@ func (p *Parser) parsePMTWithExtractor(payload []byte, extractor ParameterSetExt
 
 	// **NEW: Parse program-level descriptors for parameter sets**
 	if programInfoLength > 0 && extractor != nil {
+		if 12+programInfoLength > len(data) {
+			return
+		}
 		p.extractParameterSetsFromDescriptors(data[12:12+programInfoLength], 0, extractor)
 	}
 
 	// Start of elementary streams
 	streamOffset := 12 + programInfoLength
+	if streamOffset > len(data) {
+		return
+	}
 	streamListEnd := 3 + sectionLength - 4 // Exclude CRC
 
 	// Parse elementary streams
@@ -802,11 +809,18 @@ func (p *Parser) extractHEVCParameterSetsFromDescriptor(data []byte) [][]byte {
 		return parameterSets
 	}
 
-	numArrays := data[offset]
+	numArrays := int(data[offset])
 	offset++
 
+	// Cap array count to prevent CPU exhaustion from crafted descriptors
+	if numArrays > security.MaxHEVCParamArrays {
+		numArrays = security.MaxHEVCParamArrays
+	}
+
+	totalNALs := 0
+
 	// Process parameter set arrays (VPS, SPS, PPS)
-	for i := 0; i < int(numArrays) && offset+3 <= len(data); i++ {
+	for i := 0; i < numArrays && offset+3 <= len(data); i++ {
 		_ = data[offset] & 0x3F // Skip NAL unit type
 		offset++
 
@@ -814,6 +828,10 @@ func (p *Parser) extractHEVCParameterSetsFromDescriptor(data []byte) [][]byte {
 		offset += 2
 
 		for j := 0; j < numNalUnits && offset+2 <= len(data); j++ {
+			if totalNALs >= security.MaxNALUnitsPerFrame {
+				return parameterSets
+			}
+
 			nalLength := int(data[offset])<<8 | int(data[offset+1])
 			offset += 2
 
@@ -827,6 +845,7 @@ func (p *Parser) extractHEVCParameterSetsFromDescriptor(data []byte) [][]byte {
 				copy(nalWithHeader[4:], data[offset:offset+nalLength])
 				parameterSets = append(parameterSets, nalWithHeader)
 				offset += nalLength
+				totalNALs++
 			}
 		}
 	}
@@ -890,8 +909,11 @@ func (p *Parser) assemblePESPacket(pkt *Packet, extractor ParameterSetExtractor)
 
 	// Validate PES continuation
 	if err := p.pesValidator.ValidatePESContinuation(pkt.PID, len(pkt.Payload)); err != nil {
-		// Log validation errors but continue processing
-		// Real streams may have issues we need to handle gracefully
+		// Reset the PES buffer on validation failure to avoid assembling
+		// corrupted data from discontinuous packets
+		delete(p.pesBuffer, pkt.PID)
+		p.pesStarted[pkt.PID] = false
+		return
 	}
 
 	// Append payload to buffer

@@ -293,8 +293,8 @@ func (l *Listener) routePackets() {
 
 				l.mu.Lock()
 				// Check again in case another goroutine created it
-				session, exists := l.sessions[sessionKey]
-				if exists {
+				if existingSession, alreadyExists := l.sessions[sessionKey]; alreadyExists {
+					session = existingSession
 					l.mu.Unlock()
 					newSession.Stop()
 					l.connLimiter.Release(streamID)
@@ -308,6 +308,22 @@ func (l *Listener) routePackets() {
 					if l.handler != nil {
 						// Handler will manage the session
 						go func() {
+							defer func() {
+								if r := recover(); r != nil {
+									l.logger.WithField("stream_id", streamID).
+										WithField("panic", fmt.Sprintf("%v", r)).
+										Error("Panic in session handler goroutine")
+								}
+								// Clean up when handler returns or context is cancelled
+								l.mu.Lock()
+								delete(l.sessions, sessionKey)
+								l.mu.Unlock()
+								if newSession.MarkResourcesReleased() {
+									l.connLimiter.Release(streamID)
+									l.bandwidthManager.ReleaseBandwidth(streamID)
+								}
+							}()
+
 							// Create a channel to signal handler completion
 							done := make(chan struct{})
 							var handlerErr error
@@ -329,13 +345,6 @@ func (l *Listener) routePackets() {
 								newSession.Stop()
 								l.logger.WithField("stream_id", streamID).Info("Handler cancelled due to listener shutdown")
 							}
-
-							// Clean up when handler returns or context is cancelled
-							l.mu.Lock()
-							delete(l.sessions, sessionKey)
-							l.mu.Unlock()
-							l.connLimiter.Release(streamID)
-							l.bandwidthManager.ReleaseBandwidth(streamID)
 						}()
 					} else {
 						// Default behavior - just start the session
@@ -348,10 +357,6 @@ func (l *Listener) routePackets() {
 						"ssrc":        packet.SSRC,
 					}).Info("New RTP session created")
 				}
-			} else {
-				l.mu.RLock()
-				session = l.sessions[sessionKey]
-				l.mu.RUnlock()
 			}
 
 			// Forward packet to session for processing
@@ -380,9 +385,11 @@ func (l *Listener) cleanupSessions() {
 					l.logger.WithField("stream_id", session.streamID).Info("RTP session timed out")
 					session.Stop()
 					delete(l.sessions, key)
-					// Release resources
-					l.connLimiter.Release(session.streamID)
-					l.bandwidthManager.ReleaseBandwidth(session.streamID)
+					// Release resources (only if not already released by handler goroutine)
+					if session.MarkResourcesReleased() {
+						l.connLimiter.Release(session.streamID)
+						l.bandwidthManager.ReleaseBandwidth(session.streamID)
+					}
 				} else {
 					activeCount++
 				}

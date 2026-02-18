@@ -141,7 +141,7 @@ func TestRedisRegistry_Close(t *testing.T) {
 		Addr: "localhost:6379",
 	})
 
-	reg := registry.NewRedisRegistry(redisClient, logrus.New())
+	reg := registry.NewRedisRegistry(redisClient, logrus.New(), 5*time.Minute)
 
 	// Close the registry
 	err := reg.Close()

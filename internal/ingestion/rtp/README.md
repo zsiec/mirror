@@ -1,515 +1,252 @@
 # RTP Package
 
-The RTP package implements Real-time Transport Protocol (RTP) support for video streaming ingestion. It provides comprehensive RTP packet processing, session management, and stream validation capabilities.
+The `rtp` package implements RTP (Real-time Transport Protocol) stream ingestion for the Mirror platform. It handles UDP packet reception, SSRC-based session management, packet validation with B-frame awareness, jitter buffering, and packet loss tracking.
 
-## Overview
+## Architecture
 
-RTP (Real-time Transport Protocol) is a network protocol for delivering audio and video over IP networks. This package handles:
-
-- **RTP Packet Parsing**: Complete RFC 3550 implementation
-- **Session Management**: Multi-stream RTP session handling
-- **Sequence Validation**: Packet loss detection and reordering
-- **Timestamp Processing**: RTP timestamp to PTS conversion
-- **RTCP Support**: Real-time Control Protocol handling (future)
+```
+UDP Socket (RTP)          UDP Socket (RTCP)
+       │                        │
+       ▼                        ▼
+┌─────────────┐          ┌─────────────┐
+│  routePackets│         │ handleRTCP  │
+│  (pion/rtp)  │         │ (SSRC match)│
+└──────┬──────┘          └──────┬──────┘
+       │ validated               │
+       ▼                         ▼
+┌──────────────────────────────────────┐
+│   Sessions  map[string]*Session      │
+│   key: "{addr}_{SSRC}"              │
+├──────────────────────────────────────┤
+│ Per-session:                         │
+│  • Codec detection state machine     │
+│  • JitterBuffer (heap-based)         │
+│  • PacketLossTracker                 │
+│  • Depacketizer (codec-specific)     │
+│  • NAL callback to adapter layer     │
+└──────────────────────────────────────┘
+```
 
 ## Core Components
 
-### RTP Listener
+### Listener
 
-The `Listener` manages incoming RTP streams on UDP sockets:
+Accepts RTP/RTCP packets on UDP sockets and routes them to sessions.
 
 ```go
-type Listener struct {
-    addr        *net.UDPAddr     // Listen address
-    conn        *net.UDPConn     // UDP connection
-    sessions    map[uint32]*Session // Active sessions by SSRC
-    sessionsMu  sync.RWMutex     // Session map protection
-    metrics     *Metrics         // Performance metrics
-    config      *Config          // Configuration
+listener := rtp.NewListener(cfg, codecsCfg, reg, logger)
+listener.SetSessionHandler(func(session *rtp.Session) error {
+    return manager.HandleRTPSession(session)
+})
+err := listener.Start()
+```
+
+#### Constructor
+
+```go
+func NewListener(cfg *config.RTPConfig, codecsCfg *config.CodecsConfig,
+    reg registry.Registry, logger logger.Logger) *Listener
+```
+
+Creates a connection limiter (5 per stream, 100 total), a bandwidth manager (1 Gbps), and a `Validator` accepting dynamic payload types 96-127 with `MaxSequenceGap: 100` and `MaxTimestampJump: 90000 * 60` (60s at 90kHz).
+
+#### Key Methods
+
+| Method | Description |
+|--------|-------------|
+| `Start() error` | Binds RTP + RTCP UDP sockets, starts routing and cleanup goroutines |
+| `Stop() error` | Stops listener and all sessions |
+| `SetSessionHandler(SessionHandler)` | Sets callback invoked for new sessions |
+| `GetActiveSessions() int` | Returns count of active sessions |
+| `GetSessionStats() map[string]SessionStats` | Returns per-session statistics |
+| `TerminateStream(streamID) error` | Terminates a specific session |
+| `PauseStream(streamID) error` | Pauses packet processing for a session |
+| `ResumeStream(streamID) error` | Resumes a paused session |
+
+#### Packet Routing
+
+`routePackets` reads from a 65535-byte UDP buffer, parses via `pion/rtp`, validates with the `Validator`, and creates sessions keyed by `"{addr}_{SSRC}"`. Session cleanup runs on a configurable interval (default 10s) removing inactive sessions.
+
+### Session
+
+Manages an individual RTP stream identified by SSRC and source address.
+
+```go
+session, err := rtp.NewSession(streamID, remoteAddr, ssrc, registry, codecsCfg, logger)
+```
+
+#### Constructor
+
+```go
+func NewSession(streamID string, remoteAddr *net.UDPAddr, ssrc uint32,
+    reg registry.Registry, codecsCfg *config.CodecsConfig, logger logger.Logger) (*Session, error)
+```
+
+Creates a codec detector and depacketizer factory, initializes a `JitterBuffer(100, 100ms, 90000)`, a `PacketLossTracker`, and registers the stream in the registry.
+
+#### Codec Detection State Machine
+
+Sessions use a state machine for codec detection:
+
+```go
+const (
+    CodecStateUnknown   // Initial state
+    CodecStateDetecting // Detection in progress
+    CodecStateDetected  // Codec detected, depacketizer created
+    CodecStateError     // Detection failed
+    CodecStateTimeout   // Detection timed out
+)
+```
+
+#### Key Methods
+
+| Method | Description |
+|--------|-------------|
+| `ProcessPacket(packet *rtp.Packet)` | Main packet processing entry point |
+| `Start()` / `Stop()` | Lifecycle management |
+| `Pause()` / `Resume()` | Pauses/resumes packet processing |
+| `IsActive() bool` | True if last packet received within timeout |
+| `GetStats() SessionStats` | Returns session statistics |
+| `SetNALCallback(func([][]byte) error)` | Sets callback for depacketized NAL units |
+| `SetSDPInfo(mediaFormat, encodingName string, clockRate uint32)` | Sets SDP-derived codec info |
+| `GetRecoveryStats() RecoveryStats` | Returns packet loss/recovery statistics |
+| `GetLostPackets(maxCount int) []uint16` | Returns recently lost sequence numbers |
+
+#### SessionStats
+
+```go
+type SessionStats struct {
+    PacketsReceived   uint64
+    BytesReceived     uint64
+    LastPayloadType   uint8
+    PacketsLost       uint64
+    RateLimitDrops    uint64
+    BufferOverflows   uint64
+    LastSequence      uint16
+    InitialSequence   uint16
+    Jitter            float64
+    LastPacketTime    time.Time
+    StartTime         time.Time
+
+    // Enhanced sequence tracking
+    SequenceInitialized bool
+    SequenceGaps        uint64
+    MaxSequenceGap      uint16
+    ReorderedPackets    uint64
+    SequenceResets      uint64
+
+    // Jitter buffer stats
+    LastTimestamp   uint32
+    LastTransitTime int64
+    MaxJitter       float64
+    JitterSamples   uint64
+
+    // SSRC tracking
+    SSRCChanges     uint64
+    LastSSRC        uint32
+    SSRCInitialized bool
 }
 ```
 
-### RTP Session
+### Validator
 
-The `Session` represents an individual RTP stream:
+Validates RTP packets for protocol conformance with B-frame awareness.
 
 ```go
-type Session struct {
-    ssrc        uint32           // Synchronization source ID
-    sourceAddr  *net.UDPAddr     // Source address
-    payloadType uint8            // RTP payload type
-    clockRate   uint32           // RTP clock rate
-    
-    // Sequence tracking
-    lastSeqNum    uint16         // Last sequence number
-    expectedSeq   uint16         // Expected next sequence
-    packetsLost   uint32         // Lost packet count
-    packetsRecv   uint32         // Received packet count
-    
-    // Timing
-    firstTimestamp uint32        // First RTP timestamp
-    lastTimestamp  uint32        // Last RTP timestamp
-    
-    // Validation
-    validator     *Validator     // Packet validator
-    lastActivity  time.Time      // Last packet time
+validator := rtp.NewValidator(rtp.DefaultValidatorConfig())
+err := validator.ValidatePacket(packet)
+```
+
+#### Validation Checks
+
+1. **RTP version** must be 2
+2. **Payload type** must be in the allowed list (default: dynamic 96-127)
+3. **Padding** validation -- if set, last byte must be > 0 and <= raw length
+4. **Sequence numbers** -- gaps detected via signed 16-bit arithmetic for wraparound
+5. **Timestamps** -- B-frame aware: maintains a monotonic tracker, estimates frame duration from a 10-sample window, allows backward timestamps by up to 5 frame durations
+
+#### Configuration
+
+```go
+type ValidatorConfig struct {
+    AllowedPayloadTypes []uint8 // Valid payload types
+    MaxSequenceGap      int     // Max gap in sequence numbers (default: 100)
+    MaxTimestampJump    uint32  // Max timestamp jump in RTP units (default: 90000 * 60)
 }
 ```
 
-### RTP Validator
-
-The `Validator` ensures packet integrity and proper sequencing:
+#### Errors
 
 ```go
-type Validator struct {
-    // Sequence validation
-    maxDropout    uint16         // Max sequence dropout
-    maxMisorder   uint16         // Max misordered packets
-    minSequential uint16         // Min sequential packets
-    
-    // State tracking
-    baseSeq       uint16         // Base sequence number
-    maxSeq        uint16         // Highest sequence seen
-    badSeq        uint16         // Last bad sequence
-    probation     uint16         // Probationary packets
-    
-    // Statistics
-    received      uint32         // Packets received
-    expectedPrior uint32         // Expected packets (previous)
-    receivedPrior uint32         // Received packets (previous)
+var (
+    ErrInvalidRTPVersion  = errors.New("invalid RTP version")
+    ErrInvalidPayloadType = errors.New("invalid payload type")
+    ErrPacketTooSmall     = errors.New("packet too small")
+    ErrInvalidPadding     = errors.New("invalid padding")
+    ErrSequenceGap        = errors.New("sequence number gap detected")
+    ErrTimestampJump      = errors.New("timestamp jump detected")
+)
+```
+
+### JitterBuffer
+
+Heap-based packet reordering buffer that delivers packets based on playout time.
+
+```go
+jb := rtp.NewJitterBuffer(100, 100*time.Millisecond, 90000)
+jb.Add(packet)
+readyPackets, err := jb.Get()
+```
+
+#### Behavior
+
+- **Add**: Discards duplicates via `seqSeen` map, drops oldest on overflow, uses `container/heap` sorted by sequence number (with 16-bit wraparound handling)
+- **Get**: Returns packets whose playout time has elapsed. Playout time = base wall time + RTP timestamp offset + target delay. Uses `int32` cast for 32-bit timestamp wraparound
+- **Flush**: Clears all packets and resets state
+
+#### Statistics
+
+```go
+type JitterBufferStats struct {
+    PacketsBuffered  uint64
+    PacketsDelivered uint64
+    PacketsDropped   uint64
+    PacketsLate      uint64
+    CurrentDepth     int
+    MaxDepth         int
+    UnderrunCount    uint64
+    OverrunCount     uint64
 }
 ```
 
-## Protocol Implementation
+### PacketLossTracker
 
-### RTP Packet Structure
+Tracks sequence number gaps to detect and recover from packet loss.
 
 ```go
-type RTPHeader struct {
-    Version    uint8   // RTP version (2)
-    Padding    bool    // Padding flag
-    Extension  bool    // Extension flag
-    CSRCCount  uint8   // CSRC count
-    Marker     bool    // Marker bit
-    PayloadType uint8  // Payload type
-    SeqNumber  uint16  // Sequence number
-    Timestamp  uint32  // RTP timestamp
-    SSRC       uint32  // Synchronization source
-    CSRC       []uint32 // Contributing sources
-}
+tracker := rtp.NewPacketLossTracker()
+err := tracker.ProcessSequence(seqNum)
+stats := tracker.GetStats()
 ```
 
-### Packet Processing
+Uses RFC 1982 signed 16-bit arithmetic for sequence distance. Maintains a circular buffer (1000 entries) of recently lost sequence numbers. Tracks a sliding 10-second loss window for current loss rate calculation.
+
+#### RecoveryStats
 
 ```go
-func (l *Listener) processPacket(data []byte, addr *net.UDPAddr) error {
-    // Parse RTP header
-    header, payload, err := parseRTPPacket(data)
-    if err != nil {
-        return fmt.Errorf("invalid RTP packet: %w", err)
-    }
-    
-    // Get or create session
-    session := l.getSession(header.SSRC, addr)
-    
-    // Validate packet
-    if !session.validator.Validate(header.SeqNumber) {
-        return errors.New("packet validation failed")
-    }
-    
-    // Create timestamped packet
-    packet := &types.TimestampedPacket{
-        Data:        payload,
-        PTS:         int64(header.Timestamp),
-        CaptureTime: time.Now(),
-        SSRC:        header.SSRC,
-        SeqNum:      header.SeqNumber,
-        StreamID:    fmt.Sprintf("rtp_%d", header.SSRC),
-    }
-    
-    // Forward to pipeline
-    return l.forwardPacket(packet)
-}
-```
-
-## Stream Management
-
-### Session Discovery
-
-RTP sessions are automatically discovered based on SSRC:
-
-```go
-func (l *Listener) getSession(ssrc uint32, addr *net.UDPAddr) *Session {
-    l.sessionsMu.Lock()
-    defer l.sessionsMu.Unlock()
-    
-    session, exists := l.sessions[ssrc]
-    if !exists {
-        session = NewSession(ssrc, addr)
-        l.sessions[ssrc] = session
-        l.metrics.ActiveSessions.Inc()
-    }
-    
-    return session
-}
-```
-
-### Session Cleanup
-
-Inactive sessions are automatically cleaned up:
-
-```go
-func (l *Listener) cleanupSessions() {
-    l.sessionsMu.Lock()
-    defer l.sessionsMu.Unlock()
-    
-    timeout := time.Now().Add(-l.config.SessionTimeout)
-    
-    for ssrc, session := range l.sessions {
-        if session.lastActivity.Before(timeout) {
-            delete(l.sessions, ssrc)
-            l.metrics.ActiveSessions.Dec()
-            l.metrics.SessionTimeouts.Inc()
-        }
-    }
-}
-```
-
-## Validation and Error Recovery
-
-### Sequence Number Validation
-
-RFC 3550 compliant sequence validation:
-
-```go
-func (v *Validator) Validate(seq uint16) bool {
-    if v.probation > 0 {
-        // Still in probationary period
-        if seq == v.expectedSeq {
-            v.probation--
-            v.expectedSeq = seq + 1
-            if v.probation == 0 {
-                return true // Source validated
-            }
-        } else {
-            v.probation = v.minSequential - 1
-            v.expectedSeq = seq + 1
-        }
-        return false
-    }
-    
-    // Normal validation
-    return v.validateSequence(seq)
-}
-```
-
-### Packet Loss Detection
-
-```go
-func (s *Session) updateLossStatistics(seqNum uint16) {
-    expected := s.expectedSeq
-    if seqNum == expected {
-        // Packet arrived in order
-        s.expectedSeq++
-        s.packetsRecv++
-    } else if seqNum > expected {
-        // Packet(s) lost
-        lost := uint32(seqNum - expected)
-        s.packetsLost += lost
-        s.expectedSeq = seqNum + 1
-        s.packetsRecv++
-    } else {
-        // Late/duplicate packet
-        s.handleLatePacket(seqNum)
-    }
-}
-```
-
-## Codec Support
-
-### Payload Type Mapping
-
-```go
-var PayloadTypeMap = map[uint8]CodecInfo{
-    // Static payload types
-    0:  {Codec: types.CodecG711, ClockRate: 8000},   // PCMU
-    8:  {Codec: types.CodecG711, ClockRate: 8000},   // PCMA
-    14: {Codec: types.CodecMP3, ClockRate: 90000},   // MPA
-    26: {Codec: types.CodecJPEG, ClockRate: 90000},  // JPEG
-    33: {Codec: types.CodecMP2T, ClockRate: 90000},  // MP2T
-    
-    // Dynamic payload types (96-127) require SDP
-}
-```
-
-### Dynamic Payload Types
-
-```go
-func (s *Session) configureCodec(payloadType uint8, codecName string, clockRate uint32) {
-    s.payloadType = payloadType
-    s.clockRate = clockRate
-    
-    switch strings.ToLower(codecName) {
-    case "h264":
-        s.codec = types.CodecH264
-    case "h265", "hevc":
-        s.codec = types.CodecHEVC
-    case "av01":
-        s.codec = types.CodecAV1
-    default:
-        s.codec = types.CodecUnknown
-    }
-}
-```
-
-## Performance Optimization
-
-### Buffer Management
-
-```go
-type PacketBuffer struct {
-    packets    []*RTPPacket     // Packet buffer
-    size       int              // Buffer size
-    head       int              // Buffer head
-    tail       int              // Buffer tail
-    mu         sync.Mutex       // Buffer protection
-}
-
-func (b *PacketBuffer) Add(packet *RTPPacket) bool {
-    b.mu.Lock()
-    defer b.mu.Unlock()
-    
-    if b.isFull() {
-        // Drop oldest packet
-        b.head = (b.head + 1) % len(b.packets)
-        b.metrics.BufferOverruns.Inc()
-    }
-    
-    b.packets[b.tail] = packet
-    b.tail = (b.tail + 1) % len(b.packets)
-    b.size++
-    
-    return true
-}
-```
-
-### Memory Pooling
-
-```go
-var packetPool = sync.Pool{
-    New: func() interface{} {
-        return &RTPPacket{
-            Header:  RTPHeader{},
-            Payload: make([]byte, 0, 1500), // MTU size
-        }
-    },
-}
-
-func getPacket() *RTPPacket {
-    return packetPool.Get().(*RTPPacket)
-}
-
-func putPacket(packet *RTPPacket) {
-    packet.reset()
-    packetPool.Put(packet)
-}
-```
-
-## Configuration
-
-### Listener Configuration
-
-```go
-type Config struct {
-    // Network settings
-    ListenAddr      string        // UDP listen address
-    Port            int           // UDP port
-    BufferSize      int           // UDP receive buffer size
-    
-    // Session management
-    SessionTimeout  time.Duration // Session inactivity timeout
-    MaxSessions     int           // Maximum concurrent sessions
-    
-    // Validation settings
-    MaxDropout      uint16        // Max sequence dropout
-    MaxMisorder     uint16        // Max misordered packets
-    MinSequential   uint16        // Min sequential for validation
-    
-    // Performance
-    WorkerCount     int           // Number of worker goroutines
-    ChannelBuffer   int           // Channel buffer size
-}
-```
-
-### Default Values
-
-```go
-func DefaultConfig() *Config {
-    return &Config{
-        ListenAddr:      "0.0.0.0",
-        Port:            5004,
-        BufferSize:      1048576,  // 1MB
-        SessionTimeout:  30 * time.Second,
-        MaxSessions:     100,
-        MaxDropout:      3000,
-        MaxMisorder:     100,
-        MinSequential:   2,
-        WorkerCount:     4,
-        ChannelBuffer:   1000,
-    }
-}
-```
-
-## Metrics and Monitoring
-
-### Session Metrics
-
-```go
-type SessionMetrics struct {
-    PacketsReceived  prometheus.Counter   // Total packets received
-    PacketsLost      prometheus.Counter   // Total packets lost
-    BytesReceived    prometheus.Counter   // Total bytes received
-    Jitter          prometheus.Histogram // Packet jitter
-    Bitrate         prometheus.Gauge     // Current bitrate
-}
-```
-
-### Quality Metrics
-
-```go
-func (s *Session) calculateJitter(timestamp uint32, arrival time.Time) {
-    if s.lastArrival.IsZero() {
-        s.lastArrival = arrival
-        s.lastTimestamp = timestamp
-        return
-    }
-    
-    // RFC 3550 jitter calculation
-    arrivalDelta := arrival.Sub(s.lastArrival)
-    timestampDelta := time.Duration(timestamp-s.lastTimestamp) * time.Second / time.Duration(s.clockRate)
-    
-    transit := arrivalDelta - timestampDelta
-    jitter := float64(abs(transit - s.lastTransit)) / float64(time.Millisecond)
-    
-    s.jitter = s.jitter + (jitter-s.jitter)/16 // RFC 3550 formula
-    s.metrics.Jitter.Observe(s.jitter)
-}
-```
-
-## Integration with Video Pipeline
-
-### Packet Forwarding
-
-```go
-func (l *Listener) forwardToDepacketizer(packet *types.TimestampedPacket) error {
-    // Determine codec from payload type
-    codec := l.getCodecFromPayloadType(packet.PayloadType)
-    
-    // Forward to appropriate depacketizer
-    switch codec {
-    case types.CodecH264:
-        return l.h264Depacketizer.Process(packet)
-    case types.CodecHEVC:
-        return l.hevcDepacketizer.Process(packet)
-    case types.CodecAV1:
-        return l.av1Depacketizer.Process(packet)
-    default:
-        return fmt.Errorf("unsupported codec: %v", codec)
-    }
-}
-```
-
-### Synchronization Integration
-
-```go
-func (l *Listener) createSyncPacket(rtpPacket *RTPPacket) *sync.TimedPacket {
-    return &sync.TimedPacket{
-        Data:      rtpPacket.Payload,
-        PTS:       int64(rtpPacket.Header.Timestamp),
-        StreamID:  fmt.Sprintf("rtp_%d", rtpPacket.Header.SSRC),
-        ClockRate: l.getClockRate(rtpPacket.Header.PayloadType),
-        Marker:    rtpPacket.Header.Marker,
-    }
+type RecoveryStats struct {
+    TotalLost          uint64
+    TotalRecovered     uint64
+    UnrecoverableLoss  uint64
+    CurrentLossRate    float64
+    AverageLossRate    float64
+    MaxConsecutiveLoss uint16
+    LossEvents         uint64
 }
 ```
 
 ## Testing
 
-The package includes comprehensive tests for:
-
-### Protocol Compliance
-- RFC 3550 RTP header parsing
-- Sequence number validation
-- Timestamp handling
-- Payload type support
-
-### Error Conditions
-- Malformed packets
-- Network errors
-- Session timeouts
-- Buffer overruns
-
-### Performance
-- High packet rate handling
-- Memory usage optimization
-- Concurrent session support
-
-```go
-func TestRTPPacketParsing(t *testing.T) {
-    testCases := []struct {
-        name     string
-        packet   []byte
-        expected RTPHeader
-        hasError bool
-    }{
-        {
-            name: "valid H.264 packet",
-            packet: buildRTPPacket(RTPHeader{
-                Version:     2,
-                PayloadType: 96,
-                SeqNumber:   12345,
-                Timestamp:   67890,
-                SSRC:        0x12345678,
-            }),
-            expected: RTPHeader{
-                Version:     2,
-                PayloadType: 96,
-                SeqNumber:   12345,
-                Timestamp:   67890,
-                SSRC:        0x12345678,
-            },
-        },
-        // More test cases...
-    }
-    
-    for _, tc := range testCases {
-        t.Run(tc.name, func(t *testing.T) {
-            header, _, err := parseRTPPacket(tc.packet)
-            if tc.hasError {
-                assert.Error(t, err)
-            } else {
-                assert.NoError(t, err)
-                assert.Equal(t, tc.expected, header)
-            }
-        })
-    }
-}
+```bash
+source scripts/srt-env.sh && go test ./internal/ingestion/rtp/...
 ```
-
-## Best Practices
-
-1. **Session Management**: Clean up inactive sessions regularly
-2. **Validation**: Always validate sequence numbers per RFC 3550
-3. **Buffer Management**: Use bounded buffers to prevent memory exhaustion
-4. **Error Handling**: Handle packet loss gracefully
-5. **Performance**: Use packet pooling for high-throughput scenarios
-
-## Future Enhancements
-
-Potential improvements for the RTP package:
-
-- **RTCP Support**: Real-time Control Protocol implementation
-- **FEC**: Forward Error Correction support
-- **Multicast**: IP multicast support for efficient delivery
-- **RED**: Redundancy encoding for loss recovery
-- **SRTP**: Secure RTP for encrypted streams

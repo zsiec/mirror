@@ -204,7 +204,10 @@ func TestStreamRecovery(t *testing.T) {
 	t.Run("Circuit Breaker", func(t *testing.T) {
 		config := DefaultRecoveryConfig()
 		config.CircuitBreakerThreshold = 2
-		config.CircuitBreakerTimeout = 50 * time.Millisecond
+		config.CircuitBreakerTimeout = 500 * time.Millisecond // Long enough to test blocking
+		config.InitialBackoff = 5 * time.Millisecond          // Short backoff for test
+		config.MaxBackoff = 10 * time.Millisecond
+		config.MaxRetries = 3
 
 		sr := NewStreamRecovery("test-stream", logger.NewNullLogger(), config)
 		defer sr.Stop()
@@ -219,25 +222,26 @@ func TestStreamRecovery(t *testing.T) {
 			nil,
 		)
 
-		// Trigger multiple errors
-		for i := 0; i < 5; i++ {
-			sr.HandleError(fmt.Errorf("error %d", i))
-			time.Sleep(10 * time.Millisecond)
-		}
+		// Trigger error to start recovery — recover() will run MaxRetries attempts internally
+		sr.HandleError(fmt.Errorf("error 0"))
 
-		// Circuit breaker should open after threshold
-		time.Sleep(50 * time.Millisecond)
+		// Wait for recover() to complete (3 retries with ~5-10ms backoff = ~50ms)
+		time.Sleep(150 * time.Millisecond)
 		attemptCount := attempts.Load()
+		assert.Equal(t, int32(3), attemptCount) // MaxRetries=3 attempts in recover()
 
-		// Should have stopped after circuit breaker opened
-		assert.Less(t, attemptCount, int32(5))
-
-		// Wait for circuit breaker timeout
-		time.Sleep(100 * time.Millisecond)
-
-		// Trigger another error - should retry now
-		sr.HandleError(fmt.Errorf("error after timeout"))
+		// Circuit breaker should be open now (threshold=2, we had 3 failures)
+		// New HandleError should be blocked (500ms timeout hasn't elapsed)
+		sr.HandleError(fmt.Errorf("error blocked"))
 		time.Sleep(50 * time.Millisecond)
+		assert.Equal(t, attemptCount, attempts.Load()) // No new attempts
+
+		// Wait for circuit breaker timeout (500ms)
+		time.Sleep(600 * time.Millisecond)
+
+		// Trigger another error — circuit breaker allows (half-open), starts new recovery
+		sr.HandleError(fmt.Errorf("error after timeout"))
+		time.Sleep(150 * time.Millisecond)
 
 		assert.Greater(t, attempts.Load(), attemptCount)
 	})

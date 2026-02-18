@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -59,6 +60,14 @@ func (tb *TokenBucket) Allow(n int) bool {
 
 // AllowN waits until n bytes can be processed or context is cancelled
 func (tb *TokenBucket) AllowN(ctx context.Context, n int) error {
+	// Reject requests that can never be satisfied (n > capacity)
+	tb.mu.Lock()
+	cap := tb.capacity
+	tb.mu.Unlock()
+	if int64(n) > cap {
+		return fmt.Errorf("requested %d bytes exceeds bucket capacity %d", n, cap)
+	}
+
 	// Fast path - check if tokens available
 	if tb.Allow(n) {
 		return nil

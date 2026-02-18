@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
@@ -85,7 +86,7 @@ func main() {
 
 	// Verify Redis is writable
 	testKey := "mirror:startup:test"
-	if err := redisClient.Set(ctx, testKey, "1", 0).Err(); err != nil {
+	if err := redisClient.Set(ctx, testKey, "1", 30*time.Second).Err(); err != nil {
 		log.WithError(err).Fatal("Redis is not writable")
 	}
 	redisClient.Del(ctx, testKey)

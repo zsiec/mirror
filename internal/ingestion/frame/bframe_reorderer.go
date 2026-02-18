@@ -158,15 +158,13 @@ func (r *BFrameReorderer) validateFrame(frame *types.VideoFrame) error {
 	// Log potential DTS discontinuity but don't reject frames here
 	// The actual validation happens in isValidOutput during output
 	if r.lastOutputDTS >= 0 && frame.DTS < r.lastOutputDTS {
-		// MPEG-TS uses 33-bit timestamp values that wrap at 2^33 in 90kHz units
-		// But 32-bit is more common, check both
-		const maxDTS32Wrap = int64(1) << 32 // 2^32 = 4,294,967,296
+		// MPEG-TS PTS/DTS are always 33-bit values per ISO 13818-1
 		const maxDTS33Wrap = int64(1) << 33 // 2^33 = 8,589,934,592
 
 		dtsDiff := r.lastOutputDTS - frame.DTS
 
 		// Check if this could be a wraparound
-		isWraparound := dtsDiff > maxDTS32Wrap/2 || dtsDiff > maxDTS33Wrap/2
+		isWraparound := dtsDiff > maxDTS33Wrap/2
 
 		// Also check for large jumps that might indicate a stream reset
 		const maxReasonableJump = int64(90000 * 10) // 10 seconds at 90kHz
@@ -235,9 +233,13 @@ func (r *BFrameReorderer) checkOutput() []*types.VideoFrame {
 		// - The next frame has a higher DTS (ensuring decode order)
 		// - We're not waiting for potential B-frames that depend on this P-frame
 		if nextFrame.Type == types.FrameTypeP && len(r.buffer) > 1 {
-			// Check if the next frame in DTS order has significantly higher DTS
-			// This suggests no B-frames depend on this P-frame
+			// Find the second-smallest DTS frame. In a binary min-heap,
+			// buffer[0] is the smallest, but the second-smallest is the
+			// smaller of buffer[1] and buffer[2] (the two children of root).
 			secondFrame := r.buffer[1]
+			if len(r.buffer) > 2 && r.buffer[2].DTS < secondFrame.DTS {
+				secondFrame = r.buffer[2]
+			}
 
 			// If next frame is I or P with DTS gap > expected frame duration
 			if secondFrame.Type == types.FrameTypeI || secondFrame.Type == types.FrameTypeP {
@@ -293,13 +295,12 @@ func (r *BFrameReorderer) isValidOutput(frame *types.VideoFrame) bool {
 
 	// DTS must be monotonically increasing (with wraparound and reset handling)
 	if frame.DTS < r.lastOutputDTS {
-		// Check for wraparound
-		const maxDTS32Wrap = int64(1) << 32
+		// Check for wraparound — MPEG-TS PTS/DTS are always 33-bit
 		const maxDTS33Wrap = int64(1) << 33
 		dtsDiff := r.lastOutputDTS - frame.DTS
 
 		// If the difference is more than half the wrap value, it's likely wraparound
-		if dtsDiff > maxDTS32Wrap/2 || dtsDiff > maxDTS33Wrap/2 {
+		if dtsDiff > maxDTS33Wrap/2 {
 			// It's a wraparound, allow it
 			return true
 		}
@@ -329,13 +330,12 @@ func (r *BFrameReorderer) isValidOutput(frame *types.VideoFrame) bool {
 	// For non-B-frames, PTS should be >= last output PTS (with wraparound handling)
 	// B-frames can have PTS < last output PTS
 	if frame.Type != types.FrameTypeB && frame.PTS < r.lastOutputPTS {
-		// Check for wraparound
-		const maxPTS32Wrap = int64(1) << 32
+		// Check for wraparound — MPEG-TS PTS/DTS are always 33-bit
 		const maxPTS33Wrap = int64(1) << 33
 		ptsDiff := r.lastOutputPTS - frame.PTS
 
 		// If the difference is more than half the wrap value, it's likely wraparound
-		if ptsDiff > maxPTS32Wrap/2 || ptsDiff > maxPTS33Wrap/2 {
+		if ptsDiff > maxPTS33Wrap/2 {
 			// It's a wraparound, allow it
 			return true
 		}

@@ -76,6 +76,9 @@ type Session struct {
 	// Packet loss detection and recovery
 	packetLossTracker *PacketLossTracker
 	recoveryStats     RecoveryStats
+
+	// Guard against double-freeing limiter resources
+	resourcesReleased atomic.Bool
 }
 
 type SessionStats struct {
@@ -593,10 +596,15 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 	case CodecStateDetecting:
 		// Wait for detection to complete using condition variable with timeout
 		waitDone := make(chan struct{})
+		timerCtx, timerCancel := context.WithCancel(context.Background())
 		go func() {
-			time.Sleep(1 * time.Second)
-			s.detectionCond.Broadcast() // Wake up waiter on timeout
-			close(waitDone)
+			defer close(waitDone)
+			select {
+			case <-time.After(1 * time.Second):
+				s.detectionCond.Broadcast() // Wake up waiter on timeout
+			case <-timerCtx.Done():
+				// Detection completed before timeout; goroutine exits cleanly
+			}
 		}()
 		for s.codecState == CodecStateDetecting {
 			s.detectionCond.Wait()
@@ -604,12 +612,14 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 			case <-waitDone:
 				// Timeout elapsed - if still detecting, give up
 				if s.codecState == CodecStateDetecting {
+					timerCancel()
 					s.codecStateMu.Unlock()
 					return false
 				}
 			default:
 			}
 		}
+		timerCancel() // Cancel the timeout goroutine
 		result := s.codecState == CodecStateDetected
 		s.codecStateMu.Unlock()
 		return result
@@ -1057,6 +1067,11 @@ func (s *Session) SetJitterBufferParams(maxSize int, targetDelay time.Duration) 
 	}
 
 	s.jitterBuffer = NewJitterBuffer(maxSize, targetDelay, clockRate)
+}
+
+// MarkResourcesReleased atomically marks resources as released, returns true if this call was the first to mark it.
+func (s *Session) MarkResourcesReleased() bool {
+	return s.resourcesReleased.CompareAndSwap(false, true)
 }
 
 // Close closes the RTP session

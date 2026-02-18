@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	_ "net/http/pprof" // Import for side effects (registers pprof handlers)
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -34,6 +35,8 @@ type Server struct {
 
 	// Additional handlers can be registered
 	additionalRoutes []func(*mux.Router)
+
+	wg sync.WaitGroup // tracks server goroutines for clean shutdown
 }
 
 // New creates a new server instance.
@@ -107,7 +110,9 @@ func (s *Server) Start(ctx context.Context) error {
 	s.logger.WithField("port", s.config.HTTP3Port).Info("Starting HTTP/3 server")
 
 	errCh := make(chan error, 1)
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		if err := s.http3Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
@@ -139,6 +144,9 @@ func (s *Server) Shutdown() error {
 	if err := s.http3Server.Close(); err != nil {
 		return fmt.Errorf("failed to shutdown HTTP/3 server: %w", err)
 	}
+
+	// Wait for server goroutine to exit after Close() unblocks ListenAndServe
+	s.wg.Wait()
 
 	s.logger.Info("Server shutdown complete")
 	return nil

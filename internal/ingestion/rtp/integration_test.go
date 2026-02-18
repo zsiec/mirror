@@ -37,7 +37,7 @@ func TestRTPIntegration_StreamIngestion(t *testing.T) {
 
 	// Create test Redis registry
 	redisClient := tests.SetupTestRedis(t)
-	reg := registry.NewRedisRegistry(redisClient, logrusLogger)
+	reg := registry.NewRedisRegistry(redisClient, logrusLogger, 5*time.Minute)
 
 	// Create buffer pool
 	bufferPool := buffer.NewBufferPool(1024*1024, 10, logrusLogger) // 1MB buffers
@@ -337,7 +337,7 @@ func TestRTPIntegration_Performance(t *testing.T) {
 
 	// Create test Redis registry
 	redisClient := tests.SetupTestRedis(t)
-	reg := registry.NewRedisRegistry(redisClient, logrusLogger)
+	reg := registry.NewRedisRegistry(redisClient, logrusLogger, 5*time.Minute)
 
 	// Create RTP listener
 	cfg := &config.RTPConfig{

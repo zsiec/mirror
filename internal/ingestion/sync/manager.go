@@ -452,5 +452,3 @@ func (m *Manager) SetAudioOffset(offset time.Duration) {
 		"new_offset_ms", offset.Milliseconds())
 }
 
-// lastDriftLog tracks when we last logged drift (to avoid spam)
-var lastDriftLog time.Time

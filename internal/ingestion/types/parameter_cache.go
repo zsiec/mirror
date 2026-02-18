@@ -18,8 +18,9 @@ type ParameterSetCache struct {
 	items map[string]*cacheItem
 
 	// TTL tracking
-	ticker *time.Ticker
-	stopCh chan struct{}
+	ticker    *time.Ticker
+	stopCh    chan struct{}
+	closeOnce sync.Once
 
 	// Statistics
 	hits    uint64
@@ -139,23 +140,19 @@ func (c *ParameterSetCache) cleanupExpired() {
 			c.mu.Lock()
 			now := time.Now()
 
-			// Walk from back (oldest) and remove expired items
+			// Walk entire list and remove expired items.
+			// Items are ordered by access time (LRU), not expiry time,
+			// so we must scan all items — not break on first non-expired.
 			for elem := c.order.Back(); elem != nil; {
 				item := elem.Value.(*cacheItem)
+				next := elem.Prev()
 				if now.After(item.expiresAt) {
-					next := elem.Prev()
 					c.removeItem(item)
 					c.expired++
-					elem = next
-				} else {
-					// Items are ordered by access time, so we can stop here
-					break
 				}
+				elem = next
 			}
 			c.mu.Unlock()
-
-		case <-c.stopCh:
-			return
 		}
 	}
 }
@@ -182,8 +179,10 @@ func (c *ParameterSetCache) GetStatistics() map[string]interface{} {
 	}
 }
 
-// Close stops background cleanup
+// Close stops background cleanup. Safe to call multiple times.
 func (c *ParameterSetCache) Close() {
-	close(c.stopCh)
-	c.ticker.Stop()
+	c.closeOnce.Do(func() {
+		close(c.stopCh)
+		c.ticker.Stop()
+	})
 }

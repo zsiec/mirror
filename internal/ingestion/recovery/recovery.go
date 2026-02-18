@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,6 +60,9 @@ type Handler struct {
 	onRecoveryEnd   func(duration time.Duration, success bool)
 	onForceKeyframe func() // Request keyframe from source
 
+	// Lifecycle for waitForKeyframe goroutine
+	keyframeCancel context.CancelFunc
+
 	mu     sync.RWMutex
 	logger logger.Logger
 }
@@ -72,11 +76,20 @@ type Config struct {
 
 // NewHandler creates a new recovery handler
 func NewHandler(streamID string, config Config, gopBuffer *gop.Buffer, logger logger.Logger) *Handler {
+	maxRecoveryTime := config.MaxRecoveryTime
+	if maxRecoveryTime == 0 {
+		maxRecoveryTime = 30 * time.Second
+	}
+	keyframeTimeout := config.KeyframeTimeout
+	if keyframeTimeout == 0 {
+		keyframeTimeout = 5 * time.Second
+	}
+
 	h := &Handler{
 		streamID:         streamID,
 		gopBuffer:        gopBuffer,
-		maxRecoveryTime:  config.MaxRecoveryTime,
-		keyframeTimeout:  config.KeyframeTimeout,
+		maxRecoveryTime:  maxRecoveryTime,
+		keyframeTimeout:  keyframeTimeout,
 		corruptionWindow: config.CorruptionWindow,
 		logger:           logger.WithField("component", "recovery_handler"),
 	}
@@ -116,14 +129,23 @@ func (h *Handler) HandleError(errorType ErrorType, details interface{}) error {
 	}
 }
 
+// snapshotCallbacks returns a snapshot of callbacks under lock
+func (h *Handler) snapshotCallbacks() (func(ErrorType), func(time.Duration, bool), func()) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.onRecoveryStart, h.onRecoveryEnd, h.onForceKeyframe
+}
+
 // recoverFromPacketLoss handles packet loss recovery
 func (h *Handler) recoverFromPacketLoss(details interface{}) error {
 	h.setState(StateRecovering)
 	h.recoveryCount.Add(1)
 	startTime := time.Now()
 
-	if h.onRecoveryStart != nil {
-		h.onRecoveryStart(ErrorTypePacketLoss)
+	onStart, onEnd, _ := h.snapshotCallbacks()
+
+	if onStart != nil {
+		onStart(ErrorTypePacketLoss)
 	}
 
 	h.logger.WithField("details", details).Info("Starting packet loss recovery")
@@ -138,8 +160,8 @@ func (h *Handler) recoverFromPacketLoss(details interface{}) error {
 				h.logger.WithField("gop_id", gop.ID).Info("Recovering from GOP buffer")
 				h.setState(StateNormal)
 
-				if h.onRecoveryEnd != nil {
-					h.onRecoveryEnd(time.Since(startTime), true)
+				if onEnd != nil {
+					onEnd(time.Since(startTime), true)
 				}
 				return nil
 			}
@@ -156,8 +178,10 @@ func (h *Handler) recoverFromCorruption(details interface{}) error {
 	h.corruptionCount.Add(1)
 	startTime := time.Now()
 
-	if h.onRecoveryStart != nil {
-		h.onRecoveryStart(ErrorTypeCorruption)
+	onStart, onEnd, _ := h.snapshotCallbacks()
+
+	if onStart != nil {
+		onStart(ErrorTypeCorruption)
 	}
 
 	h.logger.WithField("details", details).Warn("Corruption detected, initiating recovery")
@@ -172,8 +196,8 @@ func (h *Handler) recoverFromCorruption(details interface{}) error {
 		h.logger.WithField("frame_id", keyframe.ID).Info("Resuming from buffered keyframe")
 		h.setState(StateNormal)
 
-		if h.onRecoveryEnd != nil {
-			h.onRecoveryEnd(time.Since(startTime), true)
+		if onEnd != nil {
+			onEnd(time.Since(startTime), true)
 		}
 		return nil
 	}
@@ -199,7 +223,15 @@ func (h *Handler) recoverFromTimeout() error {
 	}
 
 	// Wait for natural keyframe
-	go h.waitForKeyframe()
+	h.mu.Lock()
+	if h.keyframeCancel != nil {
+		h.keyframeCancel()
+	}
+	kfCtx, kfCancel := context.WithCancel(context.Background())
+	h.keyframeCancel = kfCancel
+	h.mu.Unlock()
+
+	go h.waitForKeyframe(kfCtx)
 	return nil
 }
 
@@ -212,10 +244,8 @@ func (h *Handler) recoverFromSequenceGap(details interface{}) error {
 
 	h.logger.WithField("gap_size", gap).Warn("Sequence gap detected")
 
-	// Small gaps might be reordering
+	// Small gaps might be reordering — handled elsewhere
 	if gap < 5 {
-		// Wait briefly for reordered packets
-		time.Sleep(10 * time.Millisecond)
 		return nil
 	}
 
@@ -296,33 +326,47 @@ func (h *Handler) findNextKeyframe() *types.VideoFrame {
 func (h *Handler) requestKeyframe(reason string) error {
 	h.logger.WithField("reason", reason).Info("Requesting keyframe from source")
 
-	if h.onForceKeyframe != nil {
-		h.onForceKeyframe()
+	_, _, onKeyframe := h.snapshotCallbacks()
+	if onKeyframe != nil {
+		onKeyframe()
 	}
 
+	// Cancel any previous waitForKeyframe goroutine
+	h.mu.Lock()
+	if h.keyframeCancel != nil {
+		h.keyframeCancel()
+	}
+	kfCtx, kfCancel := context.WithCancel(context.Background())
+	h.keyframeCancel = kfCancel
+	h.mu.Unlock()
+
 	// Set timeout for keyframe arrival
-	go h.waitForKeyframe()
+	go h.waitForKeyframe(kfCtx)
 
 	return nil
 }
 
 // waitForKeyframe waits for a keyframe with timeout
-func (h *Handler) waitForKeyframe() {
+func (h *Handler) waitForKeyframe(ctx context.Context) {
 	timer := time.NewTimer(h.keyframeTimeout)
 	defer timer.Stop()
 
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
+	_, onEnd, _ := h.snapshotCallbacks()
 	startTime := time.Now()
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
+
 		case <-timer.C:
 			h.logger.Error("Keyframe timeout exceeded")
 			h.setState(StateFailed)
-			if h.onRecoveryEnd != nil {
-				h.onRecoveryEnd(time.Since(startTime), false)
+			if onEnd != nil {
+				onEnd(time.Since(startTime), false)
 			}
 			return
 
@@ -335,8 +379,8 @@ func (h *Handler) waitForKeyframe() {
 			if lastKF != nil && lastKF.CaptureTime.After(startTime) {
 				h.logger.Info("Keyframe received, recovery complete")
 				h.setState(StateNormal)
-				if h.onRecoveryEnd != nil {
-					h.onRecoveryEnd(time.Since(startTime), true)
+				if onEnd != nil {
+					onEnd(time.Since(startTime), true)
 				}
 				return
 			}
@@ -413,6 +457,8 @@ func (h *Handler) GetStatistics() Statistics {
 
 // SetCallbacks sets the recovery callbacks
 func (h *Handler) SetCallbacks(onStart func(ErrorType), onEnd func(time.Duration, bool), onKeyframe func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.onRecoveryStart = onStart
 	h.onRecoveryEnd = onEnd
 	h.onForceKeyframe = onKeyframe

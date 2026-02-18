@@ -23,7 +23,7 @@ func setupTestRedis(t *testing.T) (*miniredis.Miniredis, *redis.Client, *RedisRe
 	logger := logrus.New()
 	logger.SetLevel(logrus.DebugLevel)
 
-	registry := NewRedisRegistry(client, logger)
+	registry := NewRedisRegistry(client, logger, 5*time.Minute)
 
 	return mr, client, registry
 }
@@ -369,7 +369,7 @@ func TestRedisRegistry_Update(t *testing.T) {
 	assert.Equal(t, updatedStream.BytesReceived, retrieved.BytesReceived)
 	assert.Equal(t, updatedStream.PacketsReceived, retrieved.PacketsReceived)
 
-	// Test update non-existent stream (should succeed as Update doesn't check existence)
+	// Test update non-existent stream (should fail since Update uses XX flag)
 	nonExistentStream := &Stream{
 		ID:         "non-existent",
 		Type:       StreamTypeSRT,
@@ -377,5 +377,5 @@ func TestRedisRegistry_Update(t *testing.T) {
 		SourceAddr: "192.168.1.111:1234",
 	}
 	err = registry.Update(ctx, nonExistentStream)
-	assert.NoError(t, err) // Update creates if not exists in current implementation
+	assert.Error(t, err) // Update only updates existing streams, won't create new ones
 }

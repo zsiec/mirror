@@ -48,10 +48,11 @@ const (
 
 // CorruptionPattern represents a pattern of corruption
 type CorruptionPattern struct {
-	Type      CorruptionType
-	Frequency float64 // Events per second
-	LastSeen  time.Time
-	Count     uint64
+	Type       CorruptionType
+	Frequency  float64 // Events per second
+	LastSeen   time.Time
+	Count      uint64      // All-time count
+	EventTimes []time.Time // Sliding window of event timestamps for accurate frequency
 }
 
 // CorruptionDetector detects various types of stream corruption
@@ -60,6 +61,7 @@ type CorruptionDetector struct {
 	streamID string
 	logger   logger.Logger
 	stopCh   chan struct{}
+	stopOnce sync.Once
 
 	// Detection state
 	patterns        map[CorruptionType]*CorruptionPattern
@@ -193,24 +195,28 @@ func (cd *CorruptionDetector) CheckGOP(gop *types.GOP) error {
 		})
 	}
 
-	// Check frame ordering
-	var lastPTS int64 = -1
+	// Check frame ordering by DTS (decode order).
+	// PTS can be non-monotonic within a GOP due to B-frame reordering,
+	// but DTS must always be monotonically increasing in decode order.
+	var lastDTS int64 = -1
 	for i, frame := range gop.Frames {
-		if frame.PTS <= lastPTS {
+		if frame.DTS <= lastDTS && frame.DTS != 0 {
 			cd.recordEvent(CorruptionEvent{
 				StreamID:    cd.streamID,
 				Type:        CorruptionTypeGOPStructure,
 				Severity:    SeverityHigh,
 				Timestamp:   time.Now(),
 				FrameNumber: frame.FrameNumber,
-				Description: fmt.Sprintf("Non-monotonic PTS at frame %d", i),
+				Description: fmt.Sprintf("Non-monotonic DTS at frame %d", i),
 				Data: map[string]interface{}{
-					"current_pts": frame.PTS,
-					"last_pts":    lastPTS,
+					"current_dts": frame.DTS,
+					"last_dts":    lastDTS,
 				},
 			})
 		}
-		lastPTS = frame.PTS
+		if frame.DTS != 0 {
+			lastDTS = frame.DTS
+		}
 	}
 
 	return nil
@@ -454,11 +460,15 @@ func (cd *CorruptionDetector) recordEvent(event CorruptionEvent) {
 	}
 	pattern.Count++
 	pattern.LastSeen = event.Timestamp
+	pattern.EventTimes = append(pattern.EventTimes, event.Timestamp)
+
+	// Snapshot callback under lock to avoid data race (Bug #38)
+	onCorruption := cd.onCorruption
 	cd.mu.Unlock()
 
-	// Notify callback
-	if cd.onCorruption != nil {
-		cd.onCorruption(event)
+	// Notify callback (using snapshot taken under lock)
+	if onCorruption != nil {
+		onCorruption(event)
 	}
 
 	cd.logger.WithFields(logger.Fields{
@@ -468,14 +478,11 @@ func (cd *CorruptionDetector) recordEvent(event CorruptionEvent) {
 	}).Warn("Corruption detected")
 }
 
-// Stop stops the corruption detector's background goroutine
+// Stop stops the corruption detector's background goroutine. Safe to call multiple times.
 func (cd *CorruptionDetector) Stop() {
-	select {
-	case <-cd.stopCh:
-		// Already stopped
-	default:
+	cd.stopOnce.Do(func() {
 		close(cd.stopCh)
-	}
+	})
 }
 
 func (cd *CorruptionDetector) patternDetectionLoop() {
@@ -494,27 +501,38 @@ func (cd *CorruptionDetector) patternDetectionLoop() {
 
 func (cd *CorruptionDetector) analyzePatterns() {
 	cd.mu.Lock()
-	defer cd.mu.Unlock()
 
 	now := time.Now()
 	windowDuration := 60 * time.Second
+	cutoff := now.Add(-windowDuration)
 
+	var windowEventCount int
 	for _, pattern := range cd.patterns {
-		// Calculate frequency
-		if pattern.LastSeen.After(now.Add(-windowDuration)) {
-			pattern.Frequency = float64(pattern.Count) / windowDuration.Seconds()
-
-			// Notify if frequency is high
-			if pattern.Frequency > 1.0 && cd.onPattern != nil {
-				cd.patternCounter.Inc()
-				cd.onPattern(*pattern)
+		// Prune event times outside the sliding window
+		pruned := pattern.EventTimes[:0]
+		for _, t := range pattern.EventTimes {
+			if t.After(cutoff) {
+				pruned = append(pruned, t)
 			}
+		}
+		pattern.EventTimes = pruned
+
+		// Calculate frequency from events within the window only
+		pattern.Frequency = float64(len(pruned)) / windowDuration.Seconds()
+		windowEventCount += len(pruned)
+
+		// Notify if frequency is high
+		if pattern.Frequency > 1.0 && cd.onPattern != nil {
+			cd.patternCounter.Inc()
+			cd.onPattern(*pattern)
 		}
 	}
 
-	// Update corruption rate metric
-	totalRate := float64(cd.totalEvents.Load()) / time.Since(now.Add(-windowDuration)).Seconds()
+	// Update corruption rate metric using sliding window count
+	totalRate := float64(windowEventCount) / windowDuration.Seconds()
 	cd.corruptionGauge.Set(totalRate)
+
+	cd.mu.Unlock()
 }
 
 func (cd *CorruptionDetector) getSequenceGapSeverity(gap int) CorruptionSeverity {

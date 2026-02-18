@@ -12,6 +12,9 @@ import (
 //   bits 5-4: W (0x30) - number of OBU element length fields
 //   bit 3: N  (0x08) - new temporal unit indicator
 //
+// When W=0, each OBU element is preceded by a LEB128-encoded length.
+// When W>0, the first W-1 OBUs have LEB128 length prefix, the last extends to end.
+//
 // OBU header byte layout:
 //   bit 7: forbidden (must be 0)
 //   bits 6-3: OBU type (4 bits)
@@ -23,6 +26,12 @@ import (
 //   1 = SequenceHeader  -> header byte 0x08
 //   2 = TemporalDelimiter -> header byte 0x10
 //   6 = Frame           -> header byte 0x30
+//
+// Temporal unit assembly:
+//   A temporal delimiter (TD) marks the START of a new temporal unit.
+//   When a TD is found at index > 0 in the buffer, OBUs before it are flushed.
+//   The N-bit in the aggregation header also triggers a flush of the previous TU.
+//   A standalone TD at index 0 stays buffered until the next TU boundary.
 
 func TestNewAV1Depacketizer(t *testing.T) {
 	d := NewAV1Depacketizer()
@@ -42,19 +51,21 @@ func TestAV1Depacketizer_SingleOBU(t *testing.T) {
 		{
 			name: "single OBU - temporal delimiter",
 			// Aggregation header: Z=0, Y=0, W=0, N=1 (0x08)
+			// W=0: LEB128 length prefix (0x02 = 2 bytes), then OBU
 			// OBU header: type=2 (temporal delimiter) = 0x10
 			// OBU payload: 0x00
-			payload: []byte{0x08, 0x10, 0x00},
+			payload: []byte{0x08, 0x02, 0x10, 0x00},
 			seq:     1,
 			wantErr: false,
-			wantLen: 1, // Temporal delimiter triggers flush
+			wantLen: 0, // TD at start of new TU stays buffered until next boundary
 		},
 		{
 			name: "single OBU - sequence header",
 			// Aggregation header: Z=0, Y=0, W=0, N=0 (0x00)
+			// W=0: LEB128 length prefix (0x04 = 4 bytes), then OBU
 			// OBU header: type=1 (sequence header) = 0x08
 			// OBU payload: some data
-			payload: []byte{0x00, 0x08, 0x00, 0x00, 0x00},
+			payload: []byte{0x00, 0x04, 0x08, 0x00, 0x00, 0x00},
 			seq:     2,
 			wantErr: false,
 			wantLen: 0, // No temporal delimiter, so buffered
@@ -68,7 +79,7 @@ func TestAV1Depacketizer_SingleOBU(t *testing.T) {
 			payload: []byte{0x10, 0x10, 0x00},
 			seq:     3,
 			wantErr: false,
-			wantLen: 1, // Temporal delimiter triggers flush
+			wantLen: 0, // TD at start of new TU stays buffered
 		},
 		{
 			name:    "payload too short",
@@ -196,8 +207,9 @@ func TestAV1Depacketizer_FragmentedOBU_WithFlush(t *testing.T) {
 	}
 
 	// Now send a temporal delimiter to flush: Z=0, Y=0, W=0, N=1 (0x08)
+	// W=0: LEB128 length prefix (0x02), then OBU
 	// OBU header: type=2 (temporal delimiter) = 0x10
-	payload3 := []byte{0x08, 0x10, 0x00}
+	payload3 := []byte{0x08, 0x02, 0x10, 0x00}
 	packet = &rtp.Packet{
 		Header:  rtp.Header{SequenceNumber: 102},
 		Payload: payload3,
@@ -206,11 +218,10 @@ func TestAV1Depacketizer_FragmentedOBU_WithFlush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Temporal delimiter failed: %v", err)
 	}
-	// N=1 flushes previous temporal unit (the frame), then adds the new
-	// temporal delimiter which also gets flushed due to TD detection.
-	// Previous TU had 1 OBU (the reassembled frame) + current has 1 OBU (TD) = 2
-	if len(obus) != 2 {
-		t.Errorf("Expected 2 OBUs (flushed frame + temporal delimiter), got %d", len(obus))
+	// N=1 flushes previous temporal unit (the reassembled frame OBU).
+	// The new TD stays buffered as the start of the next TU.
+	if len(obus) != 1 {
+		t.Errorf("Expected 1 OBU (flushed frame), got %d", len(obus))
 	}
 }
 
@@ -239,9 +250,24 @@ func TestAV1Depacketizer_MultipleOBUs(t *testing.T) {
 		t.Fatalf("Multiple OBUs failed: %v", err)
 	}
 
-	// Should return OBUs immediately due to temporal delimiter in the buffer
+	// OBUs are buffered: TD at index 0 starts a new TU, no prior content to flush
+	if len(obus) != 0 {
+		t.Errorf("Expected 0 OBUs (buffered in TU), got %d", len(obus))
+	}
+
+	// Send N=1 packet to flush the buffered TU
+	flushPacket := &rtp.Packet{
+		Header:  rtp.Header{SequenceNumber: 201},
+		Payload: []byte{0x08, 0x02, 0x10, 0x00}, // N=1, W=0, LEB128=2, TD
+	}
+	obus, err = d.Depacketize(flushPacket)
+	if err != nil {
+		t.Fatalf("Flush packet failed: %v", err)
+	}
+
+	// N=1 flushes previous TU [TD, seq header] = 2 OBUs
 	if len(obus) != 2 {
-		t.Errorf("Expected 2 OBUs, got %d", len(obus))
+		t.Errorf("Expected 2 OBUs after flush, got %d", len(obus))
 	}
 
 	// Verify first OBU is temporal delimiter (header byte 0x10, type = 2)
@@ -285,9 +311,24 @@ func TestAV1Depacketizer_MultipleOBUs_W3(t *testing.T) {
 		t.Fatalf("W=3 multiple OBUs failed: %v", err)
 	}
 
-	// Should flush all 3 OBUs because temporal delimiter is present
+	// OBUs are buffered: TD at index 0 starts a new TU
+	if len(obus) != 0 {
+		t.Errorf("Expected 0 OBUs (buffered in TU), got %d", len(obus))
+	}
+
+	// Send N=1 packet to flush the buffered TU
+	flushPacket := &rtp.Packet{
+		Header:  rtp.Header{SequenceNumber: 211},
+		Payload: []byte{0x08, 0x02, 0x10, 0x00}, // N=1, W=0, LEB128=2, TD
+	}
+	obus, err = d.Depacketize(flushPacket)
+	if err != nil {
+		t.Fatalf("Flush packet failed: %v", err)
+	}
+
+	// Should flush all 3 OBUs from previous TU
 	if len(obus) != 3 {
-		t.Errorf("Expected 3 OBUs, got %d", len(obus))
+		t.Errorf("Expected 3 OBUs after flush, got %d", len(obus))
 	}
 }
 
@@ -344,8 +385,8 @@ func TestAV1Depacketizer_PacketLoss_NewFragmentAfterLoss(t *testing.T) {
 	}
 
 	// Skip 301, send non-continuation at 302: Z=0, Y=0, W=0, N=1 (0x08)
-	// OBU header: type=2 (temporal delimiter) = 0x10
-	payload2 := []byte{0x08, 0x10, 0x00}
+	// W=0: LEB128 length prefix (0x02), then TD OBU
+	payload2 := []byte{0x08, 0x02, 0x10, 0x00}
 	packet = &rtp.Packet{
 		Header:  rtp.Header{SequenceNumber: 302},
 		Payload: payload2,
@@ -356,9 +397,9 @@ func TestAV1Depacketizer_PacketLoss_NewFragmentAfterLoss(t *testing.T) {
 	}
 
 	// Packet loss detected, fragments discarded. Then Z=0 so it processes as
-	// new single OBU (temporal delimiter), which gets flushed.
-	if len(obus) != 1 {
-		t.Errorf("Expected 1 OBU after packet loss recovery, got %d", len(obus))
+	// new OBU (temporal delimiter), which is buffered as the start of a new TU.
+	if len(obus) != 0 {
+		t.Errorf("Expected 0 OBUs (TD buffered as start of new TU), got %d", len(obus))
 	}
 }
 
@@ -367,8 +408,8 @@ func TestAV1Depacketizer_TemporalUnitAssembly(t *testing.T) {
 
 	// First packet: temporal delimiter with N=1
 	// Aggregation header: Z=0, Y=0, W=0, N=1 (0x08)
-	// OBU header: type=2 (temporal delimiter) = 0x10
-	payload1 := []byte{0x08, 0x10, 0x00}
+	// W=0: LEB128 length prefix (0x02), then TD OBU
+	payload1 := []byte{0x08, 0x02, 0x10, 0x00}
 	packet := &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 400,
@@ -379,15 +420,15 @@ func TestAV1Depacketizer_TemporalUnitAssembly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("First packet failed: %v", err)
 	}
-	// Single OBU (temporal delimiter) should be flushed
-	if len(obus) != 1 {
-		t.Errorf("Expected 1 OBU for temporal delimiter, got %d", len(obus))
+	// TD starts a new TU, stays buffered (no prior TU to flush)
+	if len(obus) != 0 {
+		t.Errorf("Expected 0 OBUs for first TD (no prior TU), got %d", len(obus))
 	}
 
 	// Second packet: frame OBU without N bit
 	// Aggregation header: Z=0, Y=0, W=0, N=0 (0x00)
-	// OBU header: type=6 (frame) = 0x30
-	payload2 := []byte{0x00, 0x30, 0x01, 0x02}
+	// W=0: LEB128 length prefix (0x03), then frame OBU
+	payload2 := []byte{0x00, 0x03, 0x30, 0x01, 0x02}
 	packet = &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 401,
@@ -398,15 +439,16 @@ func TestAV1Depacketizer_TemporalUnitAssembly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Second packet failed: %v", err)
 	}
-	// Frame OBU has no temporal delimiter, stays buffered
+	// Frame OBU added to current TU buffer, stays buffered
 	if len(obus) != 0 {
 		t.Error("Should buffer frame OBU")
 	}
 
 	// Third packet: new temporal delimiter with N=1
-	// N=1 flushes previous temporal unit (the frame), then the new TD also gets flushed
+	// N=1 flushes previous temporal unit (TD + frame), then the new TD is buffered
 	// Aggregation header: Z=0, Y=0, W=0, N=1 (0x08)
-	payload3 := []byte{0x08, 0x10, 0x00}
+	// W=0: LEB128 length prefix (0x02), then TD OBU
+	payload3 := []byte{0x08, 0x02, 0x10, 0x00}
 	packet = &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 402,
@@ -417,9 +459,9 @@ func TestAV1Depacketizer_TemporalUnitAssembly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Third packet failed: %v", err)
 	}
-	// Should flush previous temporal unit (frame) and return new temporal delimiter
+	// Should flush previous temporal unit (TD + frame) = 2 OBUs
 	if len(obus) != 2 {
-		t.Errorf("Expected 2 OBUs (flushed frame + new delimiter), got %d", len(obus))
+		t.Errorf("Expected 2 OBUs (flushed TD + frame), got %d", len(obus))
 	}
 }
 
@@ -429,21 +471,35 @@ func TestAV1Depacketizer_Reset(t *testing.T) {
 	// Just test that Reset() doesn't panic
 	d.Reset()
 
-	// Verify depacketizer works after reset
-	// Aggregation header: Z=0, Y=0, W=0, N=1 (0x08)
-	// OBU header: type=2 (temporal delimiter) = 0x10
+	// Verify depacketizer works after reset by buffering an OBU
+	// Send a sequence header (non-TD) so it stays buffered
+	// Aggregation header: Z=0, Y=0, W=0, N=0 (0x00)
+	// W=0: LEB128 length prefix (0x03), then seq header OBU
 	packet := &rtp.Packet{
 		Header: rtp.Header{
 			SequenceNumber: 1000,
 		},
-		Payload: []byte{0x08, 0x10, 0x00},
+		Payload: []byte{0x00, 0x03, 0x08, 0xAA, 0xBB},
 	}
 	obus, err := d.Depacketize(packet)
 	if err != nil {
 		t.Errorf("Depacketize after reset failed: %v", err)
 	}
+	if len(obus) != 0 {
+		t.Errorf("Expected 0 OBUs (buffered), got %d", len(obus))
+	}
+
+	// Flush with N=1 to verify OBU was correctly parsed and buffered
+	flushPacket := &rtp.Packet{
+		Header:  rtp.Header{SequenceNumber: 1001},
+		Payload: []byte{0x08, 0x02, 0x10, 0x00}, // N=1, W=0, LEB128=2, TD
+	}
+	obus, err = d.Depacketize(flushPacket)
+	if err != nil {
+		t.Errorf("Flush after reset failed: %v", err)
+	}
 	if len(obus) != 1 {
-		t.Errorf("Expected 1 OBU after reset, got %d", len(obus))
+		t.Errorf("Expected 1 OBU after flush, got %d", len(obus))
 	}
 }
 
@@ -463,17 +519,30 @@ func TestAV1Depacketizer_ResetDuringFragmentation(t *testing.T) {
 	// Reset should clear fragment state
 	d.Reset()
 
-	// After reset, a new single OBU should work fine
+	// After reset, send a non-TD OBU to verify clean state
 	packet = &rtp.Packet{
 		Header:  rtp.Header{SequenceNumber: 600},
-		Payload: []byte{0x08, 0x10, 0x00}, // TD with N=1
+		Payload: []byte{0x00, 0x03, 0x08, 0xAA, 0xBB}, // N=0, W=0, LEB128=3, seq header
 	}
 	obus, err := d.Depacketize(packet)
 	if err != nil {
 		t.Errorf("Depacketize after reset failed: %v", err)
 	}
+	if len(obus) != 0 {
+		t.Errorf("Expected 0 OBUs (buffered), got %d", len(obus))
+	}
+
+	// Flush to verify the OBU was correctly buffered
+	flushPacket := &rtp.Packet{
+		Header:  rtp.Header{SequenceNumber: 601},
+		Payload: []byte{0x08, 0x02, 0x10, 0x00}, // N=1, W=0, LEB128=2, TD
+	}
+	obus, err = d.Depacketize(flushPacket)
+	if err != nil {
+		t.Errorf("Flush after reset failed: %v", err)
+	}
 	if len(obus) != 1 {
-		t.Errorf("Expected 1 OBU after reset, got %d", len(obus))
+		t.Errorf("Expected 1 OBU after flush, got %d", len(obus))
 	}
 }
 
@@ -528,7 +597,7 @@ func TestAV1Depacketizer_ErrorCases(t *testing.T) {
 			payload: []byte{0x20, 0x10, 0x01},
 			seq:     601,
 			wantErr: true,
-			errMsg:  "OBU length exceeds payload size",
+			errMsg:  "OBU length 16 exceeds remaining payload size 1",
 		},
 		{
 			name: "continuation without prior fragment",
@@ -563,7 +632,7 @@ func TestAV1Depacketizer_ErrorCases(t *testing.T) {
 			payload: []byte{0x20, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80},
 			seq:     603,
 			wantErr: true,
-			errMsg:  "failed to parse OBU length: LEB128 value too large or incomplete",
+			errMsg:  "failed to parse OBU length: LEB128 encoding is incomplete",
 		},
 	}
 
@@ -671,17 +740,18 @@ func TestAV1Depacketizer_MiddleFragmentContinuation(t *testing.T) {
 	}
 
 	// Now send temporal delimiter to flush: Z=0, Y=0, W=0, N=1 (0x08)
+	// W=0: LEB128 length prefix (0x02), then TD OBU
 	packet = &rtp.Packet{
 		Header:  rtp.Header{SequenceNumber: 14},
-		Payload: []byte{0x08, 0x10, 0x00},
+		Payload: []byte{0x08, 0x02, 0x10, 0x00},
 	}
 	obus, err = d.Depacketize(packet)
 	if err != nil {
 		t.Fatalf("Temporal delimiter error: %v", err)
 	}
-	// Should flush the reassembled frame + the temporal delimiter
-	if len(obus) != 2 {
-		t.Errorf("Expected 2 OBUs (reassembled frame + TD), got %d", len(obus))
+	// N=1 flushes the reassembled frame; TD stays buffered as start of next TU
+	if len(obus) != 1 {
+		t.Errorf("Expected 1 OBU (reassembled frame), got %d", len(obus))
 	}
 
 	// Verify the reassembled content
@@ -704,9 +774,10 @@ func TestAV1Depacketizer_NBitFlushes(t *testing.T) {
 
 	// First: send a sequence header (no temporal delimiter, stays buffered)
 	// Z=0, Y=0, W=0, N=0 (0x00)
+	// W=0: LEB128 length prefix (0x03), then seq header OBU
 	packet := &rtp.Packet{
 		Header:  rtp.Header{SequenceNumber: 50},
-		Payload: []byte{0x00, 0x08, 0xAA, 0xBB}, // Sequence header OBU
+		Payload: []byte{0x00, 0x03, 0x08, 0xAA, 0xBB}, // Sequence header OBU
 	}
 	obus, err := d.Depacketize(packet)
 	if err != nil {
@@ -717,17 +788,18 @@ func TestAV1Depacketizer_NBitFlushes(t *testing.T) {
 	}
 
 	// Second: send new temporal unit (N=1) with temporal delimiter
-	// The N=1 should flush the previous buffered sequence header
+	// The N=1 flushes the previous buffered sequence header
+	// W=0: LEB128 length prefix (0x02), then TD OBU
 	packet = &rtp.Packet{
 		Header:  rtp.Header{SequenceNumber: 51},
-		Payload: []byte{0x08, 0x10, 0x00}, // N=1, temporal delimiter
+		Payload: []byte{0x08, 0x02, 0x10, 0x00}, // N=1, temporal delimiter
 	}
 	obus, err = d.Depacketize(packet)
 	if err != nil {
 		t.Fatalf("N=1 packet failed: %v", err)
 	}
-	// N=1 flushes previous TU (sequence header) then current TD also flushes
-	if len(obus) != 2 {
-		t.Errorf("Expected 2 OBUs (flushed SH + TD), got %d", len(obus))
+	// N=1 flushes previous TU (sequence header). New TD stays buffered.
+	if len(obus) != 1 {
+		t.Errorf("Expected 1 OBU (flushed SH), got %d", len(obus))
 	}
 }

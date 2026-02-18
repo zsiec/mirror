@@ -357,13 +357,13 @@ func TestCorruptionDetector(t *testing.T) {
 		assert.Equal(t, CorruptionTypeGOPStructure, events[0].Type)
 		assert.Equal(t, SeverityMedium, events[0].Severity)
 
-		// Non-monotonic PTS
-		idrFrame := &types.VideoFrame{FrameNumber: 1, PTS: 1000, Type: types.FrameTypeIDR, TotalSize: 1000}
+		// Non-monotonic DTS (decode order must be monotonically increasing)
+		idrFrame := &types.VideoFrame{FrameNumber: 1, PTS: 1000, DTS: 1000, Type: types.FrameTypeIDR, TotalSize: 1000}
 		idrFrame.SetFlag(types.FrameFlagKeyframe)
 		gop2 := &types.GOP{
 			Frames: []*types.VideoFrame{
 				idrFrame,
-				{FrameNumber: 2, PTS: 900, Type: types.FrameTypeP, TotalSize: 500}, // PTS goes backward
+				{FrameNumber: 2, PTS: 900, DTS: 800, Type: types.FrameTypeP, TotalSize: 500}, // DTS goes backward
 			},
 		}
 

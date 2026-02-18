@@ -299,6 +299,8 @@ func (h *StreamHandler) Start() {
 	// Start video pipeline
 	if err := h.pipeline.Start(); err != nil {
 		h.logger.WithError(err).Error("Failed to start video pipeline")
+		h.started = false // Reset so handler can be cleaned up properly
+		h.cancel()        // Cancel context so callers waiting on ctx.Done() unblock
 		return
 	}
 
@@ -1381,15 +1383,16 @@ func (h *StreamHandler) detectFrameCorruption(frame *types.VideoFrame) bool {
 
 // handleSequenceGap detects and handles sequence number gaps
 func (h *StreamHandler) handleSequenceGap(expected, actual uint32) {
-	gap := int(actual - expected)
-	if gap > 0 && gap < 1000 { // Reasonable gap threshold
+	// Cast to int64 before subtracting to avoid unsigned wraparound
+	gap := int64(actual) - int64(expected)
+	if gap > 0 && gap < 1000 { // Reasonable forward gap threshold
 		h.logger.WithFields(map[string]interface{}{
 			"expected": expected,
 			"actual":   actual,
 			"gap":      gap,
 		}).Warn("Sequence gap detected")
 
-		h.recoveryHandler.HandleError(recovery.ErrorTypeSequenceGap, gap)
+		h.recoveryHandler.HandleError(recovery.ErrorTypeSequenceGap, int(gap))
 	}
 }
 

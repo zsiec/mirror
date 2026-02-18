@@ -7,6 +7,7 @@ import (
 
 	"github.com/pion/rtp"
 	"github.com/zsiec/mirror/internal/ingestion/memory"
+	"github.com/zsiec/mirror/internal/ingestion/security"
 )
 
 // JPEGXSDepacketizer handles depacketization of JPEG XS RTP streams
@@ -182,14 +183,11 @@ func (d *JPEGXSDepacketizer) parseHeader(payload []byte) (*jpegxsHeader, int, er
 		// Bytes 4-5: Packet ID (16 bits)
 		header.PacketID = binary.BigEndian.Uint16(payload[4:6])
 
-		// Byte 6: Profile and Level
+		// Byte 6: Profile (full byte per RFC 9134)
 		header.Profile = JPEGXSProfile(payload[6])
-		header.Level = payload[6] & 0x0F
 
-		// Byte 7: Sub-level and additional info
-		header.SubLevel = (payload[7] >> 4) & 0x0F
-		header.ChromaFormat = (payload[7] >> 2) & 0x03
-		header.BitDepth = payload[7] & 0x03
+		// Byte 7: Level (full byte per RFC 9134)
+		header.Level = payload[7]
 
 		// Update depacketizer profile
 		d.profile = header.Profile
@@ -213,6 +211,11 @@ func (d *JPEGXSDepacketizer) assembleFrame() ([]byte, error) {
 	totalSize := 0
 	for _, frag := range d.fragments {
 		totalSize += len(frag)
+	}
+
+	// Enforce size limit to prevent DoS via unbounded frame assembly
+	if totalSize > security.MaxFrameSize {
+		return nil, fmt.Errorf("assembled JPEG XS frame size %d exceeds limit %d", totalSize, security.MaxFrameSize)
 	}
 
 	// Combine fragments
@@ -354,22 +357,17 @@ func (d *JPEGXSDepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte
 		return nil, err
 	}
 
-	// If we got complete frames, release fragment memory
+	// If we got complete frames, release all accumulated memory minus actual output size
 	if len(frames) > 0 {
-		// Calculate actual memory used
 		actualSize := int64(0)
 		for _, frame := range frames {
 			actualSize += int64(len(frame))
 		}
 
-		// Release excess memory
-		if estimatedSize > actualSize {
-			excessMemory := estimatedSize - actualSize
-			d.memController.ReleaseMemory(d.streamID, excessMemory)
-			d.currentUsage -= excessMemory
+		// Release the difference between what we requested and what we're actually using
+		if d.currentUsage > actualSize {
+			d.memController.ReleaseMemory(d.streamID, d.currentUsage-actualSize)
 		}
-
-		// Reset fragment memory tracking
 		d.currentUsage = 0
 	}
 

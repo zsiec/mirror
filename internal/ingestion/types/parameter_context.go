@@ -69,6 +69,9 @@ type ParameterSetContext struct {
 	// Cleanup management for long-running streams
 	lastCleanup    time.Time
 	cleanupEnabled bool
+
+	// Shared logger to avoid creating new logrus instances per call
+	log logger.Logger
 }
 
 // ParameterSet represents a parsed parameter set with metadata
@@ -170,6 +173,7 @@ func NewParameterSetContextWithConfig(codec CodecType, streamID string, config P
 		lastParameterSetUpdate: now,
 		lastCleanup:            now,
 		cleanupEnabled:         true,
+		log:                    logger.NewLogrusAdapter(logrus.NewEntry(logrus.New())),
 	}
 }
 
@@ -187,7 +191,7 @@ func (ctx *ParameterSetContext) AddSPS(data []byte) error {
 		// For test data, be more lenient - just log warning instead of failing
 		// Test data often uses minimal SPS that wouldn't be valid in production
 		if strings.HasPrefix(ctx.streamID, "test-") && len(data) < 10 {
-			logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+			logger := ctx.log
 			logger.WithError(err).WithFields(map[string]interface{}{
 				"stream_id":      ctx.streamID,
 				"data_size":      len(data),
@@ -196,7 +200,7 @@ func (ctx *ParameterSetContext) AddSPS(data []byte) error {
 			// Continue with parsing anyway for test streams
 		} else {
 			// Production validation - log error and fail
-			logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+			logger := ctx.log
 			logger.WithError(err).WithFields(map[string]interface{}{
 				"stream_id":      ctx.streamID,
 				"data_size":      len(data),
@@ -212,11 +216,11 @@ func (ctx *ParameterSetContext) AddSPS(data []byte) error {
 	if err := EnhancedSPSValidation(data, ctx.streamID); err != nil {
 		// For test streams, just warn
 		if strings.HasPrefix(ctx.streamID, "test-") {
-			logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+			logger := ctx.log
 			logger.WithError(err).Warn("Enhanced SPS validation failed for test stream")
 		} else {
 			// Production streams - this will prevent FFmpeg errors
-			logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+			logger := ctx.log
 			logger.WithError(err).WithFields(map[string]interface{}{
 				"stream_id": ctx.streamID,
 				"data_size": len(data),
@@ -353,11 +357,11 @@ func (ctx *ParameterSetContext) AddPPS(data []byte) error {
 	if err := EnhancedPPSValidation(data, ctx.streamID); err != nil {
 		// For test streams, just warn
 		if strings.HasPrefix(ctx.streamID, "test-") {
-			logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+			logger := ctx.log
 			logger.WithError(err).Warn("Enhanced PPS validation failed for test stream")
 		} else {
 			// Production streams - this will prevent FFmpeg errors
-			logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+			logger := ctx.log
 			logger.WithError(err).WithFields(map[string]interface{}{
 				"stream_id": ctx.streamID,
 				"data_size": len(data),
@@ -388,7 +392,7 @@ func (ctx *ParameterSetContext) AddPPS(data []byte) error {
 
 	// Check if the referenced SPS exists
 	if _, hasSPS := ctx.spsMap[pps.ReferencedSPSID]; !hasSPS {
-		log := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+		log := ctx.log
 		availableSPSIDs := ctx.getSPSIDs()
 
 		// If we have exactly one SPS and the PPS references a different one,
@@ -502,10 +506,43 @@ func (ctx *ParameterSetContext) AddHEVCSPS(data []byte) error {
 		return fmt.Errorf("HEVC SPS data too short after start code")
 	}
 
-	// SPS ID is in the first 4 bits of byte after 2-byte NAL header
+	// Parse HEVC SPS ID properly:
+	// After 2-byte NAL header: sps_video_parameter_set_id (4 bits),
+	// sps_max_sub_layers_minus1 (3 bits), sps_temporal_id_nesting_flag (1 bit),
+	// profile_tier_level(1, sps_max_sub_layers_minus1), then Exp-Golomb sps_seq_parameter_set_id
 	spsID := uint8(0)
 	if nalStart+2 < len(data) {
-		spsID = (data[nalStart+2] >> 4) & 0x0F
+		rbspData, _ := RemoveEmulationPreventionBytes(data[nalStart+2:])
+		br := NewBitReader(rbspData)
+
+		// Read sps_video_parameter_set_id (4 bits)
+		_, _ = br.ReadBits(4)
+		// Read sps_max_sub_layers_minus1 (3 bits)
+		maxSubLayers, err := br.ReadBits(3)
+		if err == nil {
+			// Read sps_temporal_id_nesting_flag (1 bit)
+			_, _ = br.ReadBits(1)
+			// Skip profile_tier_level(1, maxSubLayersMinus1)
+			// general_profile_space (2) + general_tier_flag (1) + general_profile_idc (5)
+			// + general_profile_compatibility_flags (32) + general_constraint_indicators (48)
+			// + general_level_idc (8) = 96 bits
+			_, _ = br.ReadBits(96)
+			// For each sub-layer (if maxSubLayers > 1):
+			// sub_layer_profile_present_flag[i] (1 bit each) + sub_layer_level_present_flag[i] (1 bit each)
+			if maxSubLayers > 1 {
+				_, _ = br.ReadBits(int(2 * (maxSubLayers - 1)))
+				// Reserved bits to fill to 8 sub-layers
+				if maxSubLayers < 8 {
+					_, _ = br.ReadBits(int(2 * (8 - maxSubLayers)))
+				}
+				// For each sub-layer, skip profile/level data (variable)
+				// This is simplified - in practice we'd check the present flags
+			}
+			// Now read sps_seq_parameter_set_id (Exp-Golomb)
+			if id, err := br.ReadUE(); err == nil && id <= 15 {
+				spsID = uint8(id)
+			}
+		}
 	}
 
 	dataCopy := make([]byte, len(data))
@@ -551,10 +588,15 @@ func (ctx *ParameterSetContext) AddHEVCPPS(data []byte) error {
 		return fmt.Errorf("HEVC PPS data too short after start code")
 	}
 
-	// PPS ID is in the first 6 bits of byte after 2-byte NAL header
+	// Parse HEVC PPS ID properly:
+	// After 2-byte NAL header, first Exp-Golomb value is pps_pic_parameter_set_id
 	ppsID := uint8(0)
 	if nalStart+2 < len(data) {
-		ppsID = (data[nalStart+2] >> 2) & 0x3F
+		rbspData, _ := RemoveEmulationPreventionBytes(data[nalStart+2:])
+		br := NewBitReader(rbspData)
+		if id, err := br.ReadUE(); err == nil && id <= 63 {
+			ppsID = uint8(id)
+		}
 	}
 
 	dataCopy := make([]byte, len(data))
@@ -630,7 +672,7 @@ func (ctx *ParameterSetContext) canDecodeFrameWithRequirements(frame *VideoFrame
 		availableSPSIDs := ctx.getSPSIDs()
 		if len(availableSPSIDs) > 0 {
 			// Log the fallback attempt
-			log := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+			log := ctx.log
 			log.WithFields(map[string]interface{}{
 				"stream_id":         ctx.streamID,
 				"pps_id":            requirements.RequiredPPSID,
@@ -694,7 +736,7 @@ func (ctx *ParameterSetContext) GenerateDecodableStream(frame *VideoFrame) ([]by
 	// Validate SPS before adding
 	if spsID, err := ValidateSPSData(sps.Data); err != nil {
 		// Log detailed error information
-		logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+		logger := ctx.log
 		logger.WithFields(map[string]interface{}{
 			"stream_id": ctx.streamID,
 			"sps_id":    sps.ID,
@@ -779,7 +821,7 @@ func (ctx *ParameterSetContext) GenerateBestEffortStream(frame *VideoFrame) ([]b
 			// Additional validation before using SPS
 			if _, err := ValidateSPSData(sps.Data); err != nil {
 				// Skip corrupted SPS
-				logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+				logger := ctx.log
 				logger.WithFields(map[string]interface{}{
 					"stream_id": ctx.streamID,
 					"sps_id":    sps.ID,
@@ -802,7 +844,7 @@ func (ctx *ParameterSetContext) GenerateBestEffortStream(frame *VideoFrame) ([]b
 				// Additional validation before using PPS
 				if _, _, err := ValidatePPSData(pps.Data); err != nil {
 					// Skip corrupted PPS
-					logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
+					logger := ctx.log
 					logger.WithFields(map[string]interface{}{
 						"stream_id": ctx.streamID,
 						"pps_id":    pps.ID,

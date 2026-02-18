@@ -22,6 +22,14 @@ func NewTrackSyncManager(trackType TrackType, streamID string, timeBase types.Ra
 		config = DefaultSyncConfig()
 	}
 
+	// Prevent division by zero in PTS calculations
+	if timeBase.Num == 0 {
+		timeBase.Num = 1
+	}
+	if timeBase.Den == 0 {
+		timeBase.Den = 90000 // Default to 90kHz
+	}
+
 	return &TrackSyncManager{
 		sync: &TrackSync{
 			Type:     trackType,
@@ -77,8 +85,9 @@ func (t *TrackSyncManager) ProcessTimestamp(pts, dts int64, wallTime time.Time) 
 		}
 	}
 
-	// Check DTS ordering
-	if dts != 0 && dts < t.sync.LastDTS {
+	// Check DTS ordering — only skip when DTS has never been initialized.
+	// After first non-zero DTS, a value of 0 is a regression, not "unset".
+	if t.sync.LastDTS != 0 && dts < t.sync.LastDTS {
 		t.sync.DTSErrors++
 	}
 
@@ -112,7 +121,12 @@ func (t *TrackSyncManager) getPresentationTimeLocked(pts int64) time.Time {
 
 	// Convert to duration based on time base
 	// duration = ptsDelta * timeBase.Num / timeBase.Den
-	nsDelta := (ptsDelta * int64(time.Second) * int64(t.sync.TimeBase.Num)) / int64(t.sync.TimeBase.Den)
+	// Divide before multiply to avoid int64 overflow on long streams (>26.5h at 90kHz)
+	den := int64(t.sync.TimeBase.Den)
+	num := int64(t.sync.TimeBase.Num)
+	nsDelta := (ptsDelta / den) * int64(time.Second) * num
+	// Remainder correction preserves sub-second precision
+	nsDelta += (ptsDelta % den) * int64(time.Second) * num / den
 
 	return t.sync.BaseTime.Add(time.Duration(nsDelta))
 }
@@ -126,14 +140,12 @@ func (t *TrackSyncManager) GetDecodeTime(dts int64) time.Time {
 		return time.Time{}
 	}
 
-	// Use PTS as base if DTS equals PTS
-	if dts == t.sync.LastPTS {
-		return t.getPresentationTimeLocked(dts)
-	}
-
-	// Calculate relative to base PTS/time
-	dtsDelta := dts - t.sync.BasePTS
-	nsDelta := (dtsDelta * int64(time.Second) * int64(t.sync.TimeBase.Num)) / int64(t.sync.TimeBase.Den)
+	// Calculate DTS delta accounting for wraps (same as PTS path)
+	dtsDelta := t.calculatePTSDelta(dts)
+	den := int64(t.sync.TimeBase.Den)
+	num := int64(t.sync.TimeBase.Num)
+	nsDelta := (dtsDelta / den) * int64(time.Second) * num
+	nsDelta += (dtsDelta % den) * int64(time.Second) * num / den
 
 	return t.sync.BaseTime.Add(time.Duration(nsDelta))
 }

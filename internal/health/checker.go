@@ -61,12 +61,18 @@ func (m *Manager) Register(checker Checker) {
 
 // RunChecks executes all registered health checks.
 func (m *Manager) RunChecks(ctx context.Context) map[string]*Check {
+	// Snapshot checkers under lock to avoid race with concurrent Register() calls
+	m.mu.RLock()
+	checkers := make([]Checker, len(m.checkers))
+	copy(checkers, m.checkers)
+	m.mu.RUnlock()
+
 	var wg sync.WaitGroup
-	results := make(map[string]*Check, len(m.checkers))
-	resultsChan := make(chan *Check, len(m.checkers))
+	results := make(map[string]*Check, len(checkers))
+	resultsChan := make(chan *Check, len(checkers))
 
 	// Run all checks concurrently
-	for _, checker := range m.checkers {
+	for _, checker := range checkers {
 		wg.Add(1)
 		go func(c Checker) {
 			defer wg.Done()
@@ -117,13 +123,17 @@ func (m *Manager) RunChecks(ctx context.Context) map[string]*Check {
 		close(resultsChan)
 	}()
 
-	// Collect results
+	// Collect all results first, then do a single bulk update to avoid
+	// partial-state visibility from concurrent GetResults()/GetOverallStatus()
 	for check := range resultsChan {
 		results[check.Name] = check
-		m.mu.Lock()
-		m.results[check.Name] = check
-		m.mu.Unlock()
 	}
+
+	m.mu.Lock()
+	for k, v := range results {
+		m.results[k] = v
+	}
+	m.mu.Unlock()
 
 	return results
 }

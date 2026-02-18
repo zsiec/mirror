@@ -70,7 +70,7 @@ func NewManager(cfg *config.IngestionConfig, logger logger.Logger) (*Manager, er
 	}
 
 	logrusLogger := logrus.New()
-	reg := registry.NewRedisRegistry(redisClient, logrusLogger)
+	reg := registry.NewRedisRegistry(redisClient, logrusLogger, cfg.Registry.TTL)
 
 	// Create memory controller
 	maxTotal := cfg.Memory.MaxTotal
@@ -603,6 +603,10 @@ func (m *Manager) CreateStreamHandler(streamID string, conn StreamConnection) (*
 
 	// Create stream handler with manager's context
 	handler := NewStreamHandler(m.ctx, streamID, conn, hybridQueue, m.memoryController, m.logger)
+	if handler == nil {
+		hybridQueue.Close() // Clean up the queue that was just created
+		return nil, fmt.Errorf("failed to create stream handler for %s", streamID)
+	}
 
 	// Store handler
 	m.streamHandlers[streamID] = handler
@@ -729,14 +733,9 @@ func (m *Manager) HandleSRTConnection(conn *srt.Connection) error {
 		}
 	}
 
-	// Cleanup
+	// Cleanup — RemoveStreamHandler calls handler.Stop() which calls conn.Close(),
+	// and Connection.Close() already handles registry unregistration via closeOnce.
 	m.RemoveStreamHandler(streamID)
-	// Unregister from registry
-	if m.registry != nil {
-		if err := m.registry.Unregister(context.Background(), streamID); err != nil {
-			m.logger.WithError(err).Error("Failed to unregister SRT stream from registry", "stream_id", streamID)
-		}
-	}
 	return nil
 }
 

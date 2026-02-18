@@ -3,6 +3,7 @@ package reconnect
 import (
 	"context"
 	"math"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -50,7 +51,7 @@ func (e *ExponentialBackoff) NextDelay() (time.Duration, bool) {
 	}
 
 	// Calculate next delay with jitter (±20%)
-	jitterFloat := 0.8 + (0.4 * float64(time.Now().UnixNano()%100) / 100.0)
+	jitterFloat := 0.8 + (0.4 * rand.Float64())
 	delay := time.Duration(float64(e.currentDelay) * jitterFloat)
 
 	// Update for next iteration
@@ -117,6 +118,7 @@ func (m *Manager) Start(ctx context.Context) {
 		return
 	}
 	m.running = true
+	m.stopCh = make(chan struct{}) // Recreate channel for reuse after Stop()
 	m.mu.Unlock()
 
 	go m.reconnectLoop(ctx)

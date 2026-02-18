@@ -119,13 +119,10 @@ func (buffer *ProperSizedBuffer) Write(data []byte) (int, error) {
 	writePos := buffer.writePos.Load()
 	readPos := buffer.readPos.Load()
 
-	// Calculate available space
+	// Calculate available space (always reserve 1 byte to distinguish full from empty)
 	var available int
 	if writePos >= readPos {
-		available = buffer.size - int(writePos) + int(readPos)
-		if readPos == 0 {
-			available-- // Keep one byte to distinguish full from empty
-		}
+		available = buffer.size - int(writePos) + int(readPos) - 1
 	} else {
 		available = int(readPos) - int(writePos) - 1
 	}

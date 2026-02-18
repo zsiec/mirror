@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -403,7 +404,7 @@ func TestHandler_WaitForKeyframe(t *testing.T) {
 	}, nil)
 
 	// Start waiting for keyframe
-	go handler.waitForKeyframe()
+	go handler.waitForKeyframe(context.Background())
 
 	// Simulate keyframe arrival after 50ms (well before timeout)
 	go func() {

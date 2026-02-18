@@ -143,10 +143,16 @@ func (s *HybridEvictionStrategy) SelectStreamsForEviction(streams []StreamInfo, 
 		}
 
 		// Age score (0-1, older = higher)
-		ageScore := float64(now.Sub(stream.LastAccess)) / float64(maxAge)
+		var ageScore float64
+		if maxAge > 0 {
+			ageScore = float64(now.Sub(stream.LastAccess)) / float64(maxAge)
+		}
 
 		// Size score (0-1, larger = higher)
-		sizeScore := float64(stream.MemoryUsage) / float64(maxSize)
+		var sizeScore float64
+		if maxSize > 0 {
+			sizeScore = float64(stream.MemoryUsage) / float64(maxSize)
+		}
 
 		// Priority score (0-1, lower priority = higher score)
 		priorityScore := float64(stream.Priority) / float64(maxPriority)

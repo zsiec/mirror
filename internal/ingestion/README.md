@@ -103,18 +103,22 @@ The ingestion system provides:
 ### SRT (Secure Reliable Transport)
 
 ```go
-// SRT configuration
+// SRT configuration (from config.SRTConfig)
 type SRTConfig struct {
-    Port            int           // Listen port (default: 30000)
-    Latency         time.Duration // Target latency (default: 120ms)
-    MaxBandwidth    int64         // Max bandwidth per stream
-    PayloadSize     int           // MTU-friendly packet size
-    FlowWindow      int           // Flow control window
-    PeerIdleTimeout time.Duration // Disconnect idle peers
+    Enabled           bool
+    Port              int           // Listen port (default: 30000)
+    Latency           time.Duration // Target latency (default: 120ms)
+    MaxBandwidth      int64         // Max bandwidth per stream
+    PayloadSize       int           // MTU-friendly packet size
+    FlowControlWindow int           // Flow control window
+    PeerIdleTimeout   time.Duration // Disconnect idle peers
+    MaxConnections    int           // Max concurrent connections
 }
 
-// Usage example
-srtListener := srt.NewListener(srtConfig, registry, bufferPool, logger)
+// Usage — the manager creates the listener internally via the adapter pattern
+adapter := srt.NewHaivisionAdapter()
+srtListener := srt.NewListenerWithAdapter(&cfg.SRT, &cfg.Codecs, reg, adapter, logger)
+srtListener.SetHandler(connectionHandler)
 if err := srtListener.Start(); err != nil {
     log.Fatal("Failed to start SRT listener:", err)
 }
@@ -131,17 +135,19 @@ if err := srtListener.Start(); err != nil {
 ### RTP (Real-time Transport Protocol)
 
 ```go
-// RTP configuration
+// RTP configuration (from config.RTPConfig)
 type RTPConfig struct {
-    Port         int           // RTP port (default: 5004)
-    RTCPPort     int           // RTCP port (default: 5005)
-    BufferSize   int           // UDP buffer size
-    MaxSessions  int           // Max concurrent sessions
-    SessionTimeout time.Duration // Idle session timeout
+    Enabled        bool
+    Port           int           // RTP port (default: 5004)
+    RTCPPort       int           // RTCP port (default: 5005)
+    BufferSize     int           // UDP buffer size
+    MaxSessions    int           // Max concurrent sessions
+    SessionTimeout time.Duration // Idle session timeout (default: 10s)
 }
 
-// Usage example
-rtpListener := rtp.NewListener(rtpConfig, registry, bufferPool, logger)
+// Usage — the manager creates the listener internally
+rtpListener := rtp.NewListener(&cfg.RTP, &cfg.Codecs, reg, logger)
+rtpListener.SetSessionHandler(sessionHandler)
 if err := rtpListener.Start(); err != nil {
     log.Fatal("Failed to start RTP listener:", err)
 }
@@ -389,22 +395,9 @@ func (c *BackpressureController) ShouldDrop(priority int) bool {
 }
 ```
 
-#### Video Stats - `GET /api/v1/streams/stats/video`
-```json
-{
-  "streams": {
-    "stream_123": {
-      "frames_assembled": 180000,
-      "frames_dropped": 10,
-      "keyframes": 600,
-      "p_frames": 120000,
-      "b_frames": 59400,
-      "gop_count": 600,
-      "avg_gop_size": 300
-    }
-  }
-}
-```
+#### Video Operations
+- `GET /api/v1/video/preview/{id}` - Get preview data for a stream
+- `GET /api/v1/video/buffer/{id}` - Access frame buffer for a stream
 
 ## Configuration
 
@@ -445,16 +438,17 @@ ingestion:
     
   # Memory management
   memory:
-    global_limit: 8589934592   # 8GB total
-    per_stream_limit: 419430400 # 400MB per stream
+    max_total: 2684354560      # 2.5GB total (default)
+    max_per_stream: 209715200  # 200MB per stream (default)
     gc_interval: 1m
     
-  # Backpressure control
+  # Backpressure control (watermark-based)
   backpressure:
     enabled: true
-    high_watermark: 0.8        # 80% full
-    low_watermark: 0.6         # 60% full
-    drop_strategy: "oldest"    # or "lowest_priority"
+    low_watermark: 0.25        # 25% — normal operation
+    medium_watermark: 0.50     # 50% — start monitoring
+    high_watermark: 0.75       # 75% — begin frame dropping
+    critical_watermark: 0.90   # 90% — aggressive dropping
     
   # Frame processing
   frame:
@@ -471,9 +465,9 @@ ingestion:
   # A/V synchronization
   sync:
     enabled: true
-    threshold: 100ms           # Sync threshold
-    correction_rate: 0.1       # 10% correction per second
-    max_drift: 1s              # Max allowed drift
+    max_audio_drift: 40ms      # Max drift before correction
+    correction_factor: 0.1     # 10% correction per iteration
+    max_correction_step: 5ms   # Max single correction step
 ```
 
 ## Best Practices
@@ -705,29 +699,18 @@ func TestIngestionStress(t *testing.T) {
 ### Complete Ingestion Setup
 
 ```go
-// main.go
 func setupIngestion(cfg *config.Config, logger logger.Logger) (*ingestion.Manager, error) {
-    // Create Redis client for registry
-    redisClient := redis.NewClient(&redis.Options{
-        Addr: cfg.Redis.Addr,
-    })
-    
-    // Create ingestion manager
-    manager := ingestion.NewManager(cfg.Ingestion, redisClient, logger)
-    
-    // Register health checks
-    healthMgr.Register(&ingestion.HealthChecker{
-        Manager: manager,
-    })
-    
+    // Create ingestion manager (creates Redis client internally from config)
+    manager, err := ingestion.NewManager(&cfg.Ingestion, logger)
+    if err != nil {
+        return nil, fmt.Errorf("failed to create ingestion manager: %w", err)
+    }
+
     // Start ingestion
-    if err := manager.Start(context.Background()); err != nil {
+    if err := manager.Start(); err != nil {
         return nil, fmt.Errorf("failed to start ingestion: %w", err)
     }
-    
-    // Setup metrics export
-    go manager.ExportMetrics(metricsRegistry)
-    
+
     return manager, nil
 }
 ```

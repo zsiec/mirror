@@ -19,12 +19,15 @@ type RedisRegistry struct {
 }
 
 // NewRedisRegistry creates a new Redis-backed registry
-func NewRedisRegistry(client *redis.Client, logger *logrus.Logger) *RedisRegistry {
+func NewRedisRegistry(client *redis.Client, logger *logrus.Logger, ttl time.Duration) *RedisRegistry {
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
 	return &RedisRegistry{
 		client: client,
 		logger: logger,
 		prefix: "mirror:streams:",
-		ttl:    5 * time.Minute,
+		ttl:    ttl,
 	}
 }
 
@@ -39,9 +42,13 @@ func (r *RedisRegistry) Register(ctx context.Context, stream *Stream) error {
 		if err := json.Unmarshal(existingData, &existingStream); err == nil {
 			stream.CreatedAt = existingStream.CreatedAt // Preserve original creation time
 		}
-	} else {
+	} else if err == redis.Nil {
 		// New stream, set CreatedAt
 		stream.CreatedAt = time.Now()
+		existingData = nil // Ensure we treat as new stream
+	} else {
+		// Actual Redis error — propagate it
+		return fmt.Errorf("failed to check existing stream: %w", err)
 	}
 	stream.LastHeartbeat = time.Now()
 
@@ -52,20 +59,29 @@ func (r *RedisRegistry) Register(ctx context.Context, stream *Stream) error {
 
 	// Check if this is a new stream or update
 	if existingData == nil {
-		// New stream - use SetNX to prevent race conditions
-		ok, err := r.client.SetNX(ctx, key, data, r.ttl).Result()
+		// New stream - use Lua script for atomic SetNX + SAdd
+		registerScript := redis.NewScript(`
+			local key = KEYS[1]
+			local active_key = KEYS[2]
+			local data = ARGV[1]
+			local ttl = tonumber(ARGV[2])
+			local stream_id = ARGV[3]
+			local ok = redis.call('SET', key, data, 'PX', ttl, 'NX')
+			if not ok then
+				return 0
+			end
+			redis.call('SADD', active_key, stream_id)
+			return 1
+		`)
+
+		result, err := registerScript.Run(ctx, r.client,
+			[]string{key, r.prefix + "active"},
+			data, r.ttl.Milliseconds(), stream.ID).Int()
 		if err != nil {
 			return fmt.Errorf("failed to register stream: %w", err)
 		}
-		if !ok {
+		if result == 0 {
 			return fmt.Errorf("stream %s already exists", stream.ID)
-		}
-
-		// Add to active streams set
-		if err := r.client.SAdd(ctx, r.prefix+"active", stream.ID).Err(); err != nil {
-			// Rollback the registration
-			r.client.Del(ctx, key)
-			return fmt.Errorf("failed to add to active set: %w", err)
 		}
 
 		r.logger.WithFields(logrus.Fields{
@@ -401,9 +417,13 @@ func (r *RedisRegistry) Update(ctx context.Context, stream *Stream) error {
 		return fmt.Errorf("failed to marshal stream: %w", err)
 	}
 
-	// Update with TTL
-	if err := r.client.Set(ctx, key, data, r.ttl).Err(); err != nil {
+	// Use XX flag to only update if key already exists (prevents ghost streams)
+	ok, err := r.client.SetXX(ctx, key, data, r.ttl).Result()
+	if err != nil {
 		return fmt.Errorf("failed to update stream: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("stream %s not found", stream.ID)
 	}
 
 	r.logger.WithField("stream_id", stream.ID).Debug("Stream updated")

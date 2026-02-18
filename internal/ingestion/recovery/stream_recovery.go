@@ -80,6 +80,9 @@ type StreamRecovery struct {
 	preservedState *PreservedState
 	stateStore     StateStore
 
+	// Guard against concurrent recover() goroutines
+	recovering atomic.Bool
+
 	// Callbacks
 	onRecover        func() error
 	onStateRestore   func(*PreservedState) error
@@ -199,8 +202,10 @@ func (sr *StreamRecovery) HandleError(err error) {
 		}
 	}
 
-	// Start recovery
-	go sr.recover()
+	// Start recovery (only one at a time)
+	if sr.recovering.CompareAndSwap(false, true) {
+		go sr.recover()
+	}
 }
 
 // GetState returns the current recovery state
@@ -231,14 +236,17 @@ func (sr *StreamRecovery) Stop() {
 // Private methods
 
 func (sr *StreamRecovery) recover() {
+	defer sr.recovering.Store(false)
+
 	start := time.Now()
 	sr.setState(StreamRecoveryStateRecovering)
 
-	// Snapshot callbacks under lock to avoid races with SetCallbacks
+	// Snapshot callbacks and preservedState under lock to avoid races
 	sr.mu.RLock()
 	onRecover := sr.onRecover
 	onStateRestore := sr.onStateRestore
 	onRecoveryFailed := sr.onRecoveryFailed
+	preservedState := sr.preservedState
 	sr.mu.RUnlock()
 
 	backoff := sr.config.InitialBackoff
@@ -247,9 +255,9 @@ func (sr *StreamRecovery) recover() {
 		sr.logger.WithField("attempt", attempt).Info("Attempting recovery")
 
 		// Try to restore state first
-		if sr.config.EnableStatePreservation && sr.preservedState != nil {
+		if sr.config.EnableStatePreservation && preservedState != nil {
 			if onStateRestore != nil {
-				if err := onStateRestore(sr.preservedState); err != nil {
+				if err := onStateRestore(preservedState); err != nil {
 					sr.logger.WithError(err).Warn("Failed to restore state")
 				} else {
 					sr.logger.Info("State restored successfully")
@@ -263,8 +271,12 @@ func (sr *StreamRecovery) recover() {
 				sr.logger.WithError(err).Warn("Recovery attempt failed")
 				sr.circuitBreaker.RecordFailure()
 
-				// Exponential backoff
-				time.Sleep(backoff)
+				// Context-aware exponential backoff
+				select {
+				case <-time.After(backoff):
+				case <-sr.ctx.Done():
+					return
+				}
 				backoff = time.Duration(float64(backoff) * sr.config.BackoffMultiplier)
 				if backoff > sr.config.MaxBackoff {
 					backoff = sr.config.MaxBackoff
@@ -288,8 +300,12 @@ func (sr *StreamRecovery) recover() {
 		sr.logger.Info("Recovery successful")
 
 		// Clean up preserved state
-		if sr.stateStore != nil && sr.preservedState != nil {
-			sr.stateStore.Delete(sr.streamID)
+		sr.mu.RLock()
+		stateStore := sr.stateStore
+		ps := sr.preservedState
+		sr.mu.RUnlock()
+		if stateStore != nil && ps != nil {
+			stateStore.Delete(sr.streamID)
 		}
 
 		return
@@ -366,7 +382,9 @@ func (sr *StreamRecovery) checkHealth() {
 			sr.logger.WithField("attempt", sr.totalRecoveryAttempts.Load()).
 				Info("Retrying after health check interval")
 			sr.circuitBreaker.Reset()
-			go sr.recover()
+			if sr.recovering.CompareAndSwap(false, true) {
+				go sr.recover()
+			}
 		}
 
 	case StreamRecoveryStateDegraded:
@@ -400,6 +418,7 @@ type CircuitBreaker struct {
 	threshold       int
 	timeout         time.Duration
 	state           string
+	halfOpenUsed    bool // only one request allowed in half-open state
 }
 
 // NewCircuitBreaker creates a new circuit breaker
@@ -416,15 +435,23 @@ func (cb *CircuitBreaker) Allow() bool {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
-	if cb.state == "open" {
+	switch cb.state {
+	case "open":
 		if time.Since(cb.lastFailureTime) > cb.timeout {
 			cb.state = "half-open"
-		} else {
-			return false
+			cb.halfOpenUsed = true // allow this one request
+			return true
 		}
+		return false
+	case "half-open":
+		if cb.halfOpenUsed {
+			return false // only one request allowed in half-open
+		}
+		cb.halfOpenUsed = true
+		return true
+	default: // closed
+		return true
 	}
-
-	return true
 }
 
 // RecordSuccess records a successful operation
@@ -434,6 +461,7 @@ func (cb *CircuitBreaker) RecordSuccess() {
 
 	cb.failures = 0
 	cb.state = "closed"
+	cb.halfOpenUsed = false
 }
 
 // RecordFailure records a failed operation
@@ -463,4 +491,5 @@ func (cb *CircuitBreaker) Reset() {
 
 	cb.failures = 0
 	cb.state = "closed"
+	cb.halfOpenUsed = false
 }

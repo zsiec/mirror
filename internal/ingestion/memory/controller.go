@@ -58,6 +58,8 @@ func NewController(maxMemory, perStreamLimit int64) *Controller {
 
 // SetEvictionCallback sets the callback for memory pressure eviction
 func (c *Controller) SetEvictionCallback(callback func(streamID string, bytes int64)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.evictionCallback = callback
 }
 
@@ -230,6 +232,16 @@ func (c *Controller) Stats() MemoryStats {
 // evictMemory attempts to evict memory to make room for the requested size
 // Returns the amount of memory evicted
 func (c *Controller) evictMemory(targetSize int64) int64 {
+	// Snapshot callback and strategy under lock to avoid data race
+	c.mu.Lock()
+	evictionCallback := c.evictionCallback
+	evictionStrategy := c.evictionStrategy
+	c.mu.Unlock()
+
+	if evictionCallback == nil {
+		return 0
+	}
+
 	// Collect stream information
 	var streams []StreamInfo
 	c.streamUsage.Range(func(key, value interface{}) bool {
@@ -247,24 +259,22 @@ func (c *Controller) evictMemory(targetSize int64) int64 {
 	}
 
 	// Select streams for eviction
-	selected := c.evictionStrategy.SelectStreamsForEviction(streams, targetSize)
+	selected := evictionStrategy.SelectStreamsForEviction(streams, targetSize)
 
 	var totalEvicted int64
 	for _, streamID := range selected {
-		if c.evictionCallback != nil {
-			// Get the stream's memory usage before the callback
-			if streamUsage, ok := c.streamUsage.Load(streamID); ok {
-				usageBefore := streamUsage.(*atomic.Int64).Load()
-				c.evictionCallback(streamID, usageBefore)
-				// Release any remaining memory the callback didn't release
-				remaining := streamUsage.(*atomic.Int64).Swap(0)
-				if remaining > 0 {
-					c.usage.Add(-remaining)
-				}
-				// Total evicted is what was used before (callback may have released some/all)
+		if streamUsage, ok := c.streamUsage.Load(streamID); ok {
+			usage := streamUsage.(*atomic.Int64)
+			// Atomically swap to 0 to get the usage and prevent double-decrement.
+			// The callback is for notification only; we handle accounting here.
+			usageBefore := usage.Swap(0)
+			if usageBefore > 0 {
+				c.usage.Add(-usageBefore)
 				totalEvicted += usageBefore
-				c.evictionCount.Add(1)
 			}
+			// Notify callback after accounting (callback should NOT call ReleaseMemory)
+			evictionCallback(streamID, usageBefore)
+			c.evictionCount.Add(1)
 		}
 	}
 
@@ -300,6 +310,8 @@ func (c *Controller) SetStreamActive(streamID string, active bool) {
 
 // SetEvictionStrategy allows changing the eviction strategy
 func (c *Controller) SetEvictionStrategy(strategy EvictionStrategy) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.evictionStrategy = strategy
 }
 

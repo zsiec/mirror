@@ -138,9 +138,6 @@ func (d *IDRDetector) isH264IDR(frame *types.VideoFrame) bool {
 // isHEVCIDR performs enhanced HEVC IDR detection
 func (d *IDRDetector) isHEVCIDR(frame *types.VideoFrame) bool {
 	hasIRAP := false
-	hasVPS := false
-	hasSPS := false
-	hasPPS := false
 
 	for _, nal := range frame.NALUnits {
 		if len(nal.Data) < 2 {
@@ -154,26 +151,13 @@ func (d *IDRDetector) isHEVCIDR(frame *types.VideoFrame) bool {
 			HEVCNALTypeIDRWRADL, HEVCNALTypeIDRNLP, HEVCNALTypeCRANUT:
 			hasIRAP = true
 
-		case HEVCNALTypeVPS:
-			hasVPS = true
-
 		case HEVCNALTypeSPS:
-			hasSPS = true
 			d.parseHEVCSPS(nal.Data[2:])
-
-		case HEVCNALTypePPS:
-			hasPPS = true
 		}
 	}
 
-	// IRAP with parameter sets is a keyframe
+	// IRAP (IDR, BLA, CRA) is a keyframe
 	if hasIRAP {
-		d.updateKeyframeStats(frame.FrameNumber)
-		return true
-	}
-
-	// CRA (Clean Random Access) can also serve as keyframe
-	if hasIRAP && hasVPS && hasSPS && hasPPS {
 		d.updateKeyframeStats(frame.FrameNumber)
 		return true
 	}
@@ -388,13 +372,26 @@ func getBit(data []byte, bitOffset int) byte {
 }
 
 func (d *IDRDetector) isAV1KeyframeOBU(data []byte) bool {
-	// Parse AV1 frame header
 	if len(data) < 1 {
 		return false
 	}
 
-	// Check frame type bits
-	frameType := (data[0] >> 5) & 0x03
+	offset := 0
+
+	// Skip OBU extension byte if present (check extension_flag from OBU header)
+	// The data passed here is after the OBU header byte, but we need to check
+	// if an extension byte was present. Since we're called with data after the
+	// first header byte, check if the caller's header had extension_flag set.
+	// For safety, look at the first byte as frame header data.
+
+	// Parse show_existing_frame (bit 0 of first byte of frame header)
+	showExistingFrame := (data[offset] >> 7) & 0x01
+	if showExistingFrame == 1 {
+		return false // show_existing_frame is not a keyframe
+	}
+
+	// Check frame type bits (bits 1-2 after show_existing_frame)
+	frameType := (data[offset] >> 5) & 0x03
 	return frameType == 0 // KEY_FRAME
 }
 

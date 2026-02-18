@@ -95,7 +95,7 @@ func (d *Detector) closeCurrentGOP(nextKeyframePTS int64) {
 
 	d.currentGOP.EndPTS = nextKeyframePTS
 	if len(d.currentGOP.Frames) > 0 {
-		d.currentGOP.Duration = d.currentGOP.EndPTS - d.currentGOP.StartPTS
+		d.currentGOP.Duration = ptsDurationWithWrap(d.currentGOP.EndPTS, d.currentGOP.StartPTS)
 	}
 	d.currentGOP.Closed = true
 	d.currentGOP.Complete = true
@@ -187,6 +187,16 @@ type GOPStatistics struct {
 	BFrameRatio      float64
 }
 
+// ptsDurationWithWrap calculates the duration between two PTS values,
+// handling 33-bit wraparound at the boundary (~26.5h at 90kHz).
+func ptsDurationWithWrap(endPTS, startPTS int64) int64 {
+	d := endPTS - startPTS
+	if d < 0 {
+		d += 1 << 33
+	}
+	return d
+}
+
 func (d *Detector) checkGOPCompletion() {
 	if d.currentGOP == nil {
 		return
@@ -199,7 +209,7 @@ func (d *Detector) checkGOPCompletion() {
 		lastFrame := d.currentGOP.Frames[len(d.currentGOP.Frames)-1]
 
 		// Calculate temporal duration from PTS (90kHz clock standard)
-		ptsDuration := lastFrame.PTS - firstFrame.PTS
+		ptsDuration := ptsDurationWithWrap(lastFrame.PTS, firstFrame.PTS)
 		temporalDuration := time.Duration(ptsDuration * 1000000 / 90) // Convert to nanoseconds
 
 		// Mark complete if GOP reaches reasonable temporal duration
@@ -238,7 +248,7 @@ func (d *Detector) checkGOPCompletion() {
 		if d.currentGOP.Duration == 0 && len(d.currentGOP.Frames) > 0 {
 			firstFrame := d.currentGOP.Frames[0]
 			lastFrame := d.currentGOP.Frames[len(d.currentGOP.Frames)-1]
-			d.currentGOP.Duration = lastFrame.PTS - firstFrame.PTS
+			d.currentGOP.Duration = ptsDurationWithWrap(lastFrame.PTS, firstFrame.PTS)
 		}
 	}
 }
