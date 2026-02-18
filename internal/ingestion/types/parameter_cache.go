@@ -133,6 +133,8 @@ func (c *ParameterSetCache) removeItem(item *cacheItem) {
 func (c *ParameterSetCache) cleanupExpired() {
 	for {
 		select {
+		case <-c.stopCh:
+			return
 		case <-c.ticker.C:
 			c.mu.Lock()
 			now := time.Now()

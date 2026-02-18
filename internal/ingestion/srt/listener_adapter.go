@@ -1,5 +1,7 @@
 package srt
 
+import "fmt"
+
 // ListenerAdapter adapts the new Listener to the old Listener interface
 // This allows gradual migration while maintaining compatibility
 type ListenerAdapter struct {
@@ -32,22 +34,33 @@ func (a *ListenerAdapter) GetActiveSessions() int {
 
 // TerminateStream terminates a stream by ID
 func (a *ListenerAdapter) TerminateStream(streamID string) error {
-	// The new implementation doesn't support direct stream termination
-	// This would need to be handled at the connection level
-	return nil
+	v, ok := a.Listener.connections.Load(streamID)
+	if !ok {
+		return fmt.Errorf("stream %s not found", streamID)
+	}
+	conn := v.(*Connection)
+	return conn.Close()
 }
 
 // PauseStream pauses a stream by ID
 func (a *ListenerAdapter) PauseStream(streamID string) error {
-	// The new implementation doesn't support direct stream control
-	// This would need to be handled at the connection level
+	v, ok := a.Listener.connections.Load(streamID)
+	if !ok {
+		return fmt.Errorf("stream %s not found", streamID)
+	}
+	conn := v.(*Connection)
+	conn.Pause()
 	return nil
 }
 
 // ResumeStream resumes a stream by ID
 func (a *ListenerAdapter) ResumeStream(streamID string) error {
-	// The new implementation doesn't support direct stream control
-	// This would need to be handled at the connection level
+	v, ok := a.Listener.connections.Load(streamID)
+	if !ok {
+		return fmt.Errorf("stream %s not found", streamID)
+	}
+	conn := v.(*Connection)
+	conn.Resume()
 	return nil
 }
 

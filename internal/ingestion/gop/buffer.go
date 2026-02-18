@@ -189,7 +189,7 @@ func (b *Buffer) AddGOP(gop *types.GOP) {
 		"gop_id":     gop.ID,
 		"gop_frames": len(gop.Frames),
 		"total_nals": b.countTotalNALUnits(gop),
-	}).Info("🔬 Extracting parameter sets using parsing")
+	}).Info("Extracting parameter sets using parsing")
 
 	// Extract parameter sets using unified approach
 	b.extractParameterSetsFromGOP(gop, b.parameterContext)
@@ -611,7 +611,7 @@ func (b *Buffer) GetLatestIFrame() *types.VideoFrame {
 		"gop_count":     b.gops.Len(),
 		"current_bytes": b.currentBytes,
 		"total_gops":    b.totalGOPs,
-	}).Info("🔍 Searching for latest iframe in GOP buffer")
+	}).Info("Searching for latest iframe in GOP buffer")
 
 	gopCount := 0
 	frameCount := 0
@@ -630,7 +630,7 @@ func (b *Buffer) GetLatestIFrame() *types.VideoFrame {
 			"i_frames":     countIFrames(gop),
 			"p_frames":     gop.PFrameCount,
 			"b_frames":     gop.BFrameCount,
-		}).Debug("🔎 Examining GOP for iframe")
+		}).Debug("Examining GOP for iframe")
 
 		// Find the iframe (keyframe) in this GOP
 		for frameIdx, frame := range gop.Frames {
@@ -646,7 +646,7 @@ func (b *Buffer) GetLatestIFrame() *types.VideoFrame {
 				"frame_size":     frame.TotalSize,
 				"nal_units":      len(frame.NALUnits),
 				"pts":            frame.PTS,
-			}).Debug("🎞️  Checking frame")
+			}).Debug("Checking frame")
 
 			if frame.IsKeyframe() {
 				b.logger.WithFields(map[string]interface{}{
@@ -661,7 +661,7 @@ func (b *Buffer) GetLatestIFrame() *types.VideoFrame {
 					"pts":             frame.PTS,
 					"capture_time":    frame.CaptureTime,
 					"complete_time":   frame.CompleteTime,
-				}).Info("✅ Found latest iframe")
+				}).Info("Found latest iframe")
 				return frame
 			}
 		}
@@ -672,7 +672,7 @@ func (b *Buffer) GetLatestIFrame() *types.VideoFrame {
 		"gops_searched":   gopCount,
 		"frames_searched": frameCount,
 		"total_gops":      b.gops.Len(),
-	}).Warn("❌ No iframe found in GOP buffer")
+	}).Warn("No iframe found in GOP buffer")
 
 	return nil
 }
@@ -809,6 +809,31 @@ func (b *Buffer) countTotalNALUnits(gop *types.GOP) int {
 	return total
 }
 
+// ExtractNALTypeFromData extracts the NAL type from NAL unit data, handling start codes
+func ExtractNALTypeFromData(data []byte) uint8 {
+	if len(data) == 0 {
+		return 0
+	}
+
+	// Skip start code if present
+	offset := 0
+	if len(data) >= 3 && data[0] == 0x00 && data[1] == 0x00 {
+		if data[2] == 0x01 {
+			offset = 3
+		} else if len(data) >= 4 && data[2] == 0x00 && data[3] == 0x01 {
+			offset = 4
+		}
+	}
+
+	// Check if we have data after start code
+	if offset >= len(data) {
+		return 0
+	}
+
+	// Extract NAL type from the NAL header byte
+	return data[offset] & 0x1F
+}
+
 // extractParameterSetsFromGOP extracts parameter sets from a single GOP using unified approach
 func (b *Buffer) extractParameterSetsFromGOP(gop *types.GOP, paramContext *types.ParameterSetContext) {
 	for _, frame := range gop.Frames {
@@ -819,11 +844,27 @@ func (b *Buffer) extractParameterSetsFromGOP(gop *types.GOP, paramContext *types
 
 			nalType := nalUnit.Type
 			if nalType == 0 && len(nalUnit.Data) > 0 {
-				nalType = nalUnit.Data[0] & 0x1F
+				// Extract NAL type, handling start codes properly
+				nalType = ExtractNALTypeFromData(nalUnit.Data)
+
+				// Debug log to see what's being extracted
+				if nalType == 8 {
+					// This is being identified as PPS, let's see why
+					b.logger.WithFields(map[string]interface{}{
+						"stream_id":      b.streamID,
+						"gop_id":         gop.ID,
+						"nal_type":       nalType,
+						"data_len":       len(nalUnit.Data),
+						"first_16_bytes": fmt.Sprintf("%02x", nalUnit.Data[:minInt(16, len(nalUnit.Data))]),
+					}).Debug("NAL EXTRACTION: Found NAL type 8 (PPS)")
+				}
 			}
 
-			// Use the unified extraction method
-			b.ExtractParameterSetFromNAL(paramContext, nalUnit, nalType, gop.ID)
+			// Only process actual parameter sets
+			if nalType == 7 || nalType == 8 {
+				// Use the unified extraction method
+				b.ExtractParameterSetFromNAL(paramContext, nalUnit, nalType, gop.ID)
+			}
 		}
 	}
 }
@@ -872,7 +913,7 @@ func (b *Buffer) ExtractParameterSetFromNAL(paramContext *types.ParameterSetCont
 				"raw_bytes":  fmt.Sprintf("%x", spsData[:maxBytes]),
 				"has_header": len(spsData) > 0 && spsData[0] == 0x67,
 				"issue":      "SPS_ADDITION_FAILED",
-			}).Error("💥 CRITICAL: Failed to add H.264 SPS - this will prevent iframe generation")
+			}).Error("CRITICAL: Failed to add H.264 SPS - this will prevent iframe generation")
 			return false
 		}
 
@@ -902,48 +943,77 @@ func (b *Buffer) ExtractParameterSetFromNAL(paramContext *types.ParameterSetCont
 		return true
 
 	case 8: // H.264 PPS
-		// Construct proper NAL unit with header if needed
-		var ppsData []byte
-		if len(nalUnit.Data) > 0 && nalUnit.Data[0] != 0x68 {
-			// Add NAL header if missing
-			ppsData = make([]byte, len(nalUnit.Data)+1)
-			ppsData[0] = 0x68 // H.264 PPS NAL header
-			copy(ppsData[1:], nalUnit.Data)
-		} else {
-			// Use data as-is if header already present
-			ppsData = nalUnit.Data
-		}
-
-		// **ENHANCED DEBUGGING: Extract and log the PPS ID**
-		ppsID := uint8(255) // Default invalid ID
-		parseError := ""
-		if len(ppsData) >= 2 {
-			// Parse PPS ID from the data to aid debugging
-			ppsPayload := ppsData[1:] // Skip NAL header
-			if len(ppsPayload) > 0 {
-				// Simple parsing to extract PPS ID (first few bits)
-				bitReader := newSimpleBitReader(ppsPayload)
-				if id, err := bitReader.readUE(); err == nil && id <= 255 {
-					ppsID = uint8(id)
-				} else {
-					parseError = fmt.Sprintf("PPS ID parse failed: %v", err)
+		// Check for obviously corrupt data before validation
+		if len(nalUnit.Data) > 1 {
+			// Check if data is all 0xFF (common corruption pattern)
+			allFF := true
+			for i := 1; i < len(nalUnit.Data) && i < 10; i++ {
+				if nalUnit.Data[i] != 0xFF {
+					allFF = false
+					break
 				}
+			}
+			if allFF {
+				b.logger.WithFields(map[string]interface{}{
+					"stream_id":   b.streamID,
+					"gop_id":      gopID,
+					"nal_size":    len(nalUnit.Data),
+					"first_bytes": fmt.Sprintf("%x", nalUnit.Data[:min(10, len(nalUnit.Data))]),
+				}).Warn("Skipping corrupt PPS NAL unit (all 0xFF)")
+				return false
 			}
 		}
 
-		// **DEBUG: Log all PPS attempts, especially for IDs we're missing**
-		maxBytes := len(ppsData)
-		if maxBytes > 10 {
-			maxBytes = 10
+		// Validate and fix NAL unit if needed
+		ppsData, err := types.ValidateAndFixNALUnit(nalUnit.Data, 8)
+		if err != nil {
+			b.logger.WithFields(map[string]interface{}{
+				"stream_id": b.streamID,
+				"gop_id":    gopID,
+				"error":     err.Error(),
+				"nal_size":  len(nalUnit.Data),
+				"first_bytes": func() string {
+					if len(nalUnit.Data) > 10 {
+						return fmt.Sprintf("%x", nalUnit.Data[:10])
+					}
+					return fmt.Sprintf("%x", nalUnit.Data)
+				}(),
+			}).Warn("Failed to validate/fix PPS NAL unit")
+			return false
 		}
+
+		// Validate PPS data and extract IDs
+		ppsID, referencedSPSID, err := types.ValidatePPSData(ppsData)
+		if err != nil {
+			b.logger.WithFields(map[string]interface{}{
+				"stream_id": b.streamID,
+				"gop_id":    gopID,
+				"error":     err.Error(),
+				"nal_size":  len(ppsData),
+				"first_bytes": func() string {
+					if len(ppsData) > 10 {
+						return fmt.Sprintf("%x", ppsData[:10])
+					}
+					return fmt.Sprintf("%x", ppsData)
+				}(),
+			}).Error("PPS validation failed after fix attempt")
+			return false
+		}
+
+		// Log successful PPS validation
 		b.logger.WithFields(map[string]interface{}{
-			"stream_id":   b.streamID,
-			"gop_id":      gopID,
-			"nal_size":    len(ppsData),
-			"pps_id":      ppsID,
-			"parse_error": parseError,
-			"raw_bytes":   fmt.Sprintf("%x", ppsData[:maxBytes]),
-		}).Debug("🔍 Processing PPS NAL unit")
+			"stream_id":         b.streamID,
+			"gop_id":            gopID,
+			"nal_size":          len(ppsData),
+			"pps_id":            ppsID,
+			"referenced_sps_id": referencedSPSID,
+			"first_bytes": func() string {
+				if len(ppsData) > 10 {
+					return fmt.Sprintf("%x", ppsData[:10])
+				}
+				return fmt.Sprintf("%x", ppsData)
+			}(),
+		}).Debug("Valid PPS NAL unit processed")
 
 		if err := paramContext.AddPPS(ppsData); err != nil {
 			b.logger.WithFields(map[string]interface{}{

@@ -261,35 +261,48 @@ func (d *Detector) DetectFromRTPPacket(packet *rtp.Packet) (Type, error) {
 		return codecType, nil
 	}
 
-	// Try to detect from payload patterns (less reliable)
-	if len(packet.Payload) < 4 {
+	// Try to detect from payload patterns (less reliable than SDP-based detection)
+	// NOTE: Payload-based detection is inherently ambiguous since H.264 and HEVC
+	// NAL type ranges overlap. SDP-based detection should always be preferred.
+	if len(packet.Payload) < 2 {
 		return TypeUnknown, fmt.Errorf("payload too short for detection")
 	}
 
-	// Check for H.264 NAL unit patterns
-	nalType := packet.Payload[0] & 0x1F
-	if nalType >= 1 && nalType <= 23 {
-		// Likely H.264 single NAL unit
-		return TypeH264, nil
-	} else if nalType == 24 || nalType == 25 || nalType == 26 || nalType == 27 {
-		// H.264 aggregation or fragmentation units
-		return TypeH264, nil
+	// Check for HEVC first — HEVC has 2-byte NAL headers with specific structure
+	// Per RFC 7798: F(1) | Type(6) | LayerID(6) | TID(3)
+	// TID must be > 0 per spec, LayerID == 0 for base layer
+	if len(packet.Payload) >= 2 {
+		forbiddenBit := packet.Payload[0] >> 7
+		hevcNalType := (packet.Payload[0] >> 1) & 0x3F
+		tid := packet.Payload[1] & 0x07
+
+		if forbiddenBit == 0 && tid > 0 && hevcNalType <= 49 {
+			// Check for HEVC-specific NAL types that don't exist in H.264
+			// Types 32-40 are HEVC-only (VPS, SPS, PPS, AUD, etc.)
+			// Types 48-49 are AP and FU for HEVC RTP (RFC 7798)
+			if hevcNalType >= 32 {
+				return TypeHEVC, nil
+			}
+		}
 	}
 
-	// Check for HEVC patterns
-	if len(packet.Payload) >= 2 {
-		hevcNalType := (packet.Payload[0] >> 1) & 0x3F
-		if hevcNalType >= 0 && hevcNalType <= 47 {
-			// Possibly HEVC
-			return TypeHEVC, nil
+	// Check for H.264 NAL unit patterns
+	// Per RFC 6184: F(1) | NRI(2) | Type(5) — forbidden_zero_bit must be 0
+	forbiddenBit := packet.Payload[0] >> 7
+	nalType := packet.Payload[0] & 0x1F
+	if forbiddenBit == 0 {
+		if nalType >= 1 && nalType <= 23 {
+			return TypeH264, nil
+		} else if nalType >= 24 && nalType <= 29 {
+			// H.264 STAP-A/B, MTAP, FU-A/B
+			return TypeH264, nil
 		}
 	}
 
 	// Check for AV1 OBU patterns
-	if packet.Payload[0]&0x80 == 0 { // Forbidden bit must be 0
+	if len(packet.Payload) >= 4 && packet.Payload[0]&0x80 == 0 {
 		obuType := (packet.Payload[0] >> 3) & 0x0F
 		if obuType >= 1 && obuType <= 8 {
-			// Likely AV1 OBU
 			return TypeAV1, nil
 		}
 	}

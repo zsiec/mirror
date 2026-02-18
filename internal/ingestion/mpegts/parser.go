@@ -3,6 +3,9 @@ package mpegts
 import (
 	"errors"
 	"fmt"
+	"time"
+
+	"github.com/zsiec/mirror/internal/ingestion/validation"
 )
 
 const (
@@ -19,12 +22,13 @@ const (
 
 // Packet represents an MPEG-TS packet
 type Packet struct {
-	PID                   uint16
-	PayloadStart          bool
-	AdaptationFieldExists bool
-	PayloadExists         bool
-	ContinuityCounter     uint8
-	Payload               []byte
+	PID                    uint16
+	PayloadStart           bool
+	AdaptationFieldExists  bool
+	PayloadExists          bool
+	ContinuityCounter      uint8
+	DiscontinuityIndicator bool
+	Payload                []byte
 
 	// PTS/DTS if present
 	HasPTS bool
@@ -56,13 +60,30 @@ type Parser struct {
 	// Detected codec from PMT
 	videoStreamType uint8
 	audioStreamType uint8
+
+	// Error tracking
+	continuityErrors uint64
+
+	// Validators for safety
+	packetValidator     *validation.PacketValidator
+	boundaryValidator   *validation.BoundaryValidator
+	timestampValidator  *validation.TimestampValidator
+	ptsValidator        *validation.PTSDTSValidator
+	continuityValidator *validation.ContinuityValidator
+	pesValidator        *validation.PESValidator
 }
 
 // NewParser creates a new MPEG-TS parser
 func NewParser() *Parser {
 	return &Parser{
-		pesBuffer:  make(map[uint16][]byte),
-		pesStarted: make(map[uint16]bool),
+		pesBuffer:           make(map[uint16][]byte),
+		pesStarted:          make(map[uint16]bool),
+		packetValidator:     validation.NewPacketValidator(),
+		boundaryValidator:   validation.NewBoundaryValidator(),
+		timestampValidator:  validation.NewTimestampValidator(),
+		ptsValidator:        validation.NewPTSDTSValidator("mpegts-parser"),
+		continuityValidator: validation.NewContinuityValidator(),
+		pesValidator:        validation.NewPESValidator(5 * time.Second),
 	}
 }
 
@@ -81,7 +102,9 @@ func (p *Parser) ParseWithExtractor(data []byte, extractor ParameterSetExtractor
 
 	// Process all complete packets
 	for i := 0; i+PacketSize <= len(data); i += PacketSize {
-		pkt, err := p.parsePacket(data[i : i+PacketSize])
+		packetData := data[i : i+PacketSize]
+
+		pkt, err := p.parsePacket(packetData)
 		if err != nil {
 			// Skip invalid packets
 			continue
@@ -92,20 +115,31 @@ func (p *Parser) ParseWithExtractor(data []byte, extractor ParameterSetExtractor
 			p.parsePAT(pkt.Payload)
 		} else if pkt.PID == p.pmtPID && pkt.PayloadStart && pkt.PayloadExists {
 			p.parsePMTWithExtractor(pkt.Payload, extractor)
+		} else if !p.pmtParsed && pkt.PayloadStart && pkt.PayloadExists &&
+			(pkt.PID == 0x0010 || pkt.PID == 0x0011 || pkt.PID == 0x1000 || pkt.PID == 0x1001) {
+			// Common PMT PIDs - try parsing as PMT even if PAT hasn't been processed yet
+			// Check if this looks like a PMT by checking table ID
+			if len(pkt.Payload) > 1 {
+				pointerField := int(pkt.Payload[0])
+				if pointerField+1 < len(pkt.Payload) && pkt.Payload[pointerField+1] == 0x02 {
+					p.pmtPID = pkt.PID // Update PMT PID
+					p.parsePMTWithExtractor(pkt.Payload, extractor)
+				}
+			}
 		}
 
 		// **NEW: Extract parameter sets from PES packets**
 		if pkt.PayloadStart && pkt.PayloadExists {
 			if err := p.parsePESHeader(pkt); err == nil {
 				// Check if this PES packet contains parameter sets
-				if extractor != nil {
+				if extractor != nil && pkt.PID == p.videoPID {
 					p.extractParameterSetsFromPES(pkt, extractor)
 				}
 				packets = append(packets, pkt)
 			}
 		} else if pkt.PayloadExists {
 			// Continuation of PES packet - assemble complete PES
-			if extractor != nil {
+			if extractor != nil && pkt.PID == p.videoPID {
 				p.assemblePESPacket(pkt, extractor)
 			}
 			packets = append(packets, pkt)
@@ -117,12 +151,9 @@ func (p *Parser) ParseWithExtractor(data []byte, extractor ParameterSetExtractor
 
 // parsePacket parses a single MPEG-TS packet
 func (p *Parser) parsePacket(data []byte) (*Packet, error) {
-	if len(data) != PacketSize {
-		return nil, fmt.Errorf("invalid packet size: %d", len(data))
-	}
-
-	if data[0] != SyncByte {
-		return nil, errors.New("missing sync byte")
+	// Use validator to check packet validity
+	if err := p.packetValidator.ValidateMPEGTSPacket(data); err != nil {
+		return nil, fmt.Errorf("packet validation failed: %w", err)
 	}
 
 	pkt := &Packet{}
@@ -143,13 +174,25 @@ func (p *Parser) parsePacket(data []byte) (*Packet, error) {
 	// Payload unit start indicator
 	pkt.PayloadStart = data[1]&0x40 != 0
 
-	// Adaptation field control
+	// Adaptation field control (ISO 13818-1: 0b00 is reserved)
 	adaptationFieldControl := (data[3] >> 4) & 0x03
+	if adaptationFieldControl == 0 {
+		return nil, errors.New("reserved adaptation_field_control value 0")
+	}
 	pkt.AdaptationFieldExists = adaptationFieldControl&0x02 != 0
 	pkt.PayloadExists = adaptationFieldControl&0x01 != 0
 
 	// Continuity counter
 	pkt.ContinuityCounter = data[3] & 0x0F
+
+	// Validate continuity counter (except for null packets)
+	if pkt.PID != PIDNull {
+		if err := p.continuityValidator.ValidateContinuity(pkt.PID, pkt.ContinuityCounter, pkt.PayloadExists, pkt.AdaptationFieldExists); err != nil {
+			// Continuity errors are common in real-world streams (discontinuities,
+			// stream switches). Track them but don't fail parsing.
+			p.continuityErrors++
+		}
+	}
 
 	// Parse adaptation field if present
 	offset := 4
@@ -158,9 +201,13 @@ func (p *Parser) parsePacket(data []byte) (*Packet, error) {
 		offset++
 
 		if adaptationFieldLength > 0 {
-			// Check for PCR
-			if data[offset]&0x10 != 0 && adaptationFieldLength >= 6 {
-				// PCR is in next 6 bytes
+			// Parse adaptation field flags (first byte after length)
+			flags := data[offset]
+			pkt.DiscontinuityIndicator = flags&0x80 != 0
+
+			// Check for PCR (flag bit 4, needs 6 bytes for PCR data after flags byte = 7 total)
+			if flags&0x10 != 0 && adaptationFieldLength >= 7 && offset+7 <= len(data) {
+				// PCR: 33-bit base + 6 reserved + 9-bit extension = 48 bits = 6 bytes
 				pcrBase := int64(data[offset+1])<<25 |
 					int64(data[offset+2])<<17 |
 					int64(data[offset+3])<<9 |
@@ -191,6 +238,16 @@ func (p *Parser) parsePacket(data []byte) (*Packet, error) {
 func (p *Parser) parsePESHeader(pkt *Packet) error {
 	if len(pkt.Payload) < 9 {
 		return errors.New("PES header too short")
+	}
+
+	// Validate PES start using PES validator
+	if pkt.PayloadStart {
+		if err := p.pesValidator.ValidatePESStart(pkt.PID, pkt.Payload); err != nil {
+			// Log but continue - some streams have malformed PES headers
+			// The validator tracks state for debugging
+		}
+		// Mark in our simple tracking
+		p.pesStarted[pkt.PID] = true
 	}
 
 	// Check PES start code prefix (0x000001)
@@ -243,6 +300,26 @@ func (p *Parser) parsePESHeader(pkt *Packet) error {
 				}
 				pkt.DTS = dts
 				pkt.HasDTS = true
+			} else {
+				// No DTS present, use PTS value
+				pkt.DTS = pts
+			}
+
+			// Validate timestamps using comprehensive validator
+			validationResult := p.ptsValidator.ValidateTimestamps(pkt.PTS, pkt.DTS)
+			if !validationResult.Valid {
+				return fmt.Errorf("PTS/DTS validation failed: %w", validationResult.Error)
+			}
+
+			// Apply any corrections (e.g., for wraparound)
+			if validationResult.PTSWrapped || validationResult.DTSWrapped {
+				// Log wraparound but don't modify the original values
+				// The corrected values are available in validationResult if needed
+			}
+
+			// Additional validation using timestamp validator
+			if err := p.timestampValidator.ValidatePTSDTSOrder(pkt.PTS, pkt.DTS); err != nil {
+				return fmt.Errorf("invalid PTS/DTS relationship: %w", err)
 			}
 		}
 	}
@@ -252,9 +329,23 @@ func (p *Parser) parsePESHeader(pkt *Packet) error {
 
 // extractTimestamp extracts a 33-bit timestamp from 5 bytes
 func (p *Parser) extractTimestamp(data []byte) (int64, error) {
-	// Add bounds checking to prevent panic
-	if len(data) < 5 {
-		return 0, fmt.Errorf("insufficient data for timestamp: need 5 bytes, got %d", len(data))
+	// Use boundary validator to ensure safe access
+	if err := p.boundaryValidator.ValidateBufferAccess(data, 0, 5); err != nil {
+		return 0, fmt.Errorf("timestamp extraction bounds check failed: %w", err)
+	}
+
+	// Additional validation for timestamp field structure
+	// Check marker bits as per ISO 13818-1 Table 2-21:
+	// 0x21 = PTS only, 0x31 = PTS+DTS (PTS field), 0x11 = DTS only
+	prefix := data[0] & 0xF1
+	if prefix != 0x21 && prefix != 0x31 && prefix != 0x11 {
+		return 0, fmt.Errorf("invalid PTS/DTS prefix byte: 0x%02X", data[0])
+	}
+	if data[2]&0x01 != 0x01 {
+		return 0, fmt.Errorf("invalid timestamp marker bit at byte 2")
+	}
+	if data[4]&0x01 != 0x01 {
+		return 0, fmt.Errorf("invalid timestamp marker bit at byte 4")
 	}
 
 	timestamp := int64(data[0]&0x0E)<<29 |
@@ -262,6 +353,11 @@ func (p *Parser) extractTimestamp(data []byte) (int64, error) {
 		int64(data[2]&0xFE)<<14 |
 		int64(data[3])<<7 |
 		int64(data[4])>>1
+
+	// Validate the extracted timestamp
+	if err := p.timestampValidator.ValidatePTS(timestamp); err != nil {
+		return 0, fmt.Errorf("invalid timestamp value: %w", err)
+	}
 
 	return timestamp, nil
 }
@@ -327,13 +423,22 @@ func (p *Parser) parsePAT(payload []byte) {
 		return
 	}
 
+	// Validate payload bounds
+	if err := p.boundaryValidator.ValidateBufferAccess(payload, 0, 1); err != nil {
+		return
+	}
+
 	// Skip pointer field if present
 	offset := 0
 	if len(payload) > 0 {
-		offset = int(payload[0]) + 1
+		pointerField := int(payload[0])
+		if err := p.boundaryValidator.ValidateBufferAccess(payload, 0, pointerField+1); err != nil {
+			return
+		}
+		offset = pointerField + 1
 	}
 
-	if offset >= len(payload) || len(payload[offset:]) < 8 {
+	if err := p.boundaryValidator.ValidateBufferAccess(payload, offset, 8); err != nil {
 		return
 	}
 
@@ -492,7 +597,7 @@ func (p *Parser) extractParameterSetsFromDescriptors(descriptors []byte, streamT
 		// Look for parameter set descriptors
 		switch descriptorTag {
 		case 0x28: // AVC video descriptor (H.264)
-			if streamType == 0x1B {
+			if streamType == 0x1B || streamType == 0 { // Accept streamType 0 for program-level descriptors
 				paramSets := p.extractH264ParameterSetsFromDescriptor(descriptorData)
 				parameterSets = append(parameterSets, paramSets...)
 			}
@@ -506,6 +611,8 @@ func (p *Parser) extractParameterSetsFromDescriptors(descriptors []byte, streamT
 				paramSets := p.extractAV1ParameterSetsFromDescriptor(descriptorData)
 				parameterSets = append(parameterSets, paramSets...)
 			}
+		default:
+			// Unknown descriptor tag, skip
 		}
 
 		offset += 2 + descriptorLength
@@ -517,6 +624,46 @@ func (p *Parser) extractParameterSetsFromDescriptors(descriptors []byte, streamT
 	}
 }
 
+// looksLikeAVCDescriptor does a quick check to see if data could be an AVC descriptor
+// This is a heuristic check, not a full validation
+func (p *Parser) looksLikeAVCDescriptor(data []byte) bool {
+	if len(data) < 6 {
+		return false
+	}
+
+	// Do a very basic check - just look at profile and basic structure
+	// We want to avoid parsing things that are definitely not AVC descriptors
+	// but still allow extraction from partially corrupted descriptors
+
+	// Check profile - should be a known H.264 profile or at least reasonable
+	profile := data[0]
+
+	// Check if profile is in a reasonable range
+	// Tag 0x28 might be used for other purposes, so if we see data that
+	// doesn't look like a profile byte, it's probably not an AVC descriptor
+	// Profile 0x00 is definitely invalid for H.264
+	if profile == 0x00 {
+		return false
+	}
+
+	// Check if we have at least the minimum structure for SPS count
+	if len(data) < 6 {
+		return false
+	}
+
+	// Quick check: Look at byte 4 (number of SPS with flags)
+	// The upper 3 bits are reserved and should be 111b (0xE0)
+	// So valid values are 0xE0-0xFF (typically 0xE1 for 1 SPS)
+	numSPSByte := data[4]
+	if (numSPSByte & 0xE0) != 0xE0 {
+		return false
+	}
+
+	// If we get here, it's probably an AVC descriptor
+	// Let the main parsing logic handle the detailed validation
+	return true
+}
+
 // extractH264ParameterSetsFromDescriptor extracts H.264 SPS/PPS from AVC descriptor
 func (p *Parser) extractH264ParameterSetsFromDescriptor(data []byte) [][]byte {
 	var parameterSets [][]byte
@@ -525,10 +672,24 @@ func (p *Parser) extractH264ParameterSetsFromDescriptor(data []byte) [][]byte {
 		return parameterSets
 	}
 
+	// Quick sanity check: if the descriptor is too large, it's probably not an AVC descriptor
+	if len(data) > 1024 {
+		return parameterSets
+	}
+
+	// Additional validation: Check if this looks like an AVC descriptor
+	// We do a quick check but still try to extract what we can
+	if !p.looksLikeAVCDescriptor(data) {
+		return parameterSets
+	}
+
 	// Parse AVC configuration record
 	offset := 0
 
 	// Skip profile, constraints, level
+	_ = data[0]
+	_ = data[1]
+	_ = data[2]
 	offset += 3
 
 	if offset >= len(data) {
@@ -536,8 +697,7 @@ func (p *Parser) extractH264ParameterSetsFromDescriptor(data []byte) [][]byte {
 	}
 
 	// Length size minus 1 (usually 3, meaning 4-byte length)
-	_ = data[offset] & 0x03 // Skip length size field
-	offset++
+	offset++ // skip lengthSizeMinusOne byte
 
 	if offset >= len(data) {
 		return parameterSets
@@ -550,6 +710,21 @@ func (p *Parser) extractH264ParameterSetsFromDescriptor(data []byte) [][]byte {
 	// Extract SPS
 	for i := 0; i < int(numSPS) && offset+2 <= len(data); i++ {
 		spsLength := int(data[offset])<<8 | int(data[offset+1])
+
+		// Skip zero-length SPS
+		if spsLength == 0 {
+			offset += 2
+			continue
+		}
+
+		// Sanity check: SPS should not be larger than 512 bytes
+		// Normal SPS is typically 20-200 bytes, 512 is very generous
+		// Also check if length would exceed remaining buffer
+		remainingBytes := len(data) - offset - 2
+		if spsLength > 512 || spsLength > remainingBytes {
+			break // Descriptor is likely corrupted
+		}
+
 		offset += 2
 
 		if offset+spsLength <= len(data) {
@@ -574,9 +749,29 @@ func (p *Parser) extractH264ParameterSetsFromDescriptor(data []byte) [][]byte {
 	numPPS := data[offset]
 	offset++
 
+	// Sanity check: should not have too many PPS
+	if numPPS > 8 {
+		numPPS = 8 // Limit to prevent excessive parsing of corrupted data
+	}
+
 	// Extract PPS
 	for i := 0; i < int(numPPS) && offset+2 <= len(data); i++ {
 		ppsLength := int(data[offset])<<8 | int(data[offset+1])
+
+		// Skip zero-length PPS
+		if ppsLength == 0 {
+			offset += 2
+			continue
+		}
+
+		// Sanity check: PPS should not be larger than 256 bytes
+		// Normal PPS is typically 10-100 bytes, 256 is very generous
+		// Also check if length would exceed remaining buffer
+		remainingBytes := len(data) - offset - 2
+		if ppsLength > 256 || ppsLength > remainingBytes {
+			break // Descriptor is likely corrupted
+		}
+
 		offset += 2
 
 		if offset+ppsLength <= len(data) {
@@ -697,9 +892,19 @@ func (p *Parser) assemblePESPacket(pkt *Packet, extractor ParameterSetExtractor)
 		return // Only process if we've seen the start
 	}
 
+	// Validate PES continuation
+	if err := p.pesValidator.ValidatePESContinuation(pkt.PID, len(pkt.Payload)); err != nil {
+		// Log validation errors but continue processing
+		// Real streams may have issues we need to handle gracefully
+	}
+
 	// Append payload to buffer
 	if existingBuffer, exists := p.pesBuffer[pkt.PID]; exists {
 		p.pesBuffer[pkt.PID] = append(existingBuffer, pkt.Payload...)
+	} else {
+		// Initialize buffer if it doesn't exist
+		p.pesBuffer[pkt.PID] = make([]byte, len(pkt.Payload))
+		copy(p.pesBuffer[pkt.PID], pkt.Payload)
 	}
 
 	// For video streams, we can extract parameter sets from partial data
@@ -709,6 +914,14 @@ func (p *Parser) assemblePESPacket(pkt *Packet, extractor ParameterSetExtractor)
 		if len(parameterSets) > 0 {
 			extractor(parameterSets, p.videoStreamType)
 		}
+	}
+
+	// Check if PES is complete
+	inProgress, _, _ := p.pesValidator.GetStreamState(pkt.PID)
+	if !inProgress {
+		// PES is complete, clear buffer
+		delete(p.pesBuffer, pkt.PID)
+		delete(p.pesStarted, pkt.PID)
 	}
 }
 
@@ -783,6 +996,7 @@ func (p *Parser) extractParameterSetsFromBitstream(data []byte, streamType uint8
 
 		nalUnit := make([]byte, nalEnd-nalStartPos)
 		copy(nalUnit, data[nalStartPos:nalEnd])
+
 		parameterSets = append(parameterSets, nalUnit)
 
 		// Jump to end of this NAL unit
@@ -799,4 +1013,56 @@ func (p *Parser) AddParameterSetsFromPMT(extractor ParameterSetExtractor) {
 	if p.pmtParsed {
 		p.pmtParsed = false // Reset to allow re-parsing
 	}
+}
+
+// GetPTSValidationStats returns PTS/DTS validation statistics
+func (p *Parser) GetPTSValidationStats() map[string]interface{} {
+	if p.ptsValidator != nil {
+		return p.ptsValidator.GetStatistics()
+	}
+	return nil
+}
+
+// ResetPTSValidator resets the PTS/DTS validator state
+func (p *Parser) ResetPTSValidator() {
+	if p.ptsValidator != nil {
+		p.ptsValidator.Reset()
+	}
+}
+
+// GetContinuityStats returns continuity validation statistics
+func (p *Parser) GetContinuityStats() validation.ContinuityStats {
+	if p.continuityValidator != nil {
+		return p.continuityValidator.GetStats()
+	}
+	return validation.ContinuityStats{}
+}
+
+// ResetContinuityValidator resets the continuity validator state
+func (p *Parser) ResetContinuityValidator() {
+	if p.continuityValidator != nil {
+		p.continuityValidator.Reset()
+	}
+}
+
+// CheckPESTimeouts checks for timed-out PES packets and cleans them up
+func (p *Parser) CheckPESTimeouts() []uint16 {
+	if p.pesValidator != nil {
+		timedOutPIDs := p.pesValidator.CheckTimeouts()
+		// Clean up buffers for timed-out PIDs
+		for _, pid := range timedOutPIDs {
+			delete(p.pesBuffer, pid)
+			delete(p.pesStarted, pid)
+		}
+		return timedOutPIDs
+	}
+	return nil
+}
+
+// GetPESStats returns PES assembly statistics
+func (p *Parser) GetPESStats() validation.PESStats {
+	if p.pesValidator != nil {
+		return p.pesValidator.GetStats()
+	}
+	return validation.PESStats{}
 }

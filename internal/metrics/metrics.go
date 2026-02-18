@@ -55,6 +55,46 @@ var (
 		Help: "SRT connection latency in milliseconds",
 	}, []string{"stream_id"})
 
+	srtRTT = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "srt_rtt_milliseconds",
+		Help: "SRT round-trip time in milliseconds",
+	}, []string{"stream_id"})
+
+	srtPacketsLost = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "srt_packets_lost_total",
+		Help: "Total SRT packets lost (receiver side)",
+	}, []string{"stream_id"})
+
+	srtPacketsDropped = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "srt_packets_dropped_total",
+		Help: "Total SRT packets dropped (too late to play)",
+	}, []string{"stream_id"})
+
+	srtPacketsRetransmitted = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "srt_packets_retransmitted_total",
+		Help: "Total SRT packets retransmitted",
+	}, []string{"stream_id"})
+
+	srtFlightSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "srt_flight_size_packets",
+		Help: "SRT packets currently in flight",
+	}, []string{"stream_id"})
+
+	srtReceiveRateMbps = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "srt_receive_rate_mbps",
+		Help: "SRT receive rate in megabits per second",
+	}, []string{"stream_id"})
+
+	srtBandwidthMbps = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "srt_bandwidth_mbps",
+		Help: "SRT estimated link bandwidth in megabits per second",
+	}, []string{"stream_id"})
+
+	srtAvailableRcvBuf = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "srt_available_rcv_buffer_bytes",
+		Help: "SRT available receiver buffer in bytes",
+	}, []string{"stream_id"})
+
 	// RTP specific metrics
 	rtpJitter = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "rtp_jitter_milliseconds",
@@ -179,12 +219,12 @@ func IncrementContextCancellation(component, reason string) {
 
 // UpdateSRTBytesReceived updates the SRT bytes received counter
 func UpdateSRTBytesReceived(streamID string, bytes int64) {
-	streamBytesTotal.WithLabelValues(streamID, "srt").Add(float64(bytes))
+	streamBytesTotal.WithLabelValues(streamID, "srt_recv").Add(float64(bytes))
 }
 
 // UpdateSRTBytesSent updates the SRT bytes sent counter
 func UpdateSRTBytesSent(streamID string, bytes int64) {
-	streamBytesTotal.WithLabelValues(streamID, "srt").Add(float64(bytes))
+	streamBytesTotal.WithLabelValues(streamID, "srt_send").Add(float64(bytes))
 }
 
 // IncrementSRTConnections increments the SRT connection counter
@@ -195,4 +235,23 @@ func IncrementSRTConnections() {
 // DecrementSRTConnections decrements the SRT connection counter
 func DecrementSRTConnections() {
 	streamsActiveTotal.WithLabelValues("srt").Dec()
+}
+
+// UpdateSRTStats updates all SRT-specific gauges for a stream.
+// Counters (lost, dropped, retransmitted) expect deltas, not cumulative values.
+func UpdateSRTStats(streamID string, rttMs float64, packetsLostDelta, packetsDroppedDelta, packetsRetransDelta int64, flightSize int, receiveRateMbps, bandwidthMbps float64, availRcvBuf int) {
+	srtRTT.WithLabelValues(streamID).Set(rttMs)
+	if packetsLostDelta > 0 {
+		srtPacketsLost.WithLabelValues(streamID).Add(float64(packetsLostDelta))
+	}
+	if packetsDroppedDelta > 0 {
+		srtPacketsDropped.WithLabelValues(streamID).Add(float64(packetsDroppedDelta))
+	}
+	if packetsRetransDelta > 0 {
+		srtPacketsRetransmitted.WithLabelValues(streamID).Add(float64(packetsRetransDelta))
+	}
+	srtFlightSize.WithLabelValues(streamID).Set(float64(flightSize))
+	srtReceiveRateMbps.WithLabelValues(streamID).Set(receiveRateMbps)
+	srtBandwidthMbps.WithLabelValues(streamID).Set(bandwidthMbps)
+	srtAvailableRcvBuf.WithLabelValues(streamID).Set(float64(availRcvBuf))
 }

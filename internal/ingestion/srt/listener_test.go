@@ -48,6 +48,10 @@ func (m *mockSRTAdapter) NewConnection(socket SRTSocket) (SRTConnection, error) 
 	}, nil
 }
 
+func (m *mockSRTAdapter) Connect(ctx context.Context, address string, port int, config Config) (SRTConnection, error) {
+	return nil, fmt.Errorf("caller mode not supported in mock")
+}
+
 // Mock SRT listener
 type mockSRTListener struct {
 	address  string
@@ -103,7 +107,7 @@ func (m *mockSRTListener) addConnection(streamID string, shouldAccept bool) {
 		streamID:     streamID,
 		shouldAccept: shouldAccept,
 	}
-	
+
 	// Call callback if set
 	if m.callback != nil {
 		addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
@@ -204,7 +208,7 @@ func createTestListener(t *testing.T) (*Listener, *mockSRTAdapter) {
 
 func TestListener_Creation(t *testing.T) {
 	listener, _ := createTestListener(t)
-	
+
 	assert.NotNil(t, listener)
 	assert.NotNil(t, listener.config)
 	assert.NotNil(t, listener.registry)
@@ -258,10 +262,27 @@ func TestListener_ValidateStreamID(t *testing.T) {
 		{"valid with underscore", "test_stream", true},
 		{"valid with hyphen", "test-stream", true},
 		{"empty string", "", false},
-		{"too long", string(make([]byte, 65)), false},
-		{"invalid chars", "test@stream", false},
-		{"spaces", "test stream", false},
-		{"special chars", "test$stream!", false},
+		{"512 chars", string(make([]byte, 512)), false}, // 512 null bytes - not printable ASCII
+		{"valid at sign", "test@stream", true},          // printable ASCII
+		{"valid spaces", "test stream", true},           // space is printable ASCII
+		{"valid special chars", "test$stream!", true},   // printable ASCII
+		{"haivision access control", "#!::r=mystream,m=publish", true},
+		{"max length 512", func() string {
+			b := make([]byte, 512)
+			for i := range b {
+				b[i] = 'a'
+			}
+			return string(b)
+		}(), true},
+		{"too long 513", func() string {
+			b := make([]byte, 513)
+			for i := range b {
+				b[i] = 'a'
+			}
+			return string(b)
+		}(), false},
+		{"control chars", "test\x01stream", false}, // non-printable
+		{"null byte", "test\x00stream", false},     // non-printable
 	}
 
 	for _, tt := range tests {
@@ -276,14 +297,14 @@ func TestListener_HandleIncomingConnection(t *testing.T) {
 	listener, _ := createTestListener(t)
 
 	tests := []struct {
-		name       string
-		streamID   string
+		name         string
+		streamID     string
 		shouldAccept bool
-		reason     RejectionReason
+		reason       RejectionReason
 	}{
 		{"valid stream", "test-stream", true, 0},
 		{"invalid stream ID", "", false, RejectionReasonBadRequest},
-		{"invalid characters", "test@stream", false, RejectionReasonBadRequest},
+		{"control characters", "test\x01stream", false, RejectionReasonBadRequest},
 	}
 
 	for _, tt := range tests {
@@ -352,7 +373,7 @@ func TestListener_GetConnectionInfo(t *testing.T) {
 
 	info := listener.GetConnectionInfo()
 	assert.Equal(t, 3, info["active_count"])
-	
+
 	connections, ok := info["connections"].(map[string]interface{})
 	assert.True(t, ok)
 	assert.Len(t, connections, 3)
@@ -360,7 +381,7 @@ func TestListener_GetConnectionInfo(t *testing.T) {
 	// Check a specific connection
 	conn0, exists := connections["stream-0"]
 	assert.True(t, exists)
-	
+
 	connMap, ok := conn0.(map[string]interface{})
 	assert.True(t, ok)
 	assert.Equal(t, "stream-0", connMap["stream_id"])

@@ -182,16 +182,38 @@ func (d *CodecDetector) detectFromPayload(payload []byte, payloadType uint8) typ
 
 	// For dynamic payload types, try to detect from NAL unit patterns
 	if payloadType >= 96 && payloadType <= 127 {
+		// Try HEVC detection first since H.264 NAL type range (1-29) overlaps with
+		// HEVC's first byte patterns. HEVC uses 2-byte NAL headers where the type
+		// is in bits 1-6 of the first byte; check for HEVC-specific indicators.
+		if len(payload) >= 2 {
+			hevcNalType := (payload[0] >> 1) & 0x3F
+			// HEVC forbidden_zero_bit must be 0 (bit 7)
+			forbiddenBit := (payload[0] & 0x80) != 0
+			// HEVC nuh_layer_id is bits 0-5 of byte 0 (bit 0) and bits 7-3 of byte 1
+			// nuh_temporal_id_plus1 is bits 2-0 of byte 1, must be >= 1
+			nuhTemporalIdPlus1 := payload[1] & 0x07
+			if !forbiddenBit && nuhTemporalIdPlus1 >= 1 {
+				// HEVC AP (48) and FU (49) are definitive HEVC indicators
+				if hevcNalType == 48 || hevcNalType == 49 {
+					return types.CodecHEVC
+				}
+			}
+		}
+
 		// H.264 detection
 		nalType := payload[0] & 0x1F
 		if nalType >= 1 && nalType <= 23 {
 			return types.CodecH264
 		}
+		// H.264 aggregation/fragmentation types (STAP-A=24, STAP-B=25, MTAP16=26, MTAP24=27, FU-A=28, FU-B=29)
+		if nalType >= 24 && nalType <= 29 {
+			return types.CodecH264
+		}
 
-		// HEVC detection (simple check)
+		// HEVC VCL/non-VCL detection (less certain, after H.264 check)
 		if len(payload) >= 2 {
-			nalType := (payload[0] >> 1) & 0x3F
-			if nalType <= 40 { // Valid HEVC NAL types are 0-40
+			hevcNalType := (payload[0] >> 1) & 0x3F
+			if hevcNalType <= 40 { // VCL/non-VCL types 0-40
 				return types.CodecHEVC
 			}
 		}

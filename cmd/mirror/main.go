@@ -111,6 +111,11 @@ func main() {
 		ingestionHandlers := ingestion.NewHandlers(ingestionMgr, log)
 		srv.RegisterRoutes(ingestionHandlers.RegisterRoutes)
 
+		// Register SRT health checker if SRT is enabled
+		if cfg.Ingestion.SRT.Enabled {
+			srv.RegisterHealthChecker(ingestion.NewSRTHealthChecker(ingestionMgr))
+		}
+
 		// Start ingestion
 		if err := ingestionMgr.Start(); err != nil {
 			log.WithError(err).Fatal("Failed to start ingestion manager")

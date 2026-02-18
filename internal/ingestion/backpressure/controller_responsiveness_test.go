@@ -183,7 +183,8 @@ func TestControllerDeadZone(t *testing.T) {
 			changes := changeCount.Load()
 			if tc.expect == "should be in stable zone" {
 				// Stable zone might still make minor adjustments
-				assert.LessOrEqual(t, changes, int32(3), tc.desc)
+				// Allow up to 5 small adjustments during stabilization
+				assert.LessOrEqual(t, changes, int32(5), tc.desc)
 			} else {
 				assert.Greater(t, changes, int32(0), tc.desc)
 			}

@@ -250,6 +250,12 @@ func (rb *RingBuffer) Reset() {
 	rb.written = 0
 	rb.read = 0
 	atomic.StoreInt64(&rb.drops, 0)
+	// Note: does not reset closed state - use Reopen() for that
+}
+
+// Reopen reopens a closed buffer for reuse
+func (rb *RingBuffer) Reopen() {
+	atomic.StoreInt32(&rb.closed, 0)
 }
 
 // BufferStats holds buffer statistics

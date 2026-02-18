@@ -17,6 +17,8 @@ const (
 	FrameTypeVPS                  // Video Parameter Set (HEVC)
 	FrameTypeSEI                  // Supplemental Enhancement Info
 	FrameTypeAUD                  // Access Unit Delimiter
+	FrameTypeCRA                  // Clean Random Access (HEVC)
+	FrameTypeBLA                  // Broken Link Access (HEVC)
 )
 
 // String returns the string representation of FrameType
@@ -40,6 +42,10 @@ func (f FrameType) String() string {
 		return "SEI"
 	case FrameTypeAUD:
 		return "AUD"
+	case FrameTypeCRA:
+		return "CRA"
+	case FrameTypeBLA:
+		return "BLA"
 	default:
 		return "unknown"
 	}
@@ -47,12 +53,12 @@ func (f FrameType) String() string {
 
 // IsKeyframe returns true if this is a keyframe type
 func (f FrameType) IsKeyframe() bool {
-	return f == FrameTypeI || f == FrameTypeIDR
+	return f == FrameTypeI || f == FrameTypeIDR || f == FrameTypeCRA || f == FrameTypeBLA
 }
 
 // IsReference returns true if this frame can be used as reference
 func (f FrameType) IsReference() bool {
-	return f == FrameTypeI || f == FrameTypeP || f == FrameTypeIDR
+	return f == FrameTypeI || f == FrameTypeP || f == FrameTypeIDR || f == FrameTypeCRA || f == FrameTypeBLA
 }
 
 // IsDiscardable returns true if this frame can be dropped without affecting others

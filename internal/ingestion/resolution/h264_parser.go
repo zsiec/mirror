@@ -350,7 +350,9 @@ func (d *Detector) skipScalingList(br *BitReader, index int) error {
 	return nil
 }
 
-// removeEmulationPrevention removes 0x03 bytes that follow 0x00 0x00
+// removeEmulationPrevention removes emulation prevention bytes (0x03) from
+// the byte sequence 0x00 0x00 0x03 0xNN where NN is 0x00, 0x01, 0x02, or 0x03.
+// Per H.264 Section 7.4.1, only these specific patterns are emulation prevention.
 func removeEmulationPrevention(data []byte) []byte {
 	if len(data) < 3 {
 		return data
@@ -360,8 +362,11 @@ func removeEmulationPrevention(data []byte) []byte {
 
 	for i := 0; i < len(data); i++ {
 		if i >= 2 && data[i-2] == 0x00 && data[i-1] == 0x00 && data[i] == 0x03 {
-			// Skip emulation prevention byte
-			continue
+			// Only strip 0x03 if followed by 0x00-0x03 (or at end of data)
+			// Per H.264 Section 7.4.1
+			if i+1 >= len(data) || data[i+1] <= 0x03 {
+				continue
+			}
 		}
 		result = append(result, data[i])
 	}

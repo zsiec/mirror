@@ -71,8 +71,8 @@ func TestProcessTimestamp(t *testing.T) {
 	})
 
 	t.Run("PTS wrap detection", func(t *testing.T) {
-		// Simulate 32-bit wrap
-		mgr.sync.LastPTS = 0xFFFFFF00
+		// Simulate 33-bit wrap (MPEG-TS PTS/DTS are always 33-bit)
+		mgr.sync.LastPTS = (1 << 33) - 256 // Near max 33-bit
 		err := mgr.ProcessTimestamp(100, 100, baseTime.Add(time.Second))
 		require.NoError(t, err)
 

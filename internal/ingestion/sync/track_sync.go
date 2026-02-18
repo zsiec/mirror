@@ -52,29 +52,28 @@ func (t *TrackSyncManager) ProcessTimestamp(pts, dts int64, wallTime time.Time) 
 	}
 
 	// Check for PTS wrap using our detector
-	if t.wrapDetector.DetectWrap(pts, t.sync.LastPTS) {
+	isWrap := t.wrapDetector.DetectWrap(pts, t.sync.LastPTS)
+	if isWrap {
 		t.sync.PTSWrapCount++
 	}
 
-	// Check for PTS jump/discontinuity
-	// We keep expectedPTS for potential future use (e.g., frame drop detection)
-	_ = t.sync.LastPTS + t.estimateFrameDuration()
+	// Check for PTS jump/discontinuity (skip if this was a legitimate wrap)
+	if !isWrap {
+		absoluteDiff := abs(pts - t.sync.LastPTS)
 
-	// Check absolute difference from last PTS for large jumps
-	absoluteDiff := abs(pts - t.sync.LastPTS)
+		// Detect significant jumps (more than 1 second)
+		// Calculate PTS units per second: Den/Num
+		oneSecondInPTS := int64(t.sync.TimeBase.Den) / int64(t.sync.TimeBase.Num)
 
-	// Detect significant jumps (more than 1 second)
-	// Calculate PTS units per second: Den/Num
-	oneSecondInPTS := int64(t.sync.TimeBase.Den) / int64(t.sync.TimeBase.Num)
+		if absoluteDiff > oneSecondInPTS {
+			t.sync.PTSJumps++
 
-	// Use the absolute difference for jump detection, not the difference from expected
-	if absoluteDiff > oneSecondInPTS {
-		t.sync.PTSJumps++
-
-		// Reset base time on very large jumps (>10 seconds)
-		if absoluteDiff > 10*oneSecondInPTS {
-			t.sync.BaseTime = wallTime
-			t.sync.BasePTS = pts
+			// Reset base time on very large jumps (>10 seconds)
+			if absoluteDiff > 10*oneSecondInPTS {
+				t.sync.BaseTime = wallTime
+				t.sync.BasePTS = pts
+				t.sync.PTSWrapCount = 0 // Reset wrap count when resetting base
+			}
 		}
 	}
 

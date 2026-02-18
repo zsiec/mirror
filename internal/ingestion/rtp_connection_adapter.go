@@ -27,6 +27,7 @@ type RTPConnectionAdapter struct {
 	// Frame detection
 	depacketizer   codec.Depacketizer
 	lastSeqNum     uint16
+	seqInitialized bool // Whether lastSeqNum has been set (seq 0 is valid per RFC 3550)
 	lastTimestamp  uint32
 	lastPacketTime time.Time
 
@@ -323,17 +324,18 @@ func (a *RTPConnectionAdapter) ProcessPacket(rtpPkt *rtp.Packet) error {
 	}
 	a.lastPacketTime = now
 
-	// Detect packet loss
-	if a.lastSeqNum != 0 {
-		expectedSeq := a.lastSeqNum + 1
-		if rtpPkt.SequenceNumber != expectedSeq {
-			// Mark potential corruption due to packet loss
-			if rtpPkt.SequenceNumber > expectedSeq {
+	// Detect packet loss using signed 16-bit arithmetic for wraparound safety (RFC 1982)
+	if a.seqInitialized {
+		seqDelta := int16(rtpPkt.SequenceNumber - a.lastSeqNum)
+		if seqDelta != 1 && seqDelta != 0 {
+			// Mark potential corruption due to packet loss or reordering
+			if seqDelta > 1 {
 				tsPkt.Flags |= types.PacketFlagCorrupted
 			}
 		}
 	}
 	a.lastSeqNum = rtpPkt.SequenceNumber
+	a.seqInitialized = true
 	a.lastTimestamp = rtpPkt.Timestamp
 	a.mu.Unlock()
 

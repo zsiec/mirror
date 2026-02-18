@@ -43,6 +43,12 @@ func (br *BitReader) ReadBits(n int) (uint32, error) {
 		return 0, fmt.Errorf("invalid bit count: %d", n)
 	}
 
+	// Pre-check that enough bits remain before reading
+	totalBitsAvailable := (len(br.data)-br.bytePos)*8 - br.bitPos
+	if totalBitsAvailable < n {
+		return 0, fmt.Errorf("not enough bits: need %d, have %d", n, totalBitsAvailable)
+	}
+
 	var result uint32
 	for i := 0; i < n; i++ {
 		bit, err := br.ReadBit()

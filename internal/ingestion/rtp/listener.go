@@ -60,8 +60,13 @@ func NewListener(cfg *config.RTPConfig, codecsCfg *config.CodecsConfig, reg regi
 	bandwidthManager := ratelimit.NewBandwidthManager(1_000_000_000) // 1 Gbps
 
 	// Create RTP packet validator
+	// Accept all dynamic payload types (96-127) per RFC 3551 Section 3
+	dynamicPTs := make([]uint8, 32)
+	for i := range dynamicPTs {
+		dynamicPTs[i] = uint8(96 + i)
+	}
 	validatorConfig := &ValidatorConfig{
-		AllowedPayloadTypes: []uint8{96, 97, 98, 99}, // Dynamic payload types
+		AllowedPayloadTypes: dynamicPTs,
 		MaxSequenceGap:      100,
 		MaxTimestampJump:    90000 * 60, // 60 seconds at 90kHz - more permissive for video streams
 	}
@@ -191,7 +196,9 @@ func (l *Listener) Stop() error {
 func (l *Listener) routePackets() {
 	defer l.wg.Done()
 
-	buf := make([]byte, 1500) // MTU size
+	// Use maximum UDP datagram size, not MTU. RTP packets can be larger than
+	// a single Ethernet MTU when IP fragmentation/reassembly occurs at the OS level.
+	buf := make([]byte, 65535)
 
 	for {
 		select {
@@ -412,7 +419,7 @@ func (l *Listener) GetSessionStats() map[string]SessionStats {
 func (l *Listener) handleRTCP() {
 	defer l.wg.Done()
 
-	buf := make([]byte, 1500) // MTU size
+	buf := make([]byte, 65535) // Maximum UDP datagram size
 
 	for {
 		select {
@@ -434,13 +441,40 @@ func (l *Listener) handleRTCP() {
 				continue
 			}
 
+			// Validate RTCP version (RFC 3550 Section 6.1: version must be 2)
+			if n < 4 {
+				l.logger.WithField("size", n).Debug("RTCP packet too short")
+				continue
+			}
+			rtcpVersion := (buf[0] >> 6) & 0x03
+			if rtcpVersion != 2 {
+				l.logger.WithField("version", rtcpVersion).Debug("Invalid RTCP version")
+				continue
+			}
+
 			// Find the session for this RTCP packet
+			// Parse SSRC from RTCP header (bytes 4-7) for more precise routing
+			var rtcpSSRC uint32
+			rtcpSSRCParsed := false
+			if n >= 8 {
+				rtcpSSRC = uint32(buf[4])<<24 | uint32(buf[5])<<16 | uint32(buf[6])<<8 | uint32(buf[7])
+				rtcpSSRCParsed = true
+			}
+
 			l.mu.RLock()
 			var targetSession *Session
 			for _, session := range l.sessions {
 				if session.remoteAddr.IP.Equal(addr.IP) {
-					targetSession = session
-					break
+					// If we have an SSRC, prefer exact match (SSRC 0 is valid per RFC 3550)
+					if rtcpSSRCParsed && session.ssrc == rtcpSSRC {
+						targetSession = session
+						break
+					}
+					// Fall back to IP-only match if no SSRC parsed
+					if !rtcpSSRCParsed {
+						targetSession = session
+						break
+					}
 				}
 			}
 			l.mu.RUnlock()

@@ -116,9 +116,9 @@ func (c CodecType) GetClockRate() uint32 {
 	case CodecG711:
 		return 8000 // G.711 is typically 8kHz
 	case CodecG722:
-		return 16000 // G.722 uses 16kHz RTP clock (though samples at 16kHz)
+		return 8000 // G.722 RTP clock rate is 8000 per RFC 3551 (historical quirk)
 	case CodecL16:
-		return 48000 // Can vary, but 48kHz is common
+		return 44100 // RFC 3551 Section 4.5.16: L16 default is 44100 Hz
 	case CodecVorbis:
 		return 48000 // Typically 48kHz
 	case CodecSpeex:

@@ -107,12 +107,12 @@ func TestUpdateSRTBytesReceived(t *testing.T) {
 	bytes := int64(1024)
 
 	// Get initial value
-	initialBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt"))
+	initialBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_recv"))
 
 	UpdateSRTBytesReceived(streamID, bytes)
 
 	// Check bytes counter
-	finalBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt"))
+	finalBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_recv"))
 	assert.Equal(t, initialBytes+float64(bytes), finalBytes, "SRT bytes received should increase")
 }
 
@@ -121,12 +121,12 @@ func TestUpdateSRTBytesSent(t *testing.T) {
 	bytes := int64(2048)
 
 	// Get initial value
-	initialBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt"))
+	initialBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_send"))
 
 	UpdateSRTBytesSent(streamID, bytes)
 
 	// Check bytes counter
-	finalBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt"))
+	finalBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_send"))
 	assert.Equal(t, initialBytes+float64(bytes), finalBytes, "SRT bytes sent should increase")
 }
 
@@ -162,17 +162,21 @@ func TestSRTBytesReceivedAndSent(t *testing.T) {
 	receivedBytes := int64(1000)
 	sentBytes := int64(500)
 
+	// Get initial values
+	initialRecv := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_recv"))
+	initialSend := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_send"))
+
 	// Test receiving bytes
 	UpdateSRTBytesReceived(streamID, receivedBytes)
-	bytesAfterReceive := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt"))
+	bytesAfterReceive := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_recv"))
 
-	// Test sending bytes (should add to the same counter)
+	// Test sending bytes (tracked separately from received)
 	UpdateSRTBytesSent(streamID, sentBytes)
-	bytesAfterSend := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt"))
+	bytesAfterSend := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_send"))
 
-	// Total bytes should be sum of received and sent
-	assert.Equal(t, float64(receivedBytes), bytesAfterReceive, "received bytes should be tracked")
-	assert.Equal(t, float64(receivedBytes+sentBytes), bytesAfterSend, "total bytes should be sum of received and sent")
+	// Received and sent should be tracked independently
+	assert.Equal(t, initialRecv+float64(receivedBytes), bytesAfterReceive, "received bytes should be tracked")
+	assert.Equal(t, initialSend+float64(sentBytes), bytesAfterSend, "sent bytes should be tracked separately")
 }
 
 func TestGoroutineLifecycle(t *testing.T) {
@@ -246,10 +250,10 @@ func TestContextCancellationReasons(t *testing.T) {
 func TestLockContentionDifferentLocks(t *testing.T) {
 	component := "lock_test"
 	locks := map[string]float64{
-		"mutex_a":    0.001,
-		"mutex_b":    0.005,
-		"rwmutex_c":  0.010,
-		"channel_d":  0.002,
+		"mutex_a":   0.001,
+		"mutex_b":   0.005,
+		"rwmutex_c": 0.010,
+		"channel_d": 0.002,
 	}
 
 	for lockName, duration := range locks {
@@ -262,4 +266,51 @@ func TestLockContentionDifferentLocks(t *testing.T) {
 			RecordLockContention(component, lockName, duration)
 		}, "lock contention recording should not panic for lock '%s'", lockName)
 	}
+}
+
+func TestUpdateSRTStats(t *testing.T) {
+	streamID := "srt_stats_test_stream"
+
+	// Get initial counter values
+	initialLost := testutil.ToFloat64(srtPacketsLost.WithLabelValues(streamID))
+	initialDropped := testutil.ToFloat64(srtPacketsDropped.WithLabelValues(streamID))
+	initialRetrans := testutil.ToFloat64(srtPacketsRetransmitted.WithLabelValues(streamID))
+
+	// Update stats
+	UpdateSRTStats(streamID, 15.5, 10, 5, 3, 42, 48.2, 100.0, 4194304)
+
+	// Verify gauges
+	assert.Equal(t, 15.5, testutil.ToFloat64(srtRTT.WithLabelValues(streamID)), "RTT should be set")
+	assert.Equal(t, 42.0, testutil.ToFloat64(srtFlightSize.WithLabelValues(streamID)), "flight size should be set")
+	assert.Equal(t, 48.2, testutil.ToFloat64(srtReceiveRateMbps.WithLabelValues(streamID)), "receive rate should be set")
+	assert.Equal(t, 100.0, testutil.ToFloat64(srtBandwidthMbps.WithLabelValues(streamID)), "bandwidth should be set")
+	assert.Equal(t, 4194304.0, testutil.ToFloat64(srtAvailableRcvBuf.WithLabelValues(streamID)), "available rcv buf should be set")
+
+	// Verify counters (deltas)
+	assert.Equal(t, initialLost+10, testutil.ToFloat64(srtPacketsLost.WithLabelValues(streamID)), "packets lost should increase by delta")
+	assert.Equal(t, initialDropped+5, testutil.ToFloat64(srtPacketsDropped.WithLabelValues(streamID)), "packets dropped should increase by delta")
+	assert.Equal(t, initialRetrans+3, testutil.ToFloat64(srtPacketsRetransmitted.WithLabelValues(streamID)), "packets retransmitted should increase by delta")
+}
+
+func TestUpdateSRTStats_ZeroDeltas(t *testing.T) {
+	streamID := "srt_stats_zero_delta"
+
+	// Set initial values
+	UpdateSRTStats(streamID, 10.0, 5, 3, 2, 10, 25.0, 50.0, 1024)
+
+	// Get current counter values
+	lostBefore := testutil.ToFloat64(srtPacketsLost.WithLabelValues(streamID))
+	droppedBefore := testutil.ToFloat64(srtPacketsDropped.WithLabelValues(streamID))
+	retransBefore := testutil.ToFloat64(srtPacketsRetransmitted.WithLabelValues(streamID))
+
+	// Update with zero deltas — counters should NOT change
+	UpdateSRTStats(streamID, 12.0, 0, 0, 0, 8, 30.0, 55.0, 2048)
+
+	assert.Equal(t, lostBefore, testutil.ToFloat64(srtPacketsLost.WithLabelValues(streamID)), "zero delta should not change counter")
+	assert.Equal(t, droppedBefore, testutil.ToFloat64(srtPacketsDropped.WithLabelValues(streamID)), "zero delta should not change counter")
+	assert.Equal(t, retransBefore, testutil.ToFloat64(srtPacketsRetransmitted.WithLabelValues(streamID)), "zero delta should not change counter")
+
+	// But gauges should be updated
+	assert.Equal(t, 12.0, testutil.ToFloat64(srtRTT.WithLabelValues(streamID)), "RTT gauge should be updated")
+	assert.Equal(t, 8.0, testutil.ToFloat64(srtFlightSize.WithLabelValues(streamID)), "flight size gauge should be updated")
 }

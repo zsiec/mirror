@@ -342,7 +342,7 @@ func (m *Manager) HandleStreamIframe(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	streamID := vars["id"]
 
-	m.logger.WithField("stream_id", streamID).Info("🖼️  Starting iframe request processing")
+	m.logger.WithField("stream_id", streamID).Info("Starting iframe request processing")
 
 	// Get handler and stats to get codec info
 	handler, stats, exists := m.GetStreamHandlerAndStats(streamID)
@@ -506,7 +506,7 @@ func (m *Manager) HandleStreamIframe(w http.ResponseWriter, r *http.Request) {
 		"method":        "advanced_conversion",
 		"frame_id":      iframe.ID,
 		"frame_size":    iframe.TotalSize,
-	}).Info("📤 Successfully decoded iframe with advanced context")
+	}).Info("Successfully decoded iframe with advanced context")
 }
 
 // HandleStreamParameters handles GET /api/v1/streams/{id}/parameters - Production monitoring endpoint
@@ -592,7 +592,7 @@ func (m *Manager) generatePlaceholderJPEG(frame *types.VideoFrame, codec string)
 		"nal_units":        len(frame.NALUnits),
 		"pts":              frame.PTS,
 		"placeholder_info": info,
-	}).Info("🎨 Generating placeholder JPEG with frame metadata")
+	}).Info("Generating placeholder JPEG with frame metadata")
 
 	result, err := m.generatePlaceholderJPEGData(info, 640, 480)
 	if err != nil {
@@ -711,7 +711,7 @@ func (m *Manager) convertRobustStreamToJPEG(decodableStream []byte, codec types.
 		"codec":       codec,
 		"stream_size": len(decodableStream),
 		"method":      "robust_parameter_context",
-	}).Info("🎬 Starting robust FFmpeg conversion")
+	}).Info("Starting robust FFmpeg conversion")
 
 	// **DEBUG: Analyze the exact bitstream data being sent to FFmpeg**
 	if len(decodableStream) > 0 {
@@ -724,7 +724,7 @@ func (m *Manager) convertRobustStreamToJPEG(decodableStream []byte, codec types.
 				return 32
 			}()]),
 			"method": "ffmpeg_input_analysis",
-		}).Info("🔍 BITSTREAM DEBUG: Raw data being sent to FFmpeg")
+		}).Info("BITSTREAM DEBUG: Raw data being sent to FFmpeg")
 
 		// Analyze NAL unit structure in the stream
 		offset := 0
@@ -784,7 +784,7 @@ func (m *Manager) convertRobustStreamToJPEG(decodableStream []byte, codec types.
 					}
 					return fmt.Sprintf("%x", decodableStream[nalStart:])
 				}(),
-			}).Info("🔍 BITSTREAM DEBUG: NAL unit in FFmpeg input stream")
+			}).Info("BITSTREAM DEBUG: NAL unit in FFmpeg input stream")
 
 			offset = nextOffset
 			nalCount++
@@ -880,7 +880,7 @@ func (m *Manager) analyzeIFrameAndParameterSets(streamID string, iframe *types.V
 		"frame_type": iframe.Type.String(),
 		"pts":        iframe.PTS,
 		"dts":        iframe.DTS,
-	}).Info("🔍 E2E DEBUG: Iframe retrieved for analysis")
+	}).Info("E2E DEBUG: Iframe retrieved for analysis")
 
 	// Debug each NAL unit in the iframe
 	for i, nalUnit := range iframe.NALUnits {
@@ -902,7 +902,7 @@ func (m *Manager) analyzeIFrameAndParameterSets(streamID string, iframe *types.V
 				}
 				return fmt.Sprintf("%02x", nalUnit.Data[:maxBytes])
 			}(),
-		}).Info("🔍 E2E DEBUG: NAL unit in iframe")
+		}).Info("E2E DEBUG: NAL unit in iframe")
 
 		// If this is a slice NAL unit, try to extract parameter set references
 		if nalType >= 1 && nalType <= 5 {
@@ -918,7 +918,7 @@ func (m *Manager) analyzeIFrameAndParameterSets(streamID string, iframe *types.V
 		"stream_id":     streamID,
 		"frame_id":      iframe.ID,
 		"session_stats": sessionStats,
-	}).Info("🔍 E2E DEBUG: Parameter context session statistics")
+	}).Info("E2E DEBUG: Parameter context session statistics")
 
 	// Debug detailed parameter set inventory
 	for paramType, paramMap := range allParamSets {
@@ -935,7 +935,7 @@ func (m *Manager) analyzeIFrameAndParameterSets(streamID string, iframe *types.V
 			"ids":        ids,
 			"sizes":      sizes,
 			"count":      len(ids),
-		}).Info("🔍 E2E DEBUG: Available parameter sets by type")
+		}).Info("E2E DEBUG: Available parameter sets by type")
 	}
 
 	// Try to determine what parameter sets this frame actually needs
@@ -945,7 +945,7 @@ func (m *Manager) analyzeIFrameAndParameterSets(streamID string, iframe *types.V
 			"stream_id": streamID,
 			"frame_id":  iframe.ID,
 			"error":     reqErr.Error(),
-		}).Warn("🔍 E2E DEBUG: Could not determine frame decoding requirements")
+		}).Warn("E2E DEBUG: Could not determine frame decoding requirements")
 	} else {
 		m.logger.WithFields(map[string]interface{}{
 			"stream_id":       streamID,
@@ -954,7 +954,7 @@ func (m *Manager) analyzeIFrameAndParameterSets(streamID string, iframe *types.V
 			"required_sps_id": requirements.RequiredSPSID,
 			"slice_type":      requirements.SliceType,
 			"is_idr":          requirements.IsIDR,
-		}).Info("🔍 E2E DEBUG: Frame decoding requirements")
+		}).Info("E2E DEBUG: Frame decoding requirements")
 	}
 
 	// Check if the frame can be decoded
@@ -964,7 +964,7 @@ func (m *Manager) analyzeIFrameAndParameterSets(streamID string, iframe *types.V
 		"frame_id":   iframe.ID,
 		"can_decode": canDecode,
 		"reason":     reason,
-	}).Info("🔍 E2E DEBUG: Frame decodability analysis")
+	}).Info("E2E DEBUG: Frame decodability analysis")
 }
 
 // analyzeSliceHeader attempts to parse slice header to extract parameter set references
@@ -975,7 +975,7 @@ func (m *Manager) analyzeSliceHeader(streamID string, frameID uint64, nalIndex i
 			"frame_id":  frameID,
 			"nal_index": nalIndex,
 			"size":      len(nalData),
-		}).Debug("🔍 E2E DEBUG: NAL data too small for slice header analysis")
+		}).Debug("E2E DEBUG: NAL data too small for slice header analysis")
 		return
 	}
 
@@ -989,7 +989,7 @@ func (m *Manager) analyzeSliceHeader(streamID string, frameID uint64, nalIndex i
 		"nal_type":   nalType,
 		"nal_header": fmt.Sprintf("0x%02x", nalData[0]),
 		"next_bytes": fmt.Sprintf("%02x", nalData[1:min(len(nalData), 10)]),
-	}).Info("🔍 E2E DEBUG: Slice header analysis")
+	}).Info("E2E DEBUG: Slice header analysis")
 
 	// Note: Full slice header parsing would require proper exponential-Golomb decoding
 	// This is just for debugging to see what we're getting
@@ -998,5 +998,5 @@ func (m *Manager) analyzeSliceHeader(streamID string, frameID uint64, nalIndex i
 		"frame_id":  frameID,
 		"nal_index": nalIndex,
 		"note":      "Full slice header parsing would require exponential-Golomb decoder",
-	}).Debug("🔍 E2E DEBUG: Slice header parsing limited (needs proper exp-golomb)")
+	}).Debug("E2E DEBUG: Slice header parsing limited (needs proper exp-golomb)")
 }

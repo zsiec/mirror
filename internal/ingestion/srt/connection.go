@@ -26,12 +26,19 @@ type Connection struct {
 	// Remote address information
 	remoteAddr string
 
-	startTime     time.Time
-	lastActive    time.Time
-	stats         ConnectionStats
-	closed        int32
-	paused        int32
-	statsInterval time.Duration
+	startTime      time.Time
+	lastActiveNano atomic.Int64 // stores time.UnixNano() for thread-safe access
+	stats          ConnectionStats
+	closed         int32
+	paused         int32
+	statsInterval  time.Duration
+
+	// Delta tracking for Prometheus counters (stats are cumulative, metrics need deltas)
+	lastReportedBytesRecv  int64
+	lastReportedBytesSent  int64
+	lastReportedPktsLost   int64
+	lastReportedPktsDropd  int64
+	lastReportedPktsRetran int64
 
 	// Backpressure control
 	maxBandwidth   int64 // Current max bandwidth setting
@@ -52,14 +59,10 @@ func NewConnectionWithSRTConn(streamID string, conn SRTConnection, remoteAddr st
 		logger:        logger.WithField("stream_id", streamID),
 		remoteAddr:    remoteAddr,
 		startTime:     time.Now(),
-		lastActive:    time.Now(),
 		statsInterval: 5 * time.Second,
 		done:          make(chan struct{}),
 	}
-
-	// TODO: Register stream in registry (similar to RTP streams)
-	// This needs to be implemented after fixing the SRT interface to provide remote address info
-	_ = registry // Prevent unused variable warning
+	connection.lastActiveNano.Store(time.Now().UnixNano())
 
 	return connection
 }
@@ -74,7 +77,7 @@ func (c *Connection) Read(b []byte) (int, error) {
 	if n > 0 {
 		atomic.AddInt64(&c.stats.BytesReceived, int64(n))
 		atomic.AddInt64(&c.stats.PacketsReceived, 1)
-		c.lastActive = time.Now()
+		c.lastActiveNano.Store(time.Now().UnixNano())
 	}
 
 	return n, err
@@ -90,7 +93,7 @@ func (c *Connection) Write(b []byte) (int, error) {
 	if n > 0 {
 		atomic.AddInt64(&c.stats.BytesSent, int64(n))
 		atomic.AddInt64(&c.stats.PacketsSent, 1)
-		c.lastActive = time.Now()
+		c.lastActiveNano.Store(time.Now().UnixNano())
 	}
 
 	return n, err
@@ -135,23 +138,16 @@ func (c *Connection) GetStartTime() time.Time {
 	return c.startTime
 }
 
+// GetLastActive returns the time of last activity on this connection
+func (c *Connection) GetLastActive() time.Time {
+	return time.Unix(0, c.lastActiveNano.Load())
+}
+
 // GetStats returns current connection statistics
 func (c *Connection) GetStats() ConnectionStats {
 	// Get stats from underlying connection if available
 	if c.conn != nil {
-		connStats := c.conn.GetStats()
-		return ConnectionStats{
-			BytesReceived:    int64(connStats.BytesReceived),
-			BytesSent:        int64(connStats.BytesSent),
-			PacketsReceived:  int64(connStats.PacketsReceived),
-			PacketsSent:      int64(connStats.PacketsSent),
-			PacketsLost:      int64(connStats.PacketsLost),
-			PacketsRetrans:   int64(connStats.PacketsRetrans),
-			RTTMs:            connStats.RTTMs,
-			BandwidthMbps:    connStats.BandwidthMbps,
-			DeliveryDelayMs:  connStats.DeliveryDelayMs,
-			ConnectionTimeMs: connStats.ConnectionTimeMs,
-		}
+		return c.conn.GetStats()
 	}
 
 	// Fallback to local stats
@@ -163,14 +159,14 @@ func (c *Connection) GetStats() ConnectionStats {
 	}
 }
 
-// SetRateLimiter sets the rate limiter for this connection
-func (c *Connection) SetRateLimiter(limiter ratelimit.RateLimiter) {
-	c.rateLimiter = limiter
-}
-
 // SetStatsInterval sets the stats update interval for testing
 func (c *Connection) SetStatsInterval(interval time.Duration) {
 	c.statsInterval = interval
+}
+
+// SetRateLimiter sets the rate limiter for the connection
+func (c *Connection) SetRateLimiter(limiter ratelimit.RateLimiter) {
+	c.rateLimiter = limiter
 }
 
 // Pause pauses the connection
@@ -195,30 +191,29 @@ func (c *Connection) IsClosed() bool {
 	return atomic.LoadInt32(&c.closed) == 1
 }
 
-// ReadLoop reads data from the SRT connection and writes to the buffer
+// readResult carries the result of a read operation from the reader goroutine
+type readResult struct {
+	n   int
+	err error
+}
+
+// ReadLoop reads data from the SRT connection and writes to the buffer.
+// Uses a dedicated reader goroutine to avoid busy-waiting and ticker starvation.
 func (c *Connection) ReadLoop(ctx context.Context) error {
-	// Create a child context that we control
 	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Ensure cleanup happens
+	// Recover from panics and ensure cleanup via Close() which handles
+	// registry unregistration, setting closed flag, and closing the connection.
 	defer func() {
-		c.closeOnce.Do(func() {
-			close(c.done)
-			if c.conn != nil {
-				c.conn.Close()
-			}
-
-			// Log any cleanup errors
-			if err := recover(); err != nil {
-				c.logger.WithField("panic", err).Error("Panic during cleanup")
-			}
-		})
+		if err := recover(); err != nil {
+			c.logger.WithField("panic", err).Error("Panic during ReadLoop cleanup")
+		}
+		c.Close()
 	}()
 
 	readBuffer := make([]byte, 65536) // 64KB buffer for SRT messages
 
-	// Stats ticker - use configurable interval or default to 5 seconds
 	statsInterval := c.statsInterval
 	if statsInterval == 0 {
 		statsInterval = 5 * time.Second
@@ -226,9 +221,28 @@ func (c *Connection) ReadLoop(ctx context.Context) error {
 	statsTicker := time.NewTicker(statsInterval)
 	defer statsTicker.Stop()
 
-	// Heartbeat ticker
 	heartbeatTicker := time.NewTicker(10 * time.Second)
 	defer heartbeatTicker.Stop()
+
+	// Dedicated read goroutine to avoid busy-wait in select default case
+	readCh := make(chan readResult, 1)
+	go func() {
+		for {
+			if atomic.LoadInt32(&c.paused) == 1 {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			n, err := c.conn.Read(readBuffer)
+			select {
+			case readCh <- readResult{n: n, err: err}:
+			case <-connCtx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 
 	for {
 		select {
@@ -247,38 +261,26 @@ func (c *Connection) ReadLoop(ctx context.Context) error {
 				}
 			}
 
-		default:
-			// Check if paused
-			if atomic.LoadInt32(&c.paused) == 1 {
-				time.Sleep(100 * time.Millisecond)
-				continue
-			}
-
-			n, err := c.conn.Read(readBuffer)
-			if err != nil {
-				if err == io.EOF {
+		case result := <-readCh:
+			if result.err != nil {
+				if result.err == io.EOF {
 					c.logger.Info("SRT connection ended normally")
 					return nil
 				}
-
-				// Check if connection is closed
 				if atomic.LoadInt32(&c.closed) == 1 {
 					return nil
 				}
-
-				c.logger.WithError(err).Error("SRT read error")
-				return err
+				c.logger.WithError(result.err).Error("SRT read error")
+				return result.err
 			}
 
-			if n > 0 {
-				// Update stats
-				atomic.AddInt64(&c.stats.BytesReceived, int64(n))
+			if result.n > 0 {
+				atomic.AddInt64(&c.stats.BytesReceived, int64(result.n))
 				atomic.AddInt64(&c.stats.PacketsReceived, 1)
-				c.lastActive = time.Now()
+				c.lastActiveNano.Store(time.Now().UnixNano())
 
-				// Process the data (this would integrate with the existing pipeline)
 				c.logger.WithFields(map[string]interface{}{
-					"bytes_read":  n,
+					"bytes_read":  result.n,
 					"total_bytes": atomic.LoadInt64(&c.stats.BytesReceived),
 				}).Debug("SRT data received")
 			}
@@ -286,13 +288,42 @@ func (c *Connection) ReadLoop(ctx context.Context) error {
 	}
 }
 
-// updateStats updates internal statistics
+// updateStats updates internal statistics and exports to Prometheus
 func (c *Connection) updateStats() {
 	stats := c.GetStats()
 
-	// Update metrics
-	metrics.UpdateSRTBytesReceived(c.streamID, stats.BytesReceived)
-	metrics.UpdateSRTBytesSent(c.streamID, stats.BytesSent)
+	// Stats are cumulative (Total fields); compute deltas for Prometheus counters
+	recvDelta := stats.BytesReceived - c.lastReportedBytesRecv
+	sentDelta := stats.BytesSent - c.lastReportedBytesSent
+	if recvDelta > 0 {
+		metrics.UpdateSRTBytesReceived(c.streamID, recvDelta)
+	}
+	if sentDelta > 0 {
+		metrics.UpdateSRTBytesSent(c.streamID, sentDelta)
+	}
+	c.lastReportedBytesRecv = stats.BytesReceived
+	c.lastReportedBytesSent = stats.BytesSent
+
+	// Compute deltas for loss/drop/retransmission counters
+	lostDelta := stats.PacketsReceiveLost - c.lastReportedPktsLost
+	dropDelta := stats.PacketsDropped - c.lastReportedPktsDropd
+	retransDelta := stats.PacketsRetrans - c.lastReportedPktsRetran
+	c.lastReportedPktsLost = stats.PacketsReceiveLost
+	c.lastReportedPktsDropd = stats.PacketsDropped
+	c.lastReportedPktsRetran = stats.PacketsRetrans
+
+	// Export all SRT-specific stats (gauges + counter deltas)
+	metrics.UpdateSRTStats(
+		c.streamID,
+		stats.RTTMs,
+		lostDelta,
+		dropDelta,
+		retransDelta,
+		stats.PacketsFlightSize,
+		stats.ReceiveRateMbps,
+		stats.EstimatedLinkCapacityMbps,
+		stats.AvailableRcvBuf,
+	)
 
 	c.logger.WithFields(map[string]interface{}{
 		"bytes_received":   stats.BytesReceived,
@@ -301,10 +332,18 @@ func (c *Connection) updateStats() {
 		"packets_sent":     stats.PacketsSent,
 		"rtt_ms":           stats.RTTMs,
 		"bandwidth_mbps":   stats.BandwidthMbps,
+		"packets_lost":     stats.PacketsReceiveLost,
+		"packets_dropped":  stats.PacketsDropped,
+		"flight_size":      stats.PacketsFlightSize,
+		"avail_rcv_buf":    stats.AvailableRcvBuf,
 	}).Debug("SRT connection stats")
 }
 
-// SetMaxBandwidth sets maximum bandwidth for backpressure control
+// SetMaxBandwidth sets maximum bandwidth for backpressure control.
+// NOTE: SRTO_MAXBW only limits outbound (sending) bandwidth. For a receiver
+// application, this has no effect on inbound data rate. True inbound
+// backpressure requires application-level flow control (e.g., slowing reads
+// or pausing the connection).
 func (c *Connection) SetMaxBandwidth(bw int64) error {
 	c.backpressureMu.Lock()
 	defer c.backpressureMu.Unlock()
@@ -325,10 +364,7 @@ func (c *Connection) GetMaxBandwidth() int64 {
 	defer c.backpressureMu.RUnlock()
 
 	if c.conn != nil {
-		// Try to get from underlying SRT connection if it supports it
-		if srtConn, ok := c.conn.(interface{ GetMaxBW() int64 }); ok {
-			return srtConn.GetMaxBW()
-		}
+		return c.conn.GetMaxBW()
 	}
 
 	return c.maxBandwidth
@@ -336,9 +372,7 @@ func (c *Connection) GetMaxBandwidth() int64 {
 
 // GetMaxBW is an alias for GetMaxBandwidth for compatibility
 func (c *Connection) GetMaxBW() int64 {
-	c.backpressureMu.RLock()
-	defer c.backpressureMu.RUnlock()
-	return c.maxBandwidth
+	return c.GetMaxBandwidth()
 }
 
 // SetMaxBW is an alias for SetMaxBandwidth for compatibility

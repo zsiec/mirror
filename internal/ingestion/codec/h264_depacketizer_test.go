@@ -290,26 +290,26 @@ func TestH264Depacketizer_FUA(t *testing.T) {
 					10, 11, 12, 13, // Fragment data
 				},
 			},
-			sequences:   []uint16{4000, 4002}, // Note: 4001 is missing
+			sequences:   []uint16{4000, 4007}, // Note: gap of 7, exceeds tolerance
 			wantNALs:    0,
 			wantSize:    0,
 			wantError:   false,
 			description: "Should discard fragments when packet loss detected",
 		},
 		{
-			name: "FU-A single fragment (both start and end)",
+			name: "FU-A single fragment (both start and end) - RFC 6184 violation, treated as single NAL",
 			fragments: [][]byte{
 				{
-					0x7c,          // FU-A indicator
+					0x7c,          // FU-A indicator (NRI=3, type=28)
 					0xc5,          // FU header (S=1, E=1, R=0, type=5)
 					1, 2, 3, 4, 5, // Fragment data
 				},
 			},
 			sequences:   []uint16{5000},
 			wantNALs:    1,
-			wantSize:    6, // 1 (reconstructed header) + 5 (payload)
+			wantSize:    6, // NAL header (1) + payload (5) -- wantSize excludes start code
 			wantError:   false,
-			description: "Should handle single-fragment FU-A",
+			description: "RFC 6184 Section 5.8 violation: S+E both set treated as single NAL unit",
 		},
 		{
 			name: "FU-A with short payload",
@@ -511,7 +511,7 @@ func TestIsKeyFrame(t *testing.T) {
 	}{
 		{1, false}, // Non-IDR slice
 		{5, true},  // IDR slice
-		{7, true},  // SPS (often sent with key frames)
+		{7, false}, // SPS (parameter set, not a frame)
 		{8, false}, // PPS
 		{6, false}, // SEI
 		{9, false}, // Access unit delimiter

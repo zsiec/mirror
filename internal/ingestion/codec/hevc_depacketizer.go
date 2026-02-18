@@ -12,15 +12,15 @@ import (
 // HEVCDepacketizer handles depacketization of HEVC (H.265) RTP streams
 // Based on RFC 7798
 type HEVCDepacketizer struct {
-	fragments [][]byte
-	lastSeq   uint16
-	mu        sync.Mutex // Protects fragments and lastSeq
+	fragments    [][]byte
+	lastSeq      uint16
+	fuInProgress bool       // Whether FU reassembly is in progress
+	mu           sync.Mutex // Protects fragments, lastSeq, fuInProgress
 }
 
-// NAL unit type constants for HEVC
+// NAL unit type constants for HEVC (RFC 7798)
 const (
-	// Single NAL unit packet
-	nalTypeSingle = 0
+	// Single NAL unit packets use types 0-47 (checked via nalType < nalTypeAP)
 	// Aggregation packet
 	nalTypeAP = 48
 	// Fragmentation unit
@@ -36,7 +36,20 @@ func (d *HEVCDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 	}
 
 	// Parse NAL unit header (2 bytes for HEVC)
+	// Per RFC 7798: F(1) | Type(6) | LayerID(6) | TID(3)
 	nalHeader := uint16(payload[0])<<8 | uint16(payload[1])
+
+	// L5: Check forbidden_zero_bit (F bit must be 0)
+	if payload[0]&0x80 != 0 {
+		return nil, errors.New("HEVC forbidden_zero_bit is set")
+	}
+
+	// L6: TID must be > 0 per HEVC spec
+	tid := payload[1] & 0x07
+	if tid == 0 {
+		return nil, errors.New("HEVC TemporalId must be > 0")
+	}
+
 	nalType := (nalHeader >> 9) & 0x3F
 
 	var nalUnits [][]byte
@@ -50,7 +63,11 @@ func (d *HEVCDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 
 	case nalType == nalTypeAP:
 		// Aggregation packet - multiple NAL units in one RTP packet
-		nalUnits = d.handleAggregationPacket(payload[2:])
+		var err error
+		nalUnits, err = d.handleAggregationPacket(payload[2:])
+		if err != nil {
+			return nil, fmt.Errorf("failed to handle HEVC AP: %w", err)
+		}
 
 	case nalType == nalTypeFU:
 		// Fragmentation unit
@@ -63,6 +80,10 @@ func (d *HEVCDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 		if complete && nalUnit != nil {
 			nalUnits = append(nalUnits, nalUnit)
 		}
+
+	case nalType == 50:
+		// PACI packet (RFC 7798 Section 4.4.4) — silently skip
+		return nil, nil
 
 	default:
 		return nil, fmt.Errorf("unsupported NAL type: %d", nalType)
@@ -79,13 +100,17 @@ func (d *HEVCDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 }
 
 // handleAggregationPacket processes an aggregation packet containing multiple NAL units
-func (d *HEVCDepacketizer) handleAggregationPacket(payload []byte) [][]byte {
+func (d *HEVCDepacketizer) handleAggregationPacket(payload []byte) ([][]byte, error) {
 	var nalUnits [][]byte
 	offset := 0
 
 	for offset < len(payload) {
 		if offset+2 > len(payload) {
-			break
+			// Truncated AP packet — return what we have with error
+			if len(nalUnits) > 0 {
+				return nalUnits, fmt.Errorf("truncated AP packet: incomplete size field at offset %d", offset)
+			}
+			return nil, fmt.Errorf("truncated AP packet: incomplete size field at offset %d", offset)
 		}
 
 		// Read NAL unit size (2 bytes)
@@ -93,7 +118,19 @@ func (d *HEVCDepacketizer) handleAggregationPacket(payload []byte) [][]byte {
 		offset += 2
 
 		if offset+nalSize > len(payload) {
-			break
+			// Truncated AP packet — return what we have with error
+			if len(nalUnits) > 0 {
+				return nalUnits, fmt.Errorf("truncated AP packet: NAL unit size %d exceeds remaining payload at offset %d", nalSize, offset)
+			}
+			return nil, fmt.Errorf("truncated AP packet: NAL unit size %d exceeds remaining payload at offset %d", nalSize, offset)
+		}
+
+		// Validate nested NAL type: must be 0-47, not AP(48)/FU(49)/PACI(50)
+		if nalSize >= 2 {
+			nestedNALType := (payload[offset] >> 1) & 0x3F
+			if nestedNALType >= 48 {
+				return nalUnits, fmt.Errorf("invalid nested NAL type %d in AP packet", nestedNALType)
+			}
 		}
 
 		// Extract NAL unit
@@ -104,7 +141,7 @@ func (d *HEVCDepacketizer) handleAggregationPacket(payload []byte) [][]byte {
 		offset += nalSize
 	}
 
-	return nalUnits
+	return nalUnits, nil
 }
 
 // handleFragmentationUnit processes a fragmentation unit
@@ -120,12 +157,18 @@ func (d *HEVCDepacketizer) handleFragmentationUnit(payload []byte, sequenceNumbe
 	endBit := (fuHeader & 0x40) != 0
 	fuType := fuHeader & 0x3F
 
+	// RFC 7798 Section 4.4.3: S and E bits MUST NOT both be set
+	if startBit && endBit {
+		return nil, false
+	}
+
 	// FU payload starts at byte 3
 	fuPayload := payload[3:]
 
 	if startBit {
 		// Start of a new fragmented NAL unit
 		d.fragments = [][]byte{}
+		d.fuInProgress = true
 
 		// Reconstruct NAL unit header
 		nalHeader := make([]byte, 2)
@@ -135,19 +178,30 @@ func (d *HEVCDepacketizer) handleFragmentationUnit(payload []byte, sequenceNumbe
 		d.fragments = append(d.fragments, nalHeader)
 	}
 
-	// Check for packet loss
-	if d.lastSeq != 0 && sequenceNumber != d.lastSeq+1 {
-		// Packet loss detected, discard fragments
-		d.fragments = [][]byte{}
-		return nil, false
+	// Check for packet loss using wraparound-safe arithmetic
+	// Use fuInProgress flag instead of lastSeq != 0 to handle seq 0 correctly
+	if d.fuInProgress && !startBit && len(d.fragments) > 0 {
+		gap := int16(sequenceNumber - d.lastSeq)
+		if gap == 0 {
+			// Duplicate packet — silently ignore
+			return nil, false
+		}
+		if gap != 1 {
+			// Packet loss detected, discard fragments
+			d.fragments = [][]byte{}
+			d.fuInProgress = false
+			return nil, false
+		}
 	}
 
 	// Add fragment payload
-	fragment := make([]byte, len(fuPayload))
-	copy(fragment, fuPayload)
-	d.fragments = append(d.fragments, fragment)
+	if len(d.fragments) > 0 {
+		fragment := make([]byte, len(fuPayload))
+		copy(fragment, fuPayload)
+		d.fragments = append(d.fragments, fragment)
+	}
 
-	if endBit {
+	if endBit && len(d.fragments) > 0 {
 		// End of fragmented NAL unit, combine all fragments
 		totalSize := 0
 		for _, frag := range d.fragments {
@@ -160,6 +214,7 @@ func (d *HEVCDepacketizer) handleFragmentationUnit(payload []byte, sequenceNumbe
 		}
 
 		d.fragments = [][]byte{}
+		d.fuInProgress = false
 		return nalUnit, true
 	}
 
@@ -172,6 +227,7 @@ func (d *HEVCDepacketizer) Reset() {
 	defer d.mu.Unlock()
 	d.fragments = [][]byte{}
 	d.lastSeq = 0
+	d.fuInProgress = false
 }
 
 // HEVCDepacketizerWithMemory extends HEVCDepacketizer with memory management

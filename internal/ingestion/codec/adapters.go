@@ -1,6 +1,8 @@
 package codec
 
 import (
+	"time"
+
 	"github.com/pion/rtp"
 )
 
@@ -13,7 +15,8 @@ type Depacketizer interface {
 // NewH264Depacketizer creates a new H264 depacketizer
 func NewH264Depacketizer() Depacketizer {
 	return &H264Depacketizer{
-		fragments: make([][]byte, 0),
+		fragments:       make([][]byte, 0),
+		fragmentTimeout: 5 * time.Second, // Default 5 second timeout
 	}
 }
 

@@ -35,7 +35,7 @@ func TestParameterSetExtraction(t *testing.T) {
 	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
 
 	// Create parameter context
-	paramContext := types.NewParameterSetContext(types.CodecH264, "test-stream-extract")
+	paramContext := types.NewParameterSetContextForTest(types.CodecH264, "test-stream-extract")
 
 	// Create GOP buffer for testing extraction
 	gopBufferConfig := gop.BufferConfig{
@@ -51,16 +51,16 @@ func TestParameterSetExtraction(t *testing.T) {
 		0x00, 0x00, 0x00, 0x01, // Start code
 		0x67,             // NAL header (type 7 = SPS)
 		0x42, 0x00, 0x1F, // profile_idc=66, constraint_flags=0, level_idc=31
-		0xE9, // seq_parameter_set_id=7 (encoded as exp-golomb)
-		// Additional SPS data would go here
+		0x8D,             // seq_parameter_set_id=0 (UE: 1)
+		0x61, 0x84, 0xC8, // Additional required SPS fields with minimal valid data
+		0x80, // Stop bit to ensure proper RBSP parsing
 	}
 
 	// Create test NAL unit data for PPS (H.264 PPS NAL type 8)
 	ppsData := []byte{
 		0x00, 0x00, 0x00, 0x01, // Start code
-		0x68,       // NAL header (type 8 = PPS)
-		0x8F, 0x20, // Properly encoded PPS data: pps_id=0, sps_id=0, plus additional fields
-		// Additional PPS data would go here
+		0x68,             // NAL header (type 8 = PPS)
+		0xCE, 0x38, 0x80, // Properly encoded PPS data: pps_id=0, sps_id=0
 	}
 
 	// Test parameter extraction using GOP buffer method
@@ -102,7 +102,7 @@ func TestParameterSetExtraction(t *testing.T) {
 // TestSessionParameterContext tests the parameter context functionality
 func TestSessionParameterContext(t *testing.T) {
 	// Test parameter context basic functionality
-	paramContext := types.NewParameterSetContext(types.CodecH264, "test-session-context")
+	paramContext := types.NewParameterSetContextForTest(types.CodecH264, "test-session-context")
 	require.NotNil(t, paramContext)
 
 	// Test session manager access

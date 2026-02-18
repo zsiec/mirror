@@ -124,17 +124,19 @@ func (d *HEVCDetector) handleFU(pkt *types.TimestampedPacket) (isStart, isEnd bo
 	nalType := fuHeader & 0x3F
 
 	if startBit {
-		// First fragment
-		if d.isIRAPNAL(nalType) || nalType == HEVCNALTypeAUD ||
-			nalType == HEVCNALTypeVPS || nalType == HEVCNALTypeSPS || nalType == HEVCNALTypePPS {
+		// First fragment — only VCL and AUD NALs indicate frame start in FU context.
+		// VPS/SPS/PPS are non-VCL parameter sets that should not trigger frame start
+		// when carried inside FU packets.
+		if d.isIRAPNAL(nalType) || nalType == HEVCNALTypeAUD || d.isVCLNAL(nalType) {
 			isStart = true
 			d.frameStarted = true
 		}
 	}
 
 	if endBit && d.frameStarted && d.isVCLNAL(nalType) {
-		// Last fragment of VCL NAL
-		// Frame might end after this
+		// Last fragment of VCL NAL — signal frame end
+		isEnd = true
+		d.frameStarted = false
 	}
 
 	return isStart, isEnd
@@ -156,15 +158,22 @@ func (d *HEVCDetector) detectBoundariesWithStartCode(pkt *types.TimestampedPacke
 
 		nalType := (nalUnit[0] >> 1) & 0x3F
 
+		// A non-VCL NAL after VCL data signals end of previous frame
+		if d.frameStarted && !d.isVCLNAL(nalType) && (nalType == HEVCNALTypeAUD ||
+			nalType == HEVCNALTypeVPS || nalType == HEVCNALTypeSPS || nalType == HEVCNALTypePPS) {
+			isEnd = true
+			d.frameStarted = false
+		}
+
 		// Check for frame start
 		if nalType == HEVCNALTypeAUD || d.isIRAPNAL(nalType) ||
 			nalType == HEVCNALTypeVPS || nalType == HEVCNALTypeSPS || nalType == HEVCNALTypePPS {
 			isStart = true
 		}
 
-		// Check for frame end
-		if d.frameStarted && nalType == HEVCNALTypeAUD {
-			isEnd = true
+		// Track that we've started a frame when we see VCL NALs
+		if d.isVCLNAL(nalType) {
+			d.frameStarted = true
 		}
 	}
 
@@ -177,6 +186,7 @@ func (d *HEVCDetector) GetFrameType(nalUnits []types.NALUnit) types.FrameType {
 	hasSPS := false
 	hasPPS := false
 	isReference := false
+	irapFrameType := types.FrameTypeIDR // default IRAP type
 
 	for _, nal := range nalUnits {
 		if len(nal.Data) < 2 {
@@ -187,6 +197,15 @@ func (d *HEVCDetector) GetFrameType(nalUnits []types.NALUnit) types.FrameType {
 
 		if d.isIRAPNAL(nalType) {
 			hasIRAP = true
+			// Distinguish between BLA, IDR, and CRA per HEVC spec
+			switch {
+			case nalType >= HEVCNALTypeBLAWLP && nalType <= HEVCNALTypeBLANLP:
+				irapFrameType = types.FrameTypeBLA
+			case nalType >= HEVCNALTypeIDRWRADL && nalType <= HEVCNALTypeIDRNLP:
+				irapFrameType = types.FrameTypeIDR
+			case nalType == HEVCNALTypeCRANUT:
+				irapFrameType = types.FrameTypeCRA
+			}
 		}
 
 		switch nalType {
@@ -201,9 +220,11 @@ func (d *HEVCDetector) GetFrameType(nalUnits []types.NALUnit) types.FrameType {
 		}
 	}
 
+	// IRAP takes priority — an access unit with IRAP + SPS + PPS is still a keyframe.
 	if hasIRAP {
-		return types.FrameTypeIDR
+		return irapFrameType
 	}
+	// Only classify as pure SPS/PPS if no VCL NAL units are present
 	if hasSPS {
 		return types.FrameTypeSPS
 	}
@@ -238,8 +259,8 @@ func (d *HEVCDetector) IsKeyframe(data []byte) bool {
 	for _, nalUnit := range nalUnits {
 		if len(nalUnit) >= 2 {
 			nalType := (nalUnit[0] >> 1) & 0x3F
-			if d.isIRAPNAL(nalType) || nalType == HEVCNALTypeVPS ||
-				nalType == HEVCNALTypeSPS || nalType == HEVCNALTypePPS {
+			// Only IRAP NAL units are keyframes. VPS/SPS/PPS are parameter sets, not keyframes.
+			if d.isIRAPNAL(nalType) {
 				return true
 			}
 		}
@@ -259,8 +280,10 @@ func (d *HEVCDetector) isVCLNAL(nalType uint8) bool {
 }
 
 // isIRAPNAL checks if NAL type is IRAP (keyframe)
+// Per HEVC spec Table 7-1: IRAP types are BLA (16-18), IDR (19-20), CRA (21),
+// plus RSV_IRAP_VCL (22-23) which are reserved for future IRAP types
 func (d *HEVCDetector) isIRAPNAL(nalType uint8) bool {
-	return nalType >= 16 && nalType <= 21
+	return nalType >= 16 && nalType <= 23
 }
 
 // hasStartCode checks if data begins with start code

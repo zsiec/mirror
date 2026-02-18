@@ -16,7 +16,11 @@ import (
 	"github.com/zsiec/mirror/internal/metrics"
 )
 
-// NewListener creates a new SRT listener using the adapter pattern
+// validStreamIDRegex matches printable ASCII characters, up to 512 bytes.
+// Supports Haivision SRT access control syntax (#!::key=value,key2=value2).
+var validStreamIDRegex = regexp.MustCompile(`^[\x20-\x7E]{1,512}$`)
+
+// Listener manages SRT connections using the adapter pattern
 type Listener struct {
 	config           *config.SRTConfig
 	codecsConfig     *config.CodecsConfig
@@ -40,8 +44,12 @@ type Listener struct {
 func NewListenerWithAdapter(cfg *config.SRTConfig, codecsCfg *config.CodecsConfig, reg registry.Registry, adapter SRTAdapter, logger logger.Logger) *Listener {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Create connection limiter (max 5 connections per stream, 100 total)
-	connLimiter := ratelimit.NewConnectionLimiter(5, 100)
+	// Derive connection limits from config
+	maxTotal := cfg.MaxConnections
+	if maxTotal <= 0 {
+		maxTotal = 100 // fallback default
+	}
+	connLimiter := ratelimit.NewConnectionLimiter(5, maxTotal)
 
 	// Create bandwidth manager (total 1 Gbps)
 	bandwidthManager := ratelimit.NewBandwidthManager(1_000_000_000) // 1 Gbps
@@ -106,8 +114,13 @@ func (l *Listener) Start() error {
 		return fmt.Errorf("failed to set listen callback: %w", err)
 	}
 
-	// Start listening
-	err = l.listener.Listen(l.ctx, 1)
+	// Start listening — backlog should accommodate burst connection attempts.
+	// Use MaxConnections as a reasonable upper bound; SRT internally caps this.
+	backlog := l.config.MaxConnections
+	if backlog <= 0 {
+		backlog = 128 // safe default for production
+	}
+	err = l.listener.Listen(l.ctx, backlog)
 	if err != nil {
 		return fmt.Errorf("failed to start SRT listener: %w", err)
 	}
@@ -125,15 +138,28 @@ func (l *Listener) Start() error {
 func (l *Listener) Stop() error {
 	l.cancel()
 
-	// Close listener
+	// Close listener first to stop accepting new connections
 	if l.listener != nil {
 		l.listener.Close()
 	}
 
-	// Wait for all goroutines to finish
-	l.wg.Wait()
+	// Wait for all goroutines with a timeout to prevent shutdown hangs.
+	// Connection goroutines may be blocked in srtgo Read() even after
+	// context cancellation; the listener close above should unblock them,
+	// but we bound the wait as a safety net.
+	done := make(chan struct{})
+	go func() {
+		l.wg.Wait()
+		close(done)
+	}()
 
-	l.logger.Info("SRT listener stopped")
+	select {
+	case <-done:
+		l.logger.Info("SRT listener stopped")
+	case <-time.After(10 * time.Second):
+		l.logger.Warn("SRT listener stop timed out after 10s, some goroutines may still be running")
+	}
+
 	return nil
 }
 
@@ -172,6 +198,7 @@ func (l *Listener) handleIncomingConnection(socket SRTSocket, version int, addr 
 
 	// Check if stream already exists
 	if _, exists := l.connections.Load(streamID); exists {
+		l.connLimiter.Release(streamID) // Release the slot we just acquired
 		l.logger.WithFields(map[string]interface{}{
 			"remote":    addr.String(),
 			"stream_id": streamID,
@@ -183,48 +210,70 @@ func (l *Listener) handleIncomingConnection(socket SRTSocket, version int, addr 
 	return true
 }
 
-// acceptLoop continuously accepts new connections
+// acceptLoop continuously accepts new connections with error backoff
 func (l *Listener) acceptLoop() {
 	defer l.wg.Done()
+
+	const (
+		initialBackoff = 100 * time.Millisecond
+		maxBackoff     = 5 * time.Second
+	)
+	backoff := initialBackoff
 
 	for {
 		select {
 		case <-l.ctx.Done():
 			return
 		default:
-			socket, addr, err := l.listener.Accept()
-			if err != nil {
-				if l.ctx.Err() != nil {
-					// Context cancelled, normal shutdown
-					return
-				}
-				l.logger.WithError(err).Error("Failed to accept SRT connection")
-				continue
-			}
-
-			// Create connection wrapper
-			srtConn, err := l.adapter.NewConnection(socket)
-			if err != nil {
-				l.logger.WithError(err).Error("Failed to create SRT connection wrapper")
-				socket.Close()
-				continue
-			}
-
-			streamID := socket.GetStreamID()
-
-			l.logger.WithFields(map[string]interface{}{
-				"remote":    addr.String(),
-				"stream_id": streamID,
-			}).Info("SRT connection accepted")
-
-			// Create connection object
-			conn := NewConnectionWithSRTConn(streamID, srtConn, addr.String(), l.registry, l.codecDetector, l.logger)
-			l.connections.Store(streamID, conn)
-
-			// Handle the connection
-			l.wg.Add(1)
-			go l.handleConnection(conn, streamID)
 		}
+
+		socket, addr, err := l.listener.Accept()
+		if err != nil {
+			if l.ctx.Err() != nil {
+				return
+			}
+			l.logger.WithError(err).WithField("backoff", backoff).Error("Failed to accept SRT connection")
+
+			// Backoff on error to avoid busy-spin
+			select {
+			case <-l.ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			// Exponential backoff with cap
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		// Reset backoff on successful accept
+		backoff = initialBackoff
+
+		// Create connection wrapper
+		srtConn, err := l.adapter.NewConnection(socket)
+		if err != nil {
+			l.logger.WithError(err).Error("Failed to create SRT connection wrapper")
+			l.connLimiter.Release(socket.GetStreamID()) // Release slot acquired in handleIncomingConnection
+			socket.Close()
+			continue
+		}
+
+		streamID := socket.GetStreamID()
+
+		l.logger.WithFields(map[string]interface{}{
+			"remote":    addr.String(),
+			"stream_id": streamID,
+		}).Info("SRT connection accepted")
+
+		// Create connection object
+		conn := NewConnectionWithSRTConn(streamID, srtConn, addr.String(), l.registry, l.codecDetector, l.logger)
+		l.connections.Store(streamID, conn)
+
+		// Handle the connection
+		l.wg.Add(1)
+		go l.handleConnection(conn, streamID)
 	}
 }
 
@@ -232,6 +281,7 @@ func (l *Listener) acceptLoop() {
 func (l *Listener) handleConnection(conn *Connection, streamID string) {
 	defer l.wg.Done()
 	defer l.connections.Delete(streamID)
+	defer l.connLimiter.Release(streamID)
 
 	// Update metrics
 	metrics.IncrementSRTConnections()
@@ -247,15 +297,14 @@ func (l *Listener) handleConnection(conn *Connection, streamID string) {
 	l.logger.WithField("stream_id", streamID).Info("SRT connection finished")
 }
 
-// isValidStreamID validates the stream ID format
+// isValidStreamID validates the stream ID format.
+// Per SRT spec, stream IDs support UTF-8 up to 512 bytes.
+// We accept printable ASCII to support Haivision access control syntax (#!::).
 func (l *Listener) isValidStreamID(streamID string) bool {
 	if streamID == "" {
 		return false
 	}
-
-	// Basic validation: alphanumeric, underscores, hyphens, max 64 chars
-	validPattern := regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
-	return validPattern.MatchString(streamID)
+	return validStreamIDRegex.MatchString(streamID)
 }
 
 // GetActiveConnections returns the number of active connections

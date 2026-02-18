@@ -575,6 +575,10 @@ func (h *StreamHandler) monitorBackpressure() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	// Rate limit cache enforcement to prevent lock contention
+	lastEnforcement := time.Now()
+	enforcementInterval := 10 * time.Second
+
 	for {
 		select {
 		case <-h.ctx.Done():
@@ -600,8 +604,12 @@ func (h *StreamHandler) monitorBackpressure() {
 				h.releaseBackpressure()
 			}
 
-			h.enforceSessionCacheLimits()
-			h.enforceRecentFramesLimits()
+			// Enforce limits less frequently to prevent lock contention
+			if time.Since(lastEnforcement) > enforcementInterval {
+				h.enforceSessionCacheLimits()
+				h.enforceRecentFramesLimits()
+				lastEnforcement = time.Now()
+			}
 		}
 	}
 }
@@ -1186,17 +1194,17 @@ func (h *StreamHandler) onGOPBufferDrop(gop *types.GOP, gopBufferContext *types.
 	if copiedCount <= types.ErrorCodeCriticalFailure {
 		// CRITICAL ERROR: System is in dangerous memory state
 		h.logger.WithFields(map[string]interface{}{
-			"stream_id":            h.streamID,
-			"gop_id":               gop.ID,
-			"error_code":           copiedCount,
-			"session_total_sets":   afterStats["total_sets"],
-			"emergency_cleanup":    "FAILED",
-			"system_health":        "CRITICAL_MEMORY_LEAK",
-		}).Error("🚨 CRITICAL: Parameter set memory leak detected - emergency cleanup failed!")
-		
+			"stream_id":          h.streamID,
+			"gop_id":             gop.ID,
+			"error_code":         copiedCount,
+			"session_total_sets": afterStats["total_sets"],
+			"emergency_cleanup":  "FAILED",
+			"system_health":      "CRITICAL_MEMORY_LEAK",
+		}).Error("CRITICAL: Parameter set memory leak detected - emergency cleanup failed!")
+
 		// Increment error counter to trigger alerts
 		h.errors.Add(10) // Add multiple errors to signal severity
-		
+
 	} else if copiedCount <= types.ErrorCodeMemoryPressure {
 		// WARNING: System approaching limits
 		h.logger.WithFields(map[string]interface{}{
@@ -1206,10 +1214,10 @@ func (h *StreamHandler) onGOPBufferDrop(gop *types.GOP, gopBufferContext *types.
 			"session_total_sets": afterStats["total_sets"],
 			"emergency_cleanup":  "PARTIAL",
 			"system_health":      "WARNING_MEMORY_PRESSURE",
-		}).Warn("⚠️  WARNING: Parameter set memory pressure - emergency cleanup performed")
-		
+		}).Warn("WARNING: Parameter set memory pressure - emergency cleanup performed")
+
 		h.errors.Add(1) // Track as error for monitoring
-		
+
 	} else if copiedCount < 0 {
 		// Memory limits hit - copy was truncated
 		h.logger.WithFields(map[string]interface{}{
@@ -1218,8 +1226,8 @@ func (h *StreamHandler) onGOPBufferDrop(gop *types.GOP, gopBufferContext *types.
 			"partial_copy_count": -(copiedCount + 1),
 			"session_total_sets": afterStats["total_sets"],
 			"reason":             "memory_limits_reached",
-		}).Warn("📊 Parameter set copy truncated due to memory limits")
-		
+		}).Warn("Parameter set copy truncated due to memory limits")
+
 	} else if copiedCount > 0 {
 		h.logger.WithFields(map[string]interface{}{
 			"stream_id":             h.streamID,
@@ -1230,7 +1238,7 @@ func (h *StreamHandler) onGOPBufferDrop(gop *types.GOP, gopBufferContext *types.
 			"session_sps_after":     afterStats["sps_count"],
 			"session_pps_after":     afterStats["pps_count"],
 			"session_total_after":   afterStats["total_sets"],
-		}).Info("📦 Preserved parameter sets from GOP before buffer drop")
+		}).Info("Preserved parameter sets from GOP before buffer drop")
 	} else {
 		h.logger.WithFields(map[string]interface{}{
 			"stream_id": h.streamID,
@@ -1607,8 +1615,8 @@ func seedSessionCacheFromTransport(sessionCache, transportCache *types.Parameter
 			"transport_total_sets": transportStats["total_sets"],
 			"emergency_cleanup":    "FAILED",
 			"system_health":        "CRITICAL_MEMORY_LEAK",
-		}).Error("🚨 CRITICAL: Transport-to-session parameter copy failed - memory leak detected!")
-		
+		}).Error("CRITICAL: Transport-to-session parameter copy failed - memory leak detected!")
+
 	} else if copiedCount <= types.ErrorCodeMemoryPressure {
 		// WARNING during transport-to-session seeding
 		logger.WithFields(map[string]interface{}{
@@ -1617,8 +1625,8 @@ func seedSessionCacheFromTransport(sessionCache, transportCache *types.Parameter
 			"transport_total_sets": transportStats["total_sets"],
 			"emergency_cleanup":    "PARTIAL",
 			"system_health":        "WARNING_MEMORY_PRESSURE",
-		}).Warn("⚠️  WARNING: Transport-to-session copy hit memory pressure - emergency cleanup performed")
-		
+		}).Warn("WARNING: Transport-to-session copy hit memory pressure - emergency cleanup performed")
+
 	} else if copiedCount < 0 {
 		// Copy was truncated due to memory limits
 		logger.WithFields(map[string]interface{}{
@@ -1626,8 +1634,8 @@ func seedSessionCacheFromTransport(sessionCache, transportCache *types.Parameter
 			"session_total_sets":   sessionStatsAfter["total_sets"],
 			"transport_total_sets": transportStats["total_sets"],
 			"reason":               "memory_limits_reached",
-		}).Warn("📊 Transport-to-session parameter copy truncated due to memory limits")
-		
+		}).Warn("Transport-to-session parameter copy truncated due to memory limits")
+
 	} else if copiedCount > 0 {
 		logger.WithFields(map[string]interface{}{
 			"copied_count":        copiedCount,
@@ -1811,7 +1819,6 @@ func (h *StreamHandler) processAudio() {
 	}
 }
 
-
 // cleanupSessionCache clears the session parameter cache to prevent memory leaks
 func (h *StreamHandler) cleanupSessionCache() {
 	h.parameterCacheMu.Lock()
@@ -1838,6 +1845,9 @@ func (h *StreamHandler) cleanupSessionCache() {
 		"total_after":     afterStats["total_sets"],
 		"memory_leak_fix": "session_cache_cleared",
 	}).Info("Session parameter cache cleaned up")
+
+	// Close the parameter context to stop background goroutines
+	h.sessionParameterCache.Close()
 }
 
 // cleanupRecentFrames clears the recent frames buffer to prevent memory leaks
@@ -1876,14 +1886,16 @@ func (h *StreamHandler) cleanupBitrateWindow() {
 
 // enforceSessionCacheLimits enforces memory limits on the session parameter cache
 func (h *StreamHandler) enforceSessionCacheLimits() {
-	h.parameterCacheMu.Lock()
-	defer h.parameterCacheMu.Unlock()
+	// Get cache reference without holding lock during statistics call
+	h.parameterCacheMu.RLock()
+	cache := h.sessionParameterCache
+	h.parameterCacheMu.RUnlock()
 
-	if h.sessionParameterCache == nil {
+	if cache == nil {
 		return
 	}
 
-	stats := h.sessionParameterCache.GetStatistics()
+	stats := cache.GetStatistics()
 	totalSets, ok := stats["total_sets"].(int)
 	if !ok || totalSets <= 500 { // Safe threshold (less than limit)
 		return
@@ -1897,9 +1909,9 @@ func (h *StreamHandler) enforceSessionCacheLimits() {
 	}).Warn("Session parameter cache approaching limit, clearing old entries")
 
 	// Clear half of the cache to prevent immediate re-triggering
-	h.sessionParameterCache.ClearOldest(totalSets / 2)
+	cache.ClearOldest(totalSets / 2)
 
-	afterStats := h.sessionParameterCache.GetStatistics()
+	afterStats := cache.GetStatistics()
 	h.logger.WithFields(map[string]interface{}{
 		"stream_id":   h.streamID,
 		"sets_before": totalSets,

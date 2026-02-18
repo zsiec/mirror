@@ -8,6 +8,7 @@ import (
 )
 
 func TestCalculateWrapThreshold(t *testing.T) {
+	// MPEG-TS PTS/DTS are always 33-bit per ISO 13818-1, regardless of clock rate
 	tests := []struct {
 		name     string
 		timeBase types.Rational
@@ -16,7 +17,7 @@ func TestCalculateWrapThreshold(t *testing.T) {
 		{
 			name:     "Standard video 90kHz",
 			timeBase: types.Rational{Num: 1, Den: 90000},
-			expected: 1 << 32, // 2^32
+			expected: 1 << 33, // 2^33 (33-bit per spec)
 		},
 		{
 			name:     "Audio 48kHz",
@@ -31,15 +32,12 @@ func TestCalculateWrapThreshold(t *testing.T) {
 		{
 			name:     "Custom time base 30fps",
 			timeBase: types.Rational{Num: 1001, Den: 30000},
-			// Should calculate based on 26 hours
-			// 26 * 3600 * 30000 / 1001 ≈ 2,805,194
-			expected: 2805194,
+			expected: 1 << 33, // 2^33 (always 33-bit for MPEG-TS)
 		},
 		{
 			name:     "High frequency time base",
 			timeBase: types.Rational{Num: 1, Den: 1000000},
-			// 26 * 3600 * 1000000 / 1 = 93,600,000,000
-			expected: 93600000000,
+			expected: 1 << 33, // 2^33 (always 33-bit for MPEG-TS)
 		},
 	}
 
@@ -76,7 +74,7 @@ func TestPTSWrapDetector_DetectWrap(t *testing.T) {
 		{
 			name:       "Wrap from near max to near zero",
 			currentPTS: 100,
-			lastPTS:    (1 << 32) - 100, // Near max 32-bit
+			lastPTS:    (1 << 33) - 100, // Near max 33-bit
 			expectWrap: true,
 		},
 		{
@@ -86,15 +84,21 @@ func TestPTSWrapDetector_DetectWrap(t *testing.T) {
 			expectWrap: false,
 		},
 		{
+			name:       "No wrap at 32-bit boundary (33-bit threshold)",
+			currentPTS: 100,
+			lastPTS:    (1 << 32) - 100,
+			expectWrap: false, // 32-bit difference is less than half of 33-bit threshold
+		},
+		{
 			name:       "Edge case at half threshold",
 			currentPTS: 0,
-			lastPTS:    (1 << 31), // Exactly half
+			lastPTS:    (1 << 32), // Exactly half of 2^33
 			expectWrap: false,
 		},
 		{
 			name:       "Just over half threshold",
 			currentPTS: 0,
-			lastPTS:    (1 << 31) + 1,
+			lastPTS:    (1 << 32) + 1,
 			expectWrap: true,
 		},
 	}
@@ -181,12 +185,12 @@ func TestPTSWrapDetector_IsLikelyDiscontinuity(t *testing.T) {
 		{
 			name:                "Very large jump (likely wrap)",
 			currentPTS:          100,
-			lastPTS:             (1 << 32) - 100,
+			lastPTS:             (1 << 33) - 100,
 			expectDiscontinuity: false, // This is a wrap, not discontinuity
 		},
 		{
 			name:                "Quarter threshold jump",
-			currentPTS:          (1 << 30), // Quarter of 32-bit
+			currentPTS:          (1 << 31), // Quarter of 33-bit threshold
 			lastPTS:             0,
 			expectDiscontinuity: false, // Too large for discontinuity
 		},
@@ -227,16 +231,23 @@ func TestPTSWrapDetector_CalculatePTSDelta(t *testing.T) {
 		{
 			name:       "Delta across wrap boundary",
 			currentPTS: 100,
-			lastPTS:    (1 << 32) - 100,
-			wrapCount:  0,
-			expected:   200, // Should detect wrap and adjust
+			lastPTS:    (1 << 33) - 100,
+			wrapCount:  1, // ProcessTimestamp would have incremented wrapCount before calling this
+			expected:   200,
 		},
 		{
-			name:       "Delta with existing wrap count",
+			name:       "Delta with same-epoch values (no wrap between them)",
 			currentPTS: 1000,
 			lastPTS:    900,
-			wrapCount:  1,
-			expected:   100, // Normal delta, both already wrapped
+			wrapCount:  0, // Both in same epoch, no wraps
+			expected:   100,
+		},
+		{
+			name:       "Delta after one full wrap",
+			currentPTS: 1000,
+			lastPTS:    (1 << 33) - 1000,
+			wrapCount:  1, // One wrap detected
+			expected:   2000,
 		},
 	}
 

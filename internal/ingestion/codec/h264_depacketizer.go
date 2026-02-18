@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/pion/rtp"
 	"github.com/zsiec/mirror/internal/ingestion/memory"
@@ -14,9 +15,12 @@ import (
 // H264Depacketizer handles depacketization of H.264 (AVC) RTP streams
 // Based on RFC 6184
 type H264Depacketizer struct {
-	fragments [][]byte
-	lastSeq   uint16
-	mu        sync.Mutex // Protects fragments and lastSeq
+	fragments         [][]byte
+	lastSeq           uint16
+	fuInProgress      bool      // Whether FU-A assembly is in progress (avoids seq 0 sentinel)
+	fragmentStartTime time.Time // Track when fragment assembly started
+	fragmentTimeout   time.Duration
+	mu                sync.Mutex // Protects fragments and lastSeq
 }
 
 // NAL unit type constants for H.264
@@ -41,6 +45,12 @@ func (d *H264Depacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 
 	// Parse NAL unit header (1 byte for H.264)
 	nalHeader := payload[0]
+
+	// RFC 6184 Section 1.3: forbidden_zero_bit must be 0
+	if nalHeader&0x80 != 0 {
+		return nil, errors.New("H.264 forbidden_zero_bit is set")
+	}
+
 	nalType := nalHeader & 0x1F
 
 	var nalUnits [][]byte
@@ -154,7 +164,20 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 	fuHeader := payload[1]
 	startBit := (fuHeader & 0x80) != 0
 	endBit := (fuHeader & 0x40) != 0
+
 	nalType := fuHeader & 0x1F
+
+	// RFC 6184 Section 5.8: S and E bits MUST NOT both be set to one
+	// This is a protocol violation - treat as single-fragment NAL unit
+	if startBit && endBit {
+		// Reconstruct as single NAL unit despite protocol violation
+		reconstructedHeader := (fuIndicator & 0xE0) | nalType
+		nalUnit := make([]byte, 0, 5+len(payload)-2)
+		nalUnit = append(nalUnit, 0x00, 0x00, 0x00, 0x01, reconstructedHeader)
+		nalUnit = append(nalUnit, payload[2:]...)
+		d.lastSeq = sequenceNumber
+		return nalUnit, true
+	}
 
 	// FU payload starts at byte 2
 	if len(payload) <= 2 {
@@ -167,12 +190,22 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 	if len(fuPayload) > security.MaxFragmentSize {
 		// Fragment too large, reset and skip
 		d.fragments = nil
+		d.fragmentStartTime = time.Time{}
 		return nil, false
+	}
+
+	// Check for fragment timeout before processing
+	if d.fragmentTimeout > 0 && !d.fragmentStartTime.IsZero() && time.Since(d.fragmentStartTime) > d.fragmentTimeout {
+		// Fragment assembly timed out, reset
+		d.fragments = [][]byte{}
+		d.fragmentStartTime = time.Time{}
 	}
 
 	if startBit {
 		// Start of a new fragmented NAL unit
 		d.fragments = [][]byte{}
+		d.fragmentStartTime = time.Now()
+		d.fuInProgress = true
 
 		// Reconstruct NAL unit header
 		nalHeader := (fuIndicator & 0xE0) | nalType
@@ -182,11 +215,31 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 		d.fragments = append(d.fragments, startCodeAndHeader)
 	}
 
-	// Check for packet loss
-	if d.lastSeq != 0 && sequenceNumber != d.lastSeq+1 && !startBit {
-		// Packet loss detected in the middle of fragmentation, discard fragments
-		d.fragments = [][]byte{}
-		return nil, false
+	// Check for packet loss with sequence number wraparound handling
+	// Use fuInProgress flag instead of lastSeq != 0 since seq 0 is valid (RFC 3550)
+	if d.fuInProgress && !startBit && len(d.fragments) > 0 {
+		// Calculate sequence number distance with proper wraparound handling
+		// Using the serial number arithmetic from RFC 1982
+		gap := d.sequenceDistance(sequenceNumber, d.lastSeq)
+
+		// During fragmentation, we expect consecutive packets
+		// gap = 1: Normal sequential packet
+		// gap = 0: Duplicate packet (should not happen in fragments)
+		// gap > 1: Missing packets
+		// gap < 0: Reordering (packets arrived out of order)
+
+		if gap == 0 {
+			// Duplicate packet — silently ignore
+			return nil, false
+		}
+		if gap != 1 {
+			// Any gap during FU-A reassembly means missing data.
+			// Tolerating gaps would produce corrupt NAL units with holes.
+			// Reset fragment assembly and discard.
+			d.fragments = [][]byte{}
+			d.fragmentStartTime = time.Time{}
+			return nil, false
+		}
 	}
 
 	// Add fragment payload with size check
@@ -201,6 +254,7 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 		if currentSize+len(fuPayload) > security.MaxNALUnitSize {
 			// Fragment accumulation too large, reset
 			d.fragments = [][]byte{}
+			d.fragmentStartTime = time.Time{}
 			return nil, false
 		}
 
@@ -212,6 +266,7 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 		if len(d.fragments) > 1000 {
 			// Too many fragments, reset
 			d.fragments = [][]byte{}
+			d.fragmentStartTime = time.Time{}
 			return nil, false
 		}
 	}
@@ -227,6 +282,7 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 		if totalSize > security.MaxNALUnitSize {
 			// Assembled NAL unit too large
 			d.fragments = [][]byte{}
+			d.fragmentStartTime = time.Time{}
 			return nil, false
 		}
 
@@ -236,9 +292,15 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 		}
 
 		d.fragments = [][]byte{}
+		d.fragmentStartTime = time.Time{}
+		d.fuInProgress = false
+		// Update last sequence number after successful reassembly
+		d.lastSeq = sequenceNumber
 		return nalUnit, true
 	}
 
+	// Update last sequence number for fragment tracking
+	d.lastSeq = sequenceNumber
 	return nil, false
 }
 
@@ -251,12 +313,22 @@ func (d *H264Depacketizer) prependStartCode(nalUnit []byte) []byte {
 	return result
 }
 
+// sequenceDistance calculates the distance between two RTP sequence numbers
+// handling 16-bit wraparound according to RFC 1982 serial number arithmetic.
+// Returns positive if s1 is ahead of s2, negative if behind.
+func (d *H264Depacketizer) sequenceDistance(s1, s2 uint16) int {
+	// Cast to signed 16-bit to handle wraparound
+	diff := int16(s1 - s2)
+	return int(diff)
+}
+
 // Reset clears the depacketizer state
 func (d *H264Depacketizer) Reset() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.fragments = [][]byte{}
-	d.lastSeq = 0
+	d.fuInProgress = false
+	d.fragmentStartTime = time.Time{}
 }
 
 // GetNALType extracts the NAL unit type from a NAL header
@@ -266,8 +338,9 @@ func GetNALType(nalHeader byte) byte {
 
 // IsKeyFrame checks if the NAL unit type indicates a key frame
 func IsKeyFrame(nalType byte) bool {
-	// NAL unit types 5 (IDR) and 7 (SPS) typically indicate key frames
-	return nalType == 5 || nalType == 7
+	// Only NAL unit type 5 (IDR slice) is a key frame.
+	// SPS (7) is a parameter set, not a frame.
+	return nalType == 5
 }
 
 // H264DepacketizerWithMemory extends H264Depacketizer with memory management
@@ -283,7 +356,8 @@ type H264DepacketizerWithMemory struct {
 func NewH264DepacketizerWithMemory(streamID string, memController *memory.Controller, limit int64) Depacketizer {
 	return &H264DepacketizerWithMemory{
 		H264Depacketizer: H264Depacketizer{
-			fragments: [][]byte{},
+			fragments:       [][]byte{},
+			fragmentTimeout: 5 * time.Second, // Default 5 second timeout for fragment assembly
 		},
 		streamID:      streamID,
 		memController: memController,

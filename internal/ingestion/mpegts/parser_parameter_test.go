@@ -279,3 +279,248 @@ func TestParameterExtractorCallback(t *testing.T) {
 		t.Errorf("Expected 2 parameter sets in callback, got %d", len(receivedParamSets))
 	}
 }
+
+func TestCorruptedAVCDescriptor(t *testing.T) {
+	parser := NewParser()
+
+	// Test with corrupted descriptor that has unreasonably large PPS length
+	corruptedDescriptor := []byte{
+		// Profile, constraints, level
+		0x42, 0x00, 0x1E,
+		// Length size minus 1
+		0xFF,
+		// Number of SPS (1)
+		0xE1,
+		// SPS length (8 bytes)
+		0x00, 0x08,
+		// SPS data
+		0x42, 0x00, 0x1E, 0x8D, 0x84, 0x04, 0x05, 0x06,
+		// Number of PPS (1)
+		0x01,
+		// PPS length (1656 bytes - the problematic value)
+		0x06, 0x78, // This is 1656 in big-endian
+		// Not enough data follows...
+		0xCE, 0x3C,
+	}
+
+	paramSets := parser.extractH264ParameterSetsFromDescriptor(corruptedDescriptor)
+
+	// Should extract only the SPS since PPS is corrupted
+	if len(paramSets) != 1 {
+		t.Errorf("Expected 1 parameter set (SPS only) from corrupted descriptor, got %d", len(paramSets))
+	}
+
+	// Verify the SPS was extracted correctly
+	if len(paramSets) > 0 {
+		sps := paramSets[0]
+		if len(sps) != 13 { // 5 bytes header + 8 bytes data
+			t.Errorf("Expected SPS length of 13 bytes, got %d", len(sps))
+		}
+	}
+}
+
+func TestAVCDescriptorWithInvalidProfile(t *testing.T) {
+	parser := NewParser()
+
+	// Test with invalid profile but otherwise valid descriptor
+	descriptor := []byte{
+		// Invalid profile 0xFF
+		0xFF, 0x00, 0x1E,
+		// Length size minus 1
+		0xFF,
+		// Number of SPS (1)
+		0xE1,
+		// SPS length (4 bytes)
+		0x00, 0x04,
+		// SPS data
+		0x42, 0x00, 0x1E, 0x8D,
+		// Number of PPS (1)
+		0x01,
+		// PPS length (4 bytes)
+		0x00, 0x04,
+		// PPS data
+		0xCE, 0x3C, 0x80, 0x01,
+	}
+
+	paramSets := parser.extractH264ParameterSetsFromDescriptor(descriptor)
+
+	// Should still extract parameter sets despite invalid profile
+	if len(paramSets) != 2 {
+		t.Errorf("Expected 2 parameter sets despite invalid profile, got %d", len(paramSets))
+	}
+}
+
+func TestAVCDescriptorTooLarge(t *testing.T) {
+	parser := NewParser()
+
+	// Create a descriptor that's too large (> 1024 bytes)
+	largeDescriptor := make([]byte, 1100)
+	// Fill with some data
+	largeDescriptor[0] = 0x42 // Profile
+	largeDescriptor[1] = 0x00 // Constraints
+	largeDescriptor[2] = 0x1E // Level
+
+	paramSets := parser.extractH264ParameterSetsFromDescriptor(largeDescriptor)
+
+	// Should return empty due to size check
+	if len(paramSets) != 0 {
+		t.Errorf("Expected 0 parameter sets from oversized descriptor, got %d", len(paramSets))
+	}
+}
+
+func TestAVCDescriptorWithTooManyPPS(t *testing.T) {
+	parser := NewParser()
+
+	// Test with too many PPS (> 8)
+	descriptor := []byte{
+		// Profile, constraints, level
+		0x42, 0x00, 0x1E,
+		// Length size minus 1
+		0xFF,
+		// Number of SPS (1)
+		0xE1,
+		// SPS length (4 bytes)
+		0x00, 0x04,
+		// SPS data
+		0x42, 0x00, 0x1E, 0x8D,
+		// Number of PPS (20 - too many)
+		0x14,
+		// First PPS length (4 bytes)
+		0x00, 0x04,
+		// First PPS data
+		0xCE, 0x3C, 0x80, 0x01,
+		// More PPS entries would follow...
+	}
+
+	// Add more PPS entries
+	for i := 0; i < 7; i++ {
+		descriptor = append(descriptor, 0x00, 0x04)                  // Length
+		descriptor = append(descriptor, 0xCE, 0x3C, 0x80, byte(i+2)) // Data
+	}
+
+	paramSets := parser.extractH264ParameterSetsFromDescriptor(descriptor)
+
+	// Should extract 1 SPS + maximum 8 PPS = 9 total
+	if len(paramSets) > 9 {
+		t.Errorf("Expected at most 9 parameter sets (1 SPS + 8 PPS), got %d", len(paramSets))
+	}
+}
+
+func TestAVCDescriptorValidation(t *testing.T) {
+	parser := NewParser()
+
+	tests := []struct {
+		name              string
+		descriptor        []byte
+		shouldLookLikeAVC bool
+		expectedParamSets int
+	}{
+		{
+			name: "valid AVC descriptor",
+			descriptor: []byte{
+				0x42, 0x00, 0x1E, // Profile, constraints, level
+				0xFF,       // Length size minus 1
+				0xE1,       // Number of SPS (1)
+				0x00, 0x04, // SPS length (4 bytes)
+				0x42, 0x00, 0x1E, 0x8D, // SPS data
+				0x01,       // Number of PPS (1)
+				0x00, 0x04, // PPS length (4 bytes)
+				0xCE, 0x3C, 0x80, 0x01, // PPS data
+			},
+			shouldLookLikeAVC: true,
+			expectedParamSets: 2,
+		},
+		{
+			name: "corrupted with PPS length 1656",
+			descriptor: []byte{
+				0x42, 0x00, 0x1E, // Profile, constraints, level
+				0xFF,       // Length size minus 1
+				0xE1,       // Number of SPS (1)
+				0x00, 0x08, // SPS length (8 bytes)
+				0x42, 0x00, 0x1E, 0x8D, 0x84, 0x04, 0x05, 0x06, // SPS data
+				0x01,       // Number of PPS (1)
+				0x06, 0x78, // PPS length (1656 bytes - invalid)
+				0xCE, 0x3C, // Not enough data
+			},
+			shouldLookLikeAVC: true, // Basic structure looks OK
+			expectedParamSets: 1,    // Should extract SPS only
+		},
+		{
+			name:              "too short",
+			descriptor:        []byte{0x42, 0x00, 0x1E},
+			shouldLookLikeAVC: false,
+			expectedParamSets: 0,
+		},
+		{
+			name: "zero SPS length",
+			descriptor: []byte{
+				0x42, 0x00, 0x1E, // Profile, constraints, level
+				0xFF,       // Length size minus 1
+				0xE1,       // Number of SPS (1)
+				0x00, 0x00, // SPS length (0 bytes - invalid)
+			},
+			shouldLookLikeAVC: true, // Basic structure looks OK
+			expectedParamSets: 0,    // Zero-length SPS is skipped
+		},
+		{
+			name: "SPS exceeds buffer",
+			descriptor: []byte{
+				0x42, 0x00, 0x1E, // Profile, constraints, level
+				0xFF,       // Length size minus 1
+				0xE1,       // Number of SPS (1)
+				0x00, 0x10, // SPS length (16 bytes)
+				0x42, 0x00, // Only 2 bytes of SPS data
+			},
+			shouldLookLikeAVC: true, // Basic structure looks OK
+			expectedParamSets: 0,    // Can't extract because data is truncated
+		},
+		{
+			name: "invalid SPS count byte",
+			descriptor: []byte{
+				0x42, 0x00, 0x1E, // Profile, constraints, level
+				0xFF,       // Length size minus 1
+				0x01,       // Invalid SPS count byte (should be 0xE0-0xFF)
+				0x00, 0x04, // SPS length
+			},
+			shouldLookLikeAVC: false,
+			expectedParamSets: 0,
+		},
+		{
+			name: "zero profile",
+			descriptor: []byte{
+				0x00, 0x00, 0x1E, // Profile 0x00 is suspicious
+				0xFF,
+				0xE1,
+				0x00,
+			},
+			shouldLookLikeAVC: false,
+			expectedParamSets: 0,
+		},
+		{
+			name: "0xFF profile",
+			descriptor: []byte{
+				0xFF, 0x00, 0x1E, // Profile 0xFF is suspicious but allowed
+				0xFF,
+				0xE1,
+				0x00,
+			},
+			shouldLookLikeAVC: true, // Now allows 0xFF with warning
+			expectedParamSets: 0,    // Still 0 because descriptor is incomplete
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isValid := parser.looksLikeAVCDescriptor(tt.descriptor)
+			if isValid != tt.shouldLookLikeAVC {
+				t.Errorf("Expected looksLikeAVCDescriptor to return %v, got %v", tt.shouldLookLikeAVC, isValid)
+			}
+
+			// Test extraction
+			paramSets := parser.extractH264ParameterSetsFromDescriptor(tt.descriptor)
+			if len(paramSets) != tt.expectedParamSets {
+				t.Errorf("Expected %d parameter sets, got %d", tt.expectedParamSets, len(paramSets))
+			}
+		})
+	}
+}

@@ -74,6 +74,7 @@ type HEVCProfileTierLevel struct {
 	GeneralInterlacedSourceFlag      bool
 	GeneralNonPackedConstraintFlag   bool
 	GeneralFrameOnlyConstraintFlag   bool
+	GeneralConstraintIndicatorFlags  uint64 // 44 remaining constraint bits (48 total - 4 named flags above)
 	GeneralLevelIdc                  uint32
 }
 
@@ -84,20 +85,32 @@ func (sps *HEVCSPS) GetResolution() Resolution {
 
 	// Apply conformance window cropping if present
 	if sps.ConformanceWindowFlag {
-		// Calculate chroma format multipliers
+		// Calculate chroma format multipliers per HEVC spec Table 6-1
+		// When separate_colour_plane_flag is 1, ChromaArrayType is 0 (monochrome cropping)
+		chromaArrayType := sps.ChromaFormatIdc
+		if sps.SeparateColourPlaneFlag {
+			chromaArrayType = 0
+		}
 		var subWidthC, subHeightC uint32 = 1, 1
-		switch sps.ChromaFormatIdc {
+		switch chromaArrayType {
 		case 1: // 4:2:0
 			subWidthC, subHeightC = 2, 2
 		case 2: // 4:2:2
 			subWidthC, subHeightC = 2, 1
 		case 3: // 4:4:4
 			subWidthC, subHeightC = 1, 1
+			// case 0: monochrome — subWidthC=1, subHeightC=1 (default)
 		}
 
-		// Apply cropping
-		width -= (sps.ConfWinLeftOffset + sps.ConfWinRightOffset) * subWidthC
-		height -= (sps.ConfWinTopOffset + sps.ConfWinBottomOffset) * subHeightC
+		// Apply cropping with underflow protection
+		cropWidth := (sps.ConfWinLeftOffset + sps.ConfWinRightOffset) * subWidthC
+		cropHeight := (sps.ConfWinTopOffset + sps.ConfWinBottomOffset) * subHeightC
+		if cropWidth >= width || cropHeight >= height {
+			// Malformed SPS — cropping exceeds dimensions
+			return Resolution{Width: int(width), Height: int(height)}
+		}
+		width -= cropWidth
+		height -= cropHeight
 	}
 
 	return Resolution{
@@ -145,6 +158,10 @@ func (d *Detector) parseHEVCVPS(vpsData []byte) (*HEVCVPS, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read vps_max_sub_layers_minus1: %w", err)
 	}
+	// HEVC spec: vps_max_sub_layers_minus1 shall be in the range 0 to 6
+	if vps.VpsMaxSubLayersMinus1 > 6 {
+		return nil, fmt.Errorf("vps_max_sub_layers_minus1 %d out of range (0-6)", vps.VpsMaxSubLayersMinus1)
+	}
 
 	// vps_temporal_id_nesting_flag (1 bit)
 	bit, err := br.ReadBit()
@@ -152,6 +169,12 @@ func (d *Detector) parseHEVCVPS(vpsData []byte) (*HEVCVPS, error) {
 		return nil, fmt.Errorf("failed to read vps_temporal_id_nesting_flag: %w", err)
 	}
 	vps.VpsTemporalIdNestingFlag = bit == 1
+
+	// HEVC spec Section 7.4.3.1: When vps_max_sub_layers_minus1 is 0,
+	// vps_temporal_id_nesting_flag shall be 1
+	if vps.VpsMaxSubLayersMinus1 == 0 && !vps.VpsTemporalIdNestingFlag {
+		return nil, fmt.Errorf("vps_temporal_id_nesting_flag must be 1 when vps_max_sub_layers_minus1 is 0")
+	}
 
 	// vps_reserved_0xffff_16bits (16 bits)
 	reserved16, err := br.ReadBits(16)
@@ -197,6 +220,10 @@ func (d *Detector) parseHEVCSPSFull(spsData []byte) (Resolution, error) {
 	if err != nil {
 		return Resolution{}, fmt.Errorf("failed to read sps_max_sub_layers_minus1: %w", err)
 	}
+	// HEVC spec: sps_max_sub_layers_minus1 shall be in the range 0 to 6
+	if sps.SpsMaxSubLayersMinus1 > 6 {
+		return Resolution{}, fmt.Errorf("sps_max_sub_layers_minus1 %d out of range (0-6)", sps.SpsMaxSubLayersMinus1)
+	}
 
 	// sps_temporal_id_nesting_flag (1 bit)
 	bit, err := br.ReadBit()
@@ -204,6 +231,12 @@ func (d *Detector) parseHEVCSPSFull(spsData []byte) (Resolution, error) {
 		return Resolution{}, fmt.Errorf("failed to read sps_temporal_id_nesting_flag: %w", err)
 	}
 	sps.SpsTemporalIdNestingFlag = bit == 1
+
+	// HEVC spec Section 7.4.3.2.1: When sps_max_sub_layers_minus1 is 0,
+	// sps_temporal_id_nesting_flag shall be 1
+	if sps.SpsMaxSubLayersMinus1 == 0 && !sps.SpsTemporalIdNestingFlag {
+		return Resolution{}, fmt.Errorf("sps_temporal_id_nesting_flag must be 1 when sps_max_sub_layers_minus1 is 0")
+	}
 
 	// profile_tier_level()
 	sps.ProfileTierLevel, err = d.parseHEVCProfileTierLevel(br, true, sps.SpsMaxSubLayersMinus1)
@@ -216,11 +249,19 @@ func (d *Detector) parseHEVCSPSFull(spsData []byte) (Resolution, error) {
 	if err != nil {
 		return Resolution{}, fmt.Errorf("failed to read sps_seq_parameter_set_id: %w", err)
 	}
+	// HEVC spec: sps_seq_parameter_set_id shall be in the range 0 to 15
+	if sps.SpsSeqParameterSetId > 15 {
+		return Resolution{}, fmt.Errorf("sps_seq_parameter_set_id %d out of range (0-15)", sps.SpsSeqParameterSetId)
+	}
 
 	// chroma_format_idc
 	sps.ChromaFormatIdc, err = br.ReadUE()
 	if err != nil {
 		return Resolution{}, fmt.Errorf("failed to read chroma_format_idc: %w", err)
+	}
+	// HEVC spec: chroma_format_idc shall be in the range 0 to 3
+	if sps.ChromaFormatIdc > 3 {
+		return Resolution{}, fmt.Errorf("chroma_format_idc %d out of range (0-3)", sps.ChromaFormatIdc)
 	}
 
 	if sps.ChromaFormatIdc == 3 {
@@ -352,13 +393,17 @@ func (d *Detector) parseHEVCProfileTierLevel(br *BitReader, profilePresentFlag b
 		}
 		ptl.GeneralFrameOnlyConstraintFlag = bit == 1
 
-		// Skip 44 reserved zero bits
-		for i := 0; i < 44; i++ {
-			_, err = br.ReadBit()
-			if err != nil {
-				return ptl, fmt.Errorf("failed to read reserved bit %d: %w", i, err)
-			}
+		// Read the remaining 44 constraint indicator flag bits
+		// (48 total bits minus the 4 named flags above)
+		highBits, err := br.ReadBits(32)
+		if err != nil {
+			return ptl, fmt.Errorf("failed to read constraint indicator flags (high): %w", err)
 		}
+		lowBits, err := br.ReadBits(12)
+		if err != nil {
+			return ptl, fmt.Errorf("failed to read constraint indicator flags (low): %w", err)
+		}
+		ptl.GeneralConstraintIndicatorFlags = (uint64(highBits) << 12) | uint64(lowBits)
 	}
 
 	// general_level_idc (8 bits)
@@ -368,25 +413,29 @@ func (d *Detector) parseHEVCProfileTierLevel(br *BitReader, profilePresentFlag b
 		return ptl, fmt.Errorf("failed to read general_level_idc: %w", err)
 	}
 
-	// Skip sub-layer profile/tier/level information for now
+	// Read sub-layer present flags per HEVC spec Section 7.3.3
+	subLayerProfilePresentFlag := make([]bool, maxNumSubLayersMinus1)
+	subLayerLevelPresentFlag := make([]bool, maxNumSubLayersMinus1)
+
 	for i := uint32(0); i < maxNumSubLayersMinus1; i++ {
 		// sub_layer_profile_present_flag
-		_, err = br.ReadBit()
+		profileBit, err := br.ReadBit()
 		if err != nil {
 			return ptl, fmt.Errorf("failed to read sub_layer_profile_present_flag[%d]: %w", i, err)
 		}
+		subLayerProfilePresentFlag[i] = profileBit == 1
 
 		// sub_layer_level_present_flag
-		_, err = br.ReadBit()
+		levelBit, err := br.ReadBit()
 		if err != nil {
 			return ptl, fmt.Errorf("failed to read sub_layer_level_present_flag[%d]: %w", i, err)
 		}
+		subLayerLevelPresentFlag[i] = levelBit == 1
 	}
 
-	// Skip remaining sub-layer information
+	// reserved_zero_2bits padding per HEVC spec
 	if maxNumSubLayersMinus1 > 0 {
 		for i := maxNumSubLayersMinus1; i < 8; i++ {
-			// reserved_zero_2bits
 			_, err = br.ReadBits(2)
 			if err != nil {
 				return ptl, fmt.Errorf("failed to read reserved_zero_2bits[%d]: %w", i, err)
@@ -394,8 +443,40 @@ func (d *Detector) parseHEVCProfileTierLevel(br *BitReader, profilePresentFlag b
 		}
 	}
 
-	// We would parse sub-layer profile/tier/level here, but for resolution detection
-	// we don't need this information, so we'll skip it for now
+	// Read sub-layer profile/tier/level data — CRITICAL for correct bitstream position.
+	// Without this, the bit reader is misaligned for all subsequent SPS fields.
+	for i := uint32(0); i < maxNumSubLayersMinus1; i++ {
+		if subLayerProfilePresentFlag[i] {
+			// sub_layer_profile_space(2) + sub_layer_tier_flag(1) + sub_layer_profile_idc(5) = 8 bits
+			_, err = br.ReadBits(8)
+			if err != nil {
+				return ptl, fmt.Errorf("failed to read sub_layer profile header[%d]: %w", i, err)
+			}
+			// sub_layer_profile_compatibility_flag[32]
+			_, err = br.ReadBits(32)
+			if err != nil {
+				return ptl, fmt.Errorf("failed to read sub_layer_profile_compatibility_flags[%d]: %w", i, err)
+			}
+			// sub_layer constraint flags (48 bits total):
+			// progressive(1) + interlaced(1) + non_packed(1) + frame_only(1) + 44 reserved = 48 bits
+			// Read as 32 + 16 since ReadBits max is 32
+			_, err = br.ReadBits(32)
+			if err != nil {
+				return ptl, fmt.Errorf("failed to read sub_layer constraint flags part1[%d]: %w", i, err)
+			}
+			_, err = br.ReadBits(16)
+			if err != nil {
+				return ptl, fmt.Errorf("failed to read sub_layer constraint flags part2[%d]: %w", i, err)
+			}
+		}
+		if subLayerLevelPresentFlag[i] {
+			// sub_layer_level_idc (8 bits)
+			_, err = br.ReadBits(8)
+			if err != nil {
+				return ptl, fmt.Errorf("failed to read sub_layer_level_idc[%d]: %w", i, err)
+			}
+		}
+	}
 
 	return ptl, nil
 }

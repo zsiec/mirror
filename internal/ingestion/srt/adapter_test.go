@@ -10,13 +10,17 @@ import (
 func TestRejectionReason_Values(t *testing.T) {
 	// Test that rejection reasons have expected values
 	assert.Equal(t, RejectionReason(0), RejectionReasonUnauthorized)
-	assert.Equal(t, RejectionReason(1), RejectionReasonResourceUnavailable) 
+	assert.Equal(t, RejectionReason(1), RejectionReasonResourceUnavailable)
 	assert.Equal(t, RejectionReason(2), RejectionReasonBadRequest)
+	assert.Equal(t, RejectionReason(3), RejectionReasonForbidden)
+	assert.Equal(t, RejectionReason(4), RejectionReasonNotFound)
+	assert.Equal(t, RejectionReason(5), RejectionReasonBadMode)
+	assert.Equal(t, RejectionReason(6), RejectionReasonUnacceptable)
 }
 
 func TestConnectionStats_Initialization(t *testing.T) {
 	stats := ConnectionStats{}
-	
+
 	// Test zero initialization
 	assert.Equal(t, int64(0), stats.BytesReceived)
 	assert.Equal(t, int64(0), stats.BytesSent)
@@ -38,12 +42,12 @@ func TestConnectionStats_SetValues(t *testing.T) {
 		PacketsSent:      50,
 		PacketsLost:      2,
 		PacketsRetrans:   1,
-		RTTMs:           15.5,
-		BandwidthMbps:   25.7,
-		DeliveryDelayMs: 120.3,
+		RTTMs:            15.5,
+		BandwidthMbps:    25.7,
+		DeliveryDelayMs:  120.3,
 		ConnectionTimeMs: 30 * time.Second,
 	}
-	
+
 	// Verify all values are set correctly
 	assert.Equal(t, int64(1024), stats.BytesReceived)
 	assert.Equal(t, int64(512), stats.BytesSent)
@@ -59,7 +63,7 @@ func TestConnectionStats_SetValues(t *testing.T) {
 
 func TestConfig_Initialization(t *testing.T) {
 	config := Config{}
-	
+
 	// Test zero initialization
 	assert.Equal(t, "", config.Address)
 	assert.Equal(t, 0, config.Port)
@@ -91,7 +95,7 @@ func TestConfig_SetValues(t *testing.T) {
 			PBKDFIterations: 2048,
 		},
 	}
-	
+
 	// Verify all values are set correctly
 	assert.Equal(t, "0.0.0.0", config.Address)
 	assert.Equal(t, 30000, config.Port)
@@ -102,7 +106,7 @@ func TestConfig_SetValues(t *testing.T) {
 	assert.Equal(t, 25600, config.FlowControlWindow)
 	assert.Equal(t, 30*time.Second, config.PeerIdleTimeout)
 	assert.Equal(t, 25, config.MaxConnections)
-	
+
 	// Verify encryption config
 	assert.True(t, config.Encryption.Enabled)
 	assert.Equal(t, "secret123", config.Encryption.Passphrase)
@@ -112,7 +116,7 @@ func TestConfig_SetValues(t *testing.T) {
 
 func TestEncryptionConfig_Defaults(t *testing.T) {
 	config := EncryptionConfig{}
-	
+
 	assert.False(t, config.Enabled)
 	assert.Equal(t, "", config.Passphrase)
 	assert.Equal(t, 0, config.KeyLength)
@@ -121,8 +125,8 @@ func TestEncryptionConfig_Defaults(t *testing.T) {
 
 func TestEncryptionConfig_ValidConfiguration(t *testing.T) {
 	tests := []struct {
-		name       string
-		config     EncryptionConfig
+		name        string
+		config      EncryptionConfig
 		expectValid bool
 	}{
 		{
@@ -149,7 +153,7 @@ func TestEncryptionConfig_ValidConfiguration(t *testing.T) {
 			expectValid: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Basic validation logic
@@ -196,12 +200,12 @@ func TestConfig_RealisticConfigurations(t *testing.T) {
 		{
 			name: "encrypted streaming",
 			config: Config{
-				Address:           "0.0.0.0",
-				Port:              30002,
-				Latency:           120 * time.Millisecond,
-				MaxBandwidth:      50000000,
-				PayloadSize:       1316,
-				MaxConnections:    25,
+				Address:        "0.0.0.0",
+				Port:           30002,
+				Latency:        120 * time.Millisecond,
+				MaxBandwidth:   50000000,
+				PayloadSize:    1316,
+				MaxConnections: 25,
 				Encryption: EncryptionConfig{
 					Enabled:         true,
 					Passphrase:      "super-secret-key-2024",
@@ -211,18 +215,18 @@ func TestConfig_RealisticConfigurations(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Verify config can be created and accessed
 			config := tt.config
-			
+
 			assert.NotEmpty(t, config.Address)
 			assert.Greater(t, config.Port, 0)
 			assert.GreaterOrEqual(t, config.Latency, time.Duration(0))
 			assert.GreaterOrEqual(t, config.MaxBandwidth, int64(0))
 			assert.GreaterOrEqual(t, config.MaxConnections, 0)
-			
+
 			if config.Encryption.Enabled {
 				assert.NotEmpty(t, config.Encryption.Passphrase)
 				assert.Greater(t, config.Encryption.KeyLength, 0)
@@ -237,18 +241,18 @@ func TestConnectionStats_Calculations(t *testing.T) {
 		BytesReceived:   1024000, // 1MB
 		PacketsReceived: 1000,
 		PacketsLost:     10,
-		RTTMs:          15.5,
-		BandwidthMbps:  25.0,
+		RTTMs:           15.5,
+		BandwidthMbps:   25.0,
 	}
-	
+
 	// Calculate packet loss rate
 	lossRate := float64(stats.PacketsLost) / float64(stats.PacketsReceived) * 100
 	assert.InDelta(t, 1.0, lossRate, 0.01) // 1% loss rate
-	
+
 	// Calculate average packet size
 	avgPacketSize := float64(stats.BytesReceived) / float64(stats.PacketsReceived)
 	assert.InDelta(t, 1024.0, avgPacketSize, 0.01) // 1KB average
-	
+
 	// Verify bandwidth is reasonable
 	assert.Greater(t, stats.BandwidthMbps, 0.0)
 	assert.Less(t, stats.RTTMs, 1000.0) // RTT should be reasonable

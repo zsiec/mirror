@@ -14,6 +14,7 @@ import (
 type JPEGXSDepacketizer struct {
 	fragments       [][]byte
 	lastSeq         uint16
+	hasLastSeq      bool // Whether lastSeq has been set (seq 0 is valid per RFC 3550)
 	currentFrameID  uint32
 	expectedPackets uint16
 	receivedPackets uint16
@@ -66,9 +67,9 @@ func (d *JPEGXSDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 		return nil, fmt.Errorf("failed to parse JPEG XS header: %w", err)
 	}
 
-	// Check for packet loss
+	// Check for packet loss — use hasLastSeq flag since seq 0 is valid per RFC 3550
 	packetLossDetected := false
-	if d.lastSeq != 0 && sequenceNumber != d.lastSeq+1 {
+	if d.hasLastSeq && sequenceNumber != d.lastSeq+1 {
 		// Packet loss detected
 		packetLossDetected = true
 		if !d.frameComplete && len(d.fragments) > 0 {
@@ -77,6 +78,7 @@ func (d *JPEGXSDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 		}
 	}
 	d.lastSeq = sequenceNumber
+	d.hasLastSeq = true
 
 	// Check if this is a new frame
 	if header.FirstPacket || header.FrameID != d.currentFrameID {
@@ -234,6 +236,7 @@ func (d *JPEGXSDepacketizer) resetFrame() {
 func (d *JPEGXSDepacketizer) Reset() {
 	d.resetFrame()
 	d.lastSeq = 0
+	d.hasLastSeq = false
 	d.currentFrameID = 0
 }
 

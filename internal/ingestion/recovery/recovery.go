@@ -30,6 +30,10 @@ const (
 	StateRecovering
 	StateResyncing
 	StateFailed
+
+	// Aliases for backward compatibility
+	RecoveryStateHealthy = StateNormal
+	RecoveryStateFailed  = StateFailed
 )
 
 // Handler manages error recovery for video streams

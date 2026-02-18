@@ -57,6 +57,7 @@ func (bp *BufferPool) Get(streamID string) *RingBuffer {
 	select {
 	case buffer = <-bp.freeList:
 		buffer.Reset()
+		buffer.Reopen()            // Reopen the buffer for reuse
 		buffer.streamID = streamID // Update streamID for reused buffer
 	default:
 		// Create new buffer if none available

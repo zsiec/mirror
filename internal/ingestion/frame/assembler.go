@@ -3,6 +3,7 @@ package frame
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -109,7 +110,7 @@ func (a *Assembler) Stop() error {
 		"packets_dropped":  a.packetsDropped,
 	}
 	a.mu.Unlock()
-	
+
 	a.logger.WithFields(stats).Info("Frame assembler stopped")
 
 	return nil
@@ -123,19 +124,44 @@ func (a *Assembler) AddPacket(pkt types.TimestampedPacket) error {
 		return a.ctx.Err()
 	default:
 	}
-	
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	a.packetsReceived++
 
+	// Debug log incoming packet
+	a.logger.WithFields(map[string]interface{}{
+		"packet_num":      a.packetsReceived,
+		"pts":             pkt.PTS,
+		"dts":             pkt.DTS,
+		"data_len":        len(pkt.Data),
+		"flags":           pkt.Flags,
+		"is_keyframe":     pkt.IsKeyframe(),
+		"has_frame_start": pkt.HasFlag(types.PacketFlagFrameStart),
+		"has_frame_end":   pkt.HasFlag(types.PacketFlagFrameEnd),
+		"first_16_bytes":  fmt.Sprintf("%02x", pkt.Data[:min(16, len(pkt.Data))]),
+	}).Debug("FRAME ASSEMBLER: AddPacket called")
+
 	// Detect frame boundaries
 	isStart, isEnd := a.frameDetector.DetectBoundaries(&pkt)
+
+	a.logger.WithFields(map[string]interface{}{
+		"is_start":    isStart,
+		"is_end":      isEnd,
+		"has_current": a.currentFrame != nil,
+	}).Debug("FRAME ASSEMBLER: Boundary detection result")
 
 	// Handle frame start
 	if isStart {
 		// Complete current frame if exists
 		if a.currentFrame != nil {
+			a.logger.WithFields(map[string]interface{}{
+				"current_frame_id": a.currentFrame.ID,
+				"current_pts":      a.currentFrame.PTS,
+				"nal_buffer_size":  len(a.nalBuffer),
+			}).Debug("FRAME ASSEMBLER: Completing previous frame due to new start")
+
 			if err := a.completeFrame(); err != nil {
 				a.logger.WithError(err).Debug("Failed to complete frame on new start")
 				// Note: buffers are already cleared by defer in completeFrame()
@@ -163,10 +189,19 @@ func (a *Assembler) AddPacket(pkt types.TimestampedPacket) error {
 		a.nalBuffer = make([]byte, len(pkt.Data))
 		copy(a.nalBuffer, pkt.Data)
 
+		a.logger.WithFields(map[string]interface{}{
+			"frame_id":    a.currentFrame.ID,
+			"pts":         a.currentFrame.PTS,
+			"dts":         a.currentFrame.DTS,
+			"is_keyframe": pkt.IsKeyframe(),
+			"data_len":    len(pkt.Data),
+		}).Debug("FRAME ASSEMBLER: Started new frame")
+
 	} else if a.currentFrame != nil {
 		// Add to current frame
 		a.framePackets = append(a.framePackets, pkt)
 
+		oldBufferSize := len(a.nalBuffer)
 		a.nalBuffer = append(a.nalBuffer, pkt.Data...)
 
 		// Update frame timing if needed
@@ -175,27 +210,46 @@ func (a *Assembler) AddPacket(pkt types.TimestampedPacket) error {
 			a.currentFrame.Duration = pkt.PTS - a.currentFrame.PTS
 		}
 
+		a.logger.WithFields(map[string]interface{}{
+			"frame_id":        a.currentFrame.ID,
+			"packet_count":    len(a.framePackets),
+			"old_buffer_size": oldBufferSize,
+			"new_buffer_size": len(a.nalBuffer),
+			"data_appended":   len(pkt.Data),
+			"frame_duration":  a.currentFrame.Duration,
+		}).Debug("FRAME ASSEMBLER: Added packet to current frame")
+
 	} else {
 		// No frame context - we're starting mid-stream
 		// Instead of erroring, silently wait for the next frame start (keyframe)
 		// This is normal when joining a live stream
 		a.packetsDropped++
 		a.logger.WithFields(map[string]interface{}{
-			"pts":         pkt.PTS,
-			"is_keyframe": pkt.IsKeyframe(),
-		}).Debug("Dropping packet while waiting for frame start (normal for mid-stream join)")
+			"pts":           pkt.PTS,
+			"is_keyframe":   pkt.IsKeyframe(),
+			"total_dropped": a.packetsDropped,
+		}).Debug("FRAME ASSEMBLER: Dropping packet while waiting for frame start (normal for mid-stream join)")
 		return nil // Return nil instead of ErrNoFrameContext to avoid error logging
 	}
 
 	// Handle frame end
 	if isEnd && a.currentFrame != nil {
+		a.logger.WithFields(map[string]interface{}{
+			"frame_id":     a.currentFrame.ID,
+			"packet_count": len(a.framePackets),
+			"buffer_size":  len(a.nalBuffer),
+		}).Debug("FRAME ASSEMBLER: Frame end detected, completing frame")
 		return a.completeFrame()
 	}
 
 	// Check for timeout
 	if a.currentFrame != nil && time.Since(a.currentFrame.CaptureTime) > a.frameTimeout {
 		a.currentFrame.SetFlag(types.FrameFlagCorrupted)
-		a.logger.WithField("frame_id", a.currentFrame.ID).Warn("Frame assembly timeout")
+		a.logger.WithFields(map[string]interface{}{
+			"frame_id":   a.currentFrame.ID,
+			"age_ms":     time.Since(a.currentFrame.CaptureTime).Milliseconds(),
+			"timeout_ms": a.frameTimeout.Milliseconds(),
+		}).Warn("FRAME ASSEMBLER: Frame assembly timeout")
 		// Try to complete the frame but don't propagate errors
 		// The defer in completeFrame ensures cleanup happens
 		_ = a.completeFrame()
@@ -296,18 +350,33 @@ func (a *Assembler) sendFrameToOutput(frame *types.VideoFrame) error {
 func (a *Assembler) parseNALUnits(data []byte) []types.NALUnit {
 	nalUnits := make([]types.NALUnit, 0)
 
+	a.logger.WithFields(map[string]interface{}{
+		"codec":       a.codec.String(),
+		"data_len":    len(data),
+		"first_bytes": fmt.Sprintf("%02x", data[:min(32, len(data))]),
+	}).Debug("FRAME ASSEMBLER: Parsing NAL units from buffer")
+
 	// Different parsing based on codec
 	switch a.codec {
 	case types.CodecH264, types.CodecHEVC:
 		// Look for start codes
 		units := a.findStartCodeUnits(data)
-		for _, unitData := range units {
+		a.logger.WithField("unit_count", len(units)).Debug("FRAME ASSEMBLER: Found start code units")
+
+		for i, unitData := range units {
 			if len(unitData) > 0 {
 				nalType := a.getNALType(unitData)
 				nalUnit := types.NALUnit{
 					Type: nalType,
 					Data: unitData,
 				}
+
+				a.logger.WithFields(map[string]interface{}{
+					"unit_index":  i,
+					"nal_type":    nalType,
+					"unit_size":   len(unitData),
+					"first_bytes": fmt.Sprintf("%02x", unitData[:min(8, len(unitData))]),
+				}).Debug("FRAME ASSEMBLER: Parsed NAL unit")
 
 				nalUnits = append(nalUnits, nalUnit)
 			}
@@ -320,6 +389,7 @@ func (a *Assembler) parseNALUnits(data []byte) []types.NALUnit {
 			Type: 0,
 			Data: data,
 		})
+		a.logger.Debug("FRAME ASSEMBLER: AV1 codec - treating as single unit")
 
 	default:
 		// Unknown codec, treat as single unit
@@ -328,9 +398,11 @@ func (a *Assembler) parseNALUnits(data []byte) []types.NALUnit {
 				Type: 0,
 				Data: data,
 			})
+			a.logger.Debug("FRAME ASSEMBLER: Unknown codec - treating as single unit")
 		}
 	}
 
+	a.logger.WithField("total_nal_units", len(nalUnits)).Debug("FRAME ASSEMBLER: NAL unit parsing complete")
 	return nalUnits
 }
 
@@ -455,4 +527,12 @@ func (g *GenericDetector) IsKeyframe(data []byte) bool {
 
 func (g *GenericDetector) GetCodec() types.CodecType {
 	return g.codec
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

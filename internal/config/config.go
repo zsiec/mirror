@@ -82,13 +82,17 @@ type SRTConfig struct {
 	ListenAddr        string        `mapstructure:"listen_addr"`
 	Port              int           `mapstructure:"port"`
 	Latency           time.Duration `mapstructure:"latency"`         // Default 120ms
-	MaxBandwidth      int64         `mapstructure:"max_bandwidth"`   // Maximum bandwidth limit (bps) - SRT MaxBW
-	InputBandwidth    int64         `mapstructure:"input_bandwidth"` // Expected input rate (bps) - SRT InputBW for buffer sizing
+	MaxBandwidth      int64         `mapstructure:"max_bandwidth"`   // Maximum bandwidth limit in bits/sec (converted to bytes/sec for SRT). Use -1 for auto.
+	InputBandwidth    int64         `mapstructure:"input_bandwidth"` // Expected input rate in bits/sec (converted to bytes/sec for SRT)
 	PayloadSize       int           `mapstructure:"payload_size"`    // MTU-friendly (1316)
 	FlowControlWindow int           `mapstructure:"fc_window"`       // Flow control window
 	PeerIdleTimeout   time.Duration `mapstructure:"peer_idle_timeout"`
 	MaxConnections    int           `mapstructure:"max_connections"`
 	Encryption        SRTEncryption `mapstructure:"encryption"`
+
+	// Caller mode (outbound connections)
+	CallerMode   bool   `mapstructure:"caller_mode"`   // Enable caller mode for outbound SRT connections
+	CallerTarget string `mapstructure:"caller_target"` // Target address for caller mode (host:port)
 }
 
 type SRTEncryption struct {

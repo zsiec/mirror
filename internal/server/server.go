@@ -281,6 +281,11 @@ func (s *Server) RegisterRoutes(registerFunc func(*mux.Router)) {
 	s.additionalRoutes = append(s.additionalRoutes, registerFunc)
 }
 
+// RegisterHealthChecker adds a health checker to the server's health manager
+func (s *Server) RegisterHealthChecker(checker health.Checker) {
+	s.healthMgr.Register(checker)
+}
+
 // GetRouter returns the router for testing.
 func (s *Server) GetRouter() *mux.Router {
 	return s.router

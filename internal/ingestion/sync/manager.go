@@ -185,19 +185,16 @@ func (m *Manager) measureDrift() {
 	// This catches both timestamp issues and delivery delays
 	ptsDrift := videoPresentationTime.Sub(audioPresentationTime)
 
-	// Calculate total drift considering both factors properly
+	// Calculate total drift considering both factors separately
 	// PTS drift is the actual synchronization error we need to correct
 	// Wall clock drift indicates processing delays or network jitter
 
-	var totalDrift time.Duration
-	if abs(int64(wallClockDrift)) < int64(10*time.Millisecond) {
-		// Small wall clock difference is just jitter, ignore it
-		totalDrift = ptsDrift
-	} else {
-		// Large wall clock difference might indicate buffering issues
-		// Weight it less than PTS drift since it's not the primary sync error
-		totalDrift = ptsDrift + time.Duration(float64(wallClockDrift)*0.3)
-	}
+	// Primary sync error is always the PTS drift
+	totalDrift := ptsDrift
+
+	// For diagnostic purposes, we track processing lag separately
+	// Large processing lag might indicate buffering or network issues
+	// but should not directly affect sync correction decisions
 
 	// Add to drift window with detailed components
 	sample := DriftSample{
@@ -224,9 +221,10 @@ func (m *Manager) measureDrift() {
 	m.status.DriftWindow = m.driftWindow
 	m.updateDriftStatistics()
 
-	// Check if correction is needed
+	// Check if correction is needed based on PTS drift only
 	if m.config.EnableAutoCorrect && time.Since(m.lastCorrection) > m.config.CorrectionInterval {
-		if abs(int64(totalDrift)) > int64(m.config.MaxAudioDrift) {
+		// Use PTS drift for correction decisions, not processing lag
+		if abs(int64(ptsDrift)) > int64(m.config.MaxAudioDrift) {
 			m.applyDriftCorrection()
 		}
 	}
@@ -304,21 +302,31 @@ func (m *Manager) updateDriftStatistics() {
 		return
 	}
 
-	// Calculate average drift
-	var totalDrift time.Duration
+	// Calculate average PTS drift (the actual sync error)
+	var totalPTSDrift time.Duration
+	var totalProcessingLag time.Duration
 	for _, sample := range m.driftWindow {
-		totalDrift += sample.Drift
+		totalPTSDrift += sample.PTSDrift
+		totalProcessingLag += sample.ProcessingLag
 	}
-	m.status.AvgDrift = totalDrift / time.Duration(len(m.driftWindow))
+	m.status.AvgDrift = totalPTSDrift / time.Duration(len(m.driftWindow))
 
-	// Calculate variance
+	// Calculate variance based on PTS drift
 	var variance float64
 	avgMs := float64(m.status.AvgDrift.Milliseconds())
 	for _, sample := range m.driftWindow {
-		diffMs := float64(sample.Drift.Milliseconds()) - avgMs
+		diffMs := float64(sample.PTSDrift.Milliseconds()) - avgMs
 		variance += diffMs * diffMs
 	}
 	m.status.DriftVariance = variance / float64(len(m.driftWindow))
+
+	// Also track average processing lag for diagnostics
+	avgProcessingLag := totalProcessingLag / time.Duration(len(m.driftWindow))
+	if abs(int64(avgProcessingLag)) > int64(50*time.Millisecond) {
+		m.logger.Warn("High average processing lag detected",
+			"stream_id", m.streamID,
+			"avg_lag_ms", avgProcessingLag.Milliseconds())
+	}
 
 	// Calculate correction rate
 	if m.correctionCount > 0 && !m.status.VideoSync.BaseTime.IsZero() {
@@ -328,8 +336,8 @@ func (m *Manager) updateDriftStatistics() {
 		}
 	}
 
-	// Update sync status
-	m.status.InSync = abs(int64(m.status.CurrentDrift)) <= int64(m.config.MaxAudioDrift)
+	// Update sync status based on PTS drift average
+	m.status.InSync = abs(int64(m.status.AvgDrift)) <= int64(m.config.MaxAudioDrift)
 }
 
 // GetSyncStatus returns the current synchronization status

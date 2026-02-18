@@ -211,15 +211,20 @@ func (s *SRTConfig) Validate() error {
 		return fmt.Errorf("SRT listen address cannot be empty")
 	}
 
-	if s.MaxBandwidth <= 0 {
-		return fmt.Errorf("max_bandwidth must be positive")
+	// MaxBandwidth: must be positive or -1 (auto mode)
+	if s.MaxBandwidth == 0 {
+		return fmt.Errorf("max_bandwidth must be set (positive value or -1 for automatic)")
+	}
+	if s.MaxBandwidth < -1 {
+		return fmt.Errorf("max_bandwidth must be positive or -1 (automatic)")
 	}
 
-	if s.InputBandwidth <= 0 {
-		return fmt.Errorf("input_bandwidth must be positive")
+	if s.InputBandwidth < 0 {
+		return fmt.Errorf("input_bandwidth cannot be negative")
 	}
 
-	if s.InputBandwidth > s.MaxBandwidth {
+	// Only validate InputBandwidth vs MaxBandwidth when MaxBandwidth is explicit (not auto)
+	if s.MaxBandwidth > 0 && s.InputBandwidth > s.MaxBandwidth {
 		return fmt.Errorf("input_bandwidth cannot exceed max_bandwidth")
 	}
 
@@ -229,6 +234,20 @@ func (s *SRTConfig) Validate() error {
 
 	if s.MaxConnections <= 0 {
 		return fmt.Errorf("max_connections must be positive")
+	}
+
+	// Encryption validation (SRT spec requirements)
+	if s.Encryption.Enabled {
+		if len(s.Encryption.Passphrase) < 10 {
+			return fmt.Errorf("encryption passphrase must be at least 10 characters (SRT spec minimum)")
+		}
+		if len(s.Encryption.Passphrase) > 80 {
+			return fmt.Errorf("encryption passphrase must be at most 80 characters (SRT spec maximum)")
+		}
+		validKeyLengths := map[int]bool{0: true, 128: true, 192: true, 256: true}
+		if !validKeyLengths[s.Encryption.KeyLength] {
+			return fmt.Errorf("encryption key_length must be 0 (auto), 128, 192, or 256; got %d", s.Encryption.KeyLength)
+		}
 	}
 
 	return nil

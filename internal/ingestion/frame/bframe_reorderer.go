@@ -155,20 +155,32 @@ func (r *BFrameReorderer) validateFrame(frame *types.VideoFrame) error {
 		frame.DTS = frame.PTS
 	}
 
-	// Check for DTS discontinuity (with wraparound detection)
+	// Log potential DTS discontinuity but don't reject frames here
+	// The actual validation happens in isValidOutput during output
 	if r.lastOutputDTS >= 0 && frame.DTS < r.lastOutputDTS {
-		// MPEG-TS uses 33-bit PCR values that wrap at 2^33 in 90kHz units
-		// Check if this is wraparound vs real backwards jump
-		const maxDTSWrap = int64(1) << 32 // 2^32 = 4,294,967,296
+		// MPEG-TS uses 33-bit timestamp values that wrap at 2^33 in 90kHz units
+		// But 32-bit is more common, check both
+		const maxDTS32Wrap = int64(1) << 32 // 2^32 = 4,294,967,296
+		const maxDTS33Wrap = int64(1) << 33 // 2^33 = 8,589,934,592
+
 		dtsDiff := r.lastOutputDTS - frame.DTS
 
-		isWraparound := dtsDiff > maxDTSWrap
-		if !isWraparound {
-			return fmt.Errorf("DTS went backwards: %d < %d", frame.DTS, r.lastOutputDTS)
-		}
+		// Check if this could be a wraparound
+		isWraparound := dtsDiff > maxDTS32Wrap/2 || dtsDiff > maxDTS33Wrap/2
 
-		// Handle wraparound: reset lastOutputDTS to allow new sequence
-		r.lastOutputDTS = -1
+		// Also check for large jumps that might indicate a stream reset
+		const maxReasonableJump = int64(90000 * 10) // 10 seconds at 90kHz
+		isStreamReset := dtsDiff > maxReasonableJump
+
+		// Log the condition for debugging
+		r.logger.WithFields(map[string]interface{}{
+			"frame_id":      frame.ID,
+			"current_dts":   frame.DTS,
+			"last_dts":      r.lastOutputDTS,
+			"diff":          dtsDiff,
+			"is_wraparound": isWraparound,
+			"is_reset":      isStreamReset,
+		}).Debug("Frame DTS is less than last output DTS")
 	}
 
 	return nil
@@ -279,14 +291,73 @@ func (r *BFrameReorderer) isValidOutput(frame *types.VideoFrame) bool {
 		return true
 	}
 
-	// DTS must be monotonically increasing
+	// DTS must be monotonically increasing (with wraparound and reset handling)
 	if frame.DTS < r.lastOutputDTS {
+		// Check for wraparound
+		const maxDTS32Wrap = int64(1) << 32
+		const maxDTS33Wrap = int64(1) << 33
+		dtsDiff := r.lastOutputDTS - frame.DTS
+
+		// If the difference is more than half the wrap value, it's likely wraparound
+		if dtsDiff > maxDTS32Wrap/2 || dtsDiff > maxDTS33Wrap/2 {
+			// It's a wraparound, allow it
+			return true
+		}
+
+		// Check for stream reset - if the backward jump is very large but not wraparound
+		const maxReasonableJump = int64(90000 * 10) // 10 seconds at 90kHz
+		if dtsDiff > maxReasonableJump {
+			// This is likely a stream reset with new timestamp base
+			// Reset our state to accept this new timestamp sequence
+			r.logger.WithFields(map[string]interface{}{
+				"frame_id":    frame.ID,
+				"current_dts": frame.DTS,
+				"last_dts":    r.lastOutputDTS,
+				"diff":        dtsDiff,
+			}).Info("Stream reset detected, accepting new timestamp sequence")
+
+			// Reset state for new stream
+			r.lastOutputDTS = -1
+			r.lastOutputPTS = -1
+			return true
+		}
+
+		// Otherwise, it's a genuine backwards jump
 		return false
 	}
 
-	// For non-B-frames, PTS should be >= last output PTS
+	// For non-B-frames, PTS should be >= last output PTS (with wraparound handling)
 	// B-frames can have PTS < last output PTS
 	if frame.Type != types.FrameTypeB && frame.PTS < r.lastOutputPTS {
+		// Check for wraparound
+		const maxPTS32Wrap = int64(1) << 32
+		const maxPTS33Wrap = int64(1) << 33
+		ptsDiff := r.lastOutputPTS - frame.PTS
+
+		// If the difference is more than half the wrap value, it's likely wraparound
+		if ptsDiff > maxPTS32Wrap/2 || ptsDiff > maxPTS33Wrap/2 {
+			// It's a wraparound, allow it
+			return true
+		}
+
+		// Check for stream reset
+		const maxReasonableJump = int64(90000 * 10) // 10 seconds at 90kHz
+		if ptsDiff > maxReasonableJump {
+			// Stream reset with new timestamp base
+			r.logger.WithFields(map[string]interface{}{
+				"frame_id":    frame.ID,
+				"current_pts": frame.PTS,
+				"last_pts":    r.lastOutputPTS,
+				"diff":        ptsDiff,
+			}).Info("Stream reset detected on PTS, accepting new timestamp sequence")
+
+			// Reset state for new stream
+			r.lastOutputDTS = -1
+			r.lastOutputPTS = -1
+			return true
+		}
+
+		// Otherwise, it's a genuine backwards jump
 		return false
 	}
 

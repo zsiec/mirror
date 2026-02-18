@@ -25,7 +25,7 @@ func TestServer_timeoutMiddleware(t *testing.T) {
 	logrusLogger := logrus.New()
 	logrusLogger.SetLevel(logrus.ErrorLevel)
 	errorHandler := errors.NewErrorHandler(logrusLogger)
-	
+
 	server := &Server{
 		config:       cfg,
 		errorHandler: errorHandler,
@@ -89,7 +89,7 @@ func TestServer_timeoutMiddleware(t *testing.T) {
 
 			// Verify
 			assert.Equal(t, tt.expectedStatus, w.Code)
-			
+
 			if tt.expectTimeout {
 				// Timeout responses contain "Request timeout" message
 				assert.Contains(t, w.Body.String(), "Request timeout")
@@ -110,7 +110,7 @@ func TestServer_timeoutMiddleware_StreamingPaths(t *testing.T) {
 	logrusLogger := logrus.New()
 	logrusLogger.SetLevel(logrus.ErrorLevel)
 	errorHandler := errors.NewErrorHandler(logrusLogger)
-	
+
 	server := &Server{
 		config:       cfg,
 		errorHandler: errorHandler,
@@ -155,7 +155,7 @@ func TestServer_metricsMiddleware_Coverage(t *testing.T) {
 	logrusLogger := logrus.New()
 	logrusLogger.SetLevel(logrus.ErrorLevel)
 	errorHandler := errors.NewErrorHandler(logrusLogger)
-	
+
 	server := &Server{
 		config:       cfg,
 		errorHandler: errorHandler,
@@ -225,7 +225,7 @@ func TestServer_metricsMiddleware_Coverage(t *testing.T) {
 			if body != "" {
 				req.Header.Set("Content-Type", "application/json")
 			}
-			
+
 			w := httptest.NewRecorder()
 
 			// Execute

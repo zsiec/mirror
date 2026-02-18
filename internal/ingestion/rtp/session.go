@@ -24,11 +24,11 @@ import (
 type CodecDetectionState int32
 
 const (
-	CodecStateUnknown    CodecDetectionState = iota
-	CodecStateDetecting  // Detection in progress
-	CodecStateDetected   // Codec detected and depacketizer created
-	CodecStateError      // Detection failed
-	CodecStateTimeout    // Detection timed out
+	CodecStateUnknown   CodecDetectionState = iota
+	CodecStateDetecting                     // Detection in progress
+	CodecStateDetected                      // Codec detected and depacketizer created
+	CodecStateError                         // Detection failed
+	CodecStateTimeout                       // Detection timed out
 )
 
 type Session struct {
@@ -69,6 +69,13 @@ type Session struct {
 	codecStateMu    sync.Mutex
 	codecUpdateOnce sync.Once
 	detectionCond   *sync.Cond // Condition variable for codec detection coordination
+
+	// Jitter buffer
+	jitterBuffer *JitterBuffer
+
+	// Packet loss detection and recovery
+	packetLossTracker *PacketLossTracker
+	recoveryStats     RecoveryStats
 }
 
 type SessionStats struct {
@@ -85,6 +92,24 @@ type SessionStats struct {
 	StartTime         time.Time
 	LastBytesReceived uint64 // For delta calculation
 	LastStatsTime     time.Time
+
+	// Enhanced sequence tracking
+	SequenceInitialized bool   // Whether LastSequence has been set (seq 0 is valid per RFC 3550)
+	SequenceGaps        uint64 // Number of detected sequence gaps
+	MaxSequenceGap      uint16 // Largest gap seen
+	ReorderedPackets    uint64 // Packets received out of order
+	SequenceResets      uint64 // Large gaps indicating reset
+
+	// Jitter buffer stats
+	LastTimestamp   uint32  // Last RTP timestamp
+	LastTransitTime int64   // Last transit time for jitter calc
+	MaxJitter       float64 // Maximum jitter seen
+	JitterSamples   uint64  // Number of jitter measurements
+
+	// SSRC tracking
+	SSRCChanges     uint64 // Number of SSRC changes detected
+	LastSSRC        uint32 // Last seen SSRC
+	SSRCInitialized bool   // Whether LastSSRC has been set (SSRC 0 is valid per RFC 3550)
 }
 
 func NewSession(streamID string, remoteAddr *net.UDPAddr, ssrc uint32,
@@ -117,6 +142,12 @@ func NewSession(streamID string, remoteAddr *net.UDPAddr, ssrc uint32,
 
 	// Initialize condition variable for codec detection coordination
 	session.detectionCond = sync.NewCond(&session.codecStateMu)
+
+	// Initialize jitter buffer
+	session.jitterBuffer = NewJitterBuffer(100, 100*time.Millisecond, 90000) // 90kHz for video
+
+	// Initialize packet loss tracker
+	session.packetLossTracker = NewPacketLossTracker()
 
 	// Register stream with unknown codec initially
 	stream := &registry.Stream{
@@ -161,44 +192,42 @@ func (s *Session) Start() {
 	// Start stats reporter
 	s.wg.Add(1)
 	go s.reportStats()
+
+	// Start jitter buffer processor
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.processJitterBuffer()
+	}()
 }
 
 func (s *Session) Stop() {
 	s.cancel()
 	s.wg.Wait()
 
-	// Unregister stream
-	if err := s.registry.Unregister(s.ctx, s.streamID); err != nil {
+	// Flush jitter buffer
+	s.jitterBuffer.Flush()
+
+	// Unregister stream using background context since s.ctx is cancelled
+	if err := s.registry.Unregister(context.Background(), s.streamID); err != nil {
 		s.logger.WithError(err).Error("Failed to unregister stream")
 	}
 
 	s.logger.Info("RTP session stopped")
 }
 
+// updateStats provides basic stats tracking for concurrent access testing.
+// Production code uses ProcessPacket which includes inline stats updates.
 func (s *Session) updateStats(packet *rtp.Packet, size int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Update basic stats
-	atomic.AddUint64(&s.stats.PacketsReceived, 1)
-	atomic.AddUint64(&s.stats.BytesReceived, uint64(size))
+	s.stats.PacketsReceived++
+	s.stats.BytesReceived += uint64(size)
 	s.stats.LastPacketTime = time.Now()
-
-	// Check for packet loss
-	if s.stats.PacketsReceived == 1 {
-		s.stats.InitialSequence = packet.SequenceNumber
-		s.stats.LastSequence = packet.SequenceNumber
-	} else {
-		expectedSeq := s.stats.LastSequence + 1
-		if packet.SequenceNumber != expectedSeq {
-			// Simple packet loss detection (doesn't handle wraparound)
-			if packet.SequenceNumber > expectedSeq {
-				lost := uint64(packet.SequenceNumber - expectedSeq)
-				atomic.AddUint64(&s.stats.PacketsLost, lost)
-			}
-		}
-		s.stats.LastSequence = packet.SequenceNumber
-	}
+	s.lastPacket = time.Now()
+	s.stats.LastSequence = packet.SequenceNumber
+	s.stats.SequenceInitialized = true
 }
 
 // SetSDP processes SDP to detect codec and configure the session
@@ -248,7 +277,7 @@ func (s *Session) SetSDP(sdp string) error {
 
 	// Create depacketizer for detected codec (outside lock)
 	depacketizer, err := s.codecFactory.Create(codecType, s.streamID)
-	
+
 	if err != nil {
 		s.codecStateMu.Lock()
 		s.codecState = CodecStateError
@@ -385,6 +414,26 @@ func (s *Session) reportStats() {
 				"bitrate_mbps":     bitrate / 1e6,
 				"packet_rate":      packetRate,
 			}).Info("RTP session statistics")
+
+			// Log enhanced metrics
+			s.logger.WithFields(map[string]interface{}{
+				"max_jitter_ms": stats.MaxJitter / 1000,
+				"sequence_gaps": atomic.LoadUint64(&stats.SequenceGaps),
+				"reordered":     atomic.LoadUint64(&stats.ReorderedPackets),
+				"ssrc_changes":  atomic.LoadUint64(&stats.SSRCChanges),
+			}).Debug("RTP session enhanced statistics")
+
+			// Log jitter buffer stats
+			jbStats := s.jitterBuffer.GetStats()
+			s.logger.WithFields(map[string]interface{}{
+				"jb_depth":     jbStats.CurrentDepth,
+				"jb_max_depth": jbStats.MaxDepth,
+				"jb_delivered": jbStats.PacketsDelivered,
+				"jb_dropped":   jbStats.PacketsDropped,
+				"jb_late":      jbStats.PacketsLate,
+				"jb_underruns": jbStats.UnderrunCount,
+				"jb_overruns":  jbStats.OverrunCount,
+			}).Debug("Jitter buffer statistics")
 
 			// Update stream in registry with stats
 			stream, err := s.registry.Get(s.ctx, s.streamID)
@@ -526,7 +575,7 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 
 	// Use atomic state machine for codec detection
 	s.codecStateMu.Lock()
-	
+
 	switch s.codecState {
 	case CodecStateDetected:
 		s.codecStateMu.Unlock()
@@ -541,9 +590,9 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 			}
 			close(done)
 		}()
-		
+
 		s.codecStateMu.Unlock()
-		
+
 		// Wait up to 1 second for detection to complete
 		select {
 		case <-done:
@@ -569,7 +618,7 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 			s.codecState = CodecStateTimeout
 			s.detectionCond.Broadcast()
 			s.codecStateMu.Unlock()
-			
+
 			s.logger.Error("Failed to detect codec within timeout period")
 			go func() {
 				s.registry.UpdateStatus(s.ctx, s.streamID, registry.StatusError)
@@ -585,14 +634,14 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 
 		// Perform detection outside of locks
 		detectedType, err := s.codecDetector.DetectFromRTPPacket(packet)
-		
+
 		s.codecStateMu.Lock()
 		if err != nil || detectedType == codec.TypeUnknown {
 			// Detection failed - return to unknown state
 			s.codecState = CodecStateUnknown
 			s.detectionCond.Broadcast()
 			s.codecStateMu.Unlock()
-			
+
 			// Log once per second to avoid spam
 			s.mu.RLock()
 			lastPacket := s.lastPacket
@@ -609,7 +658,7 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 			s.codecState = CodecStateError
 			s.detectionCond.Broadcast()
 			s.codecStateMu.Unlock()
-			
+
 			s.logger.WithError(err).Errorf("Failed to create depacketizer for codec %s", detectedType)
 			go func() {
 				s.registry.UpdateStatus(s.ctx, s.streamID, registry.StatusError)
@@ -668,6 +717,22 @@ func (s *Session) ProcessPacket(packet *rtp.Packet) {
 		"payload_size": len(packet.Payload),
 	}).Debug("RTP ProcessPacket: Entry")
 
+	// Check for SSRC change — use SSRCInitialized flag since SSRC 0 is valid per RFC 3550
+	s.mu.Lock()
+	if s.stats.SSRCInitialized && s.stats.LastSSRC != packet.SSRC {
+		atomic.AddUint64(&s.stats.SSRCChanges, 1)
+		s.logger.WithFields(map[string]interface{}{
+			"old_ssrc": s.stats.LastSSRC,
+			"new_ssrc": packet.SSRC,
+		}).Warn("SSRC change detected - possible stream switch or packet from wrong source")
+
+		// Update SSRC but continue processing
+		s.ssrc = packet.SSRC
+	}
+	s.stats.LastSSRC = packet.SSRC
+	s.stats.SSRCInitialized = true
+	s.mu.Unlock()
+
 	// Check if paused
 	if atomic.LoadInt32(&s.paused) == 1 {
 		s.logger.Debug("RTP ProcessPacket: Session paused, dropping packet")
@@ -675,7 +740,8 @@ func (s *Session) ProcessPacket(packet *rtp.Packet) {
 	}
 
 	// Apply rate limiting if configured
-	packetSize := len(packet.Payload) + 12 // RTP header is 12 bytes
+	// Use MarshalSize() for accurate header size (includes CSRC entries and extensions)
+	packetSize := len(packet.Payload) + packet.Header.MarshalSize()
 	if s.rateLimiter != nil {
 		if err := s.rateLimiter.AllowN(s.ctx, packetSize); err != nil {
 			atomic.AddUint64(&s.stats.RateLimitDrops, 1)
@@ -707,55 +773,158 @@ func (s *Session) ProcessPacket(packet *rtp.Packet) {
 	s.stats.LastPacketTime = s.lastPacket
 	s.stats.LastPayloadType = packet.PayloadType
 
-	// Check for packet loss
-	if s.stats.LastSequence != 0 {
-		expectedSeq := s.stats.LastSequence + 1
-		if packet.SequenceNumber != expectedSeq {
-			// Calculate lost packets
-			if packet.SequenceNumber > expectedSeq {
-				lost := uint64(packet.SequenceNumber - expectedSeq)
-				atomic.AddUint64(&s.stats.PacketsLost, lost)
+	// Calculate jitter (RFC 3550 Section 6.4.1)
+	// Both arrival time and RTP timestamp must be in the same clock units.
+	// Per RFC 3550, jitter is computed for every data packet received, including
+	// packets with the same timestamp.
+	{
+		// Convert arrival time to RTP clock units
+		// Use multiplication before division to avoid integer truncation
+		clockRate := s.detectedClockRate
+		if clockRate == 0 {
+			clockRate = 90000 // Default video clock rate
+		}
+		arrivalRTP := time.Now().UnixNano() * int64(clockRate) / 1_000_000_000
+		// Use int32 for transit to handle 32-bit RTP timestamp wraparound
+		transit := int32(arrivalRTP) - int32(packet.Timestamp)
+
+		// Only compute jitter after we have at least one prior transit measurement.
+		// The first packet just establishes LastTransitTime.
+		if s.stats.JitterSamples > 0 {
+			// Calculate jitter - use int32 subtraction for wraparound safety
+			diff := int64(transit - int32(s.stats.LastTransitTime))
+			if diff < 0 {
+				diff = -diff
 			}
+
+			// Exponential moving average (RFC 3550 formula)
+			s.stats.Jitter = s.stats.Jitter + (float64(diff)-s.stats.Jitter)/16.0
+
+			// Track max jitter
+			if s.stats.Jitter > s.stats.MaxJitter {
+				s.stats.MaxJitter = s.stats.Jitter
+			}
+		}
+
+		s.stats.LastTransitTime = int64(transit)
+		s.stats.JitterSamples++
+	}
+	s.stats.LastTimestamp = packet.Timestamp
+
+	// Check for packet loss with proper sequence number wraparound handling
+	// Use SequenceInitialized flag since sequence 0 is valid per RFC 3550
+	if s.stats.SequenceInitialized {
+		// Use signed 16-bit arithmetic for wraparound-safe gap detection (RFC 1982)
+		seqDelta := int16(packet.SequenceNumber - s.stats.LastSequence)
+		gap := int(seqDelta)
+
+		if gap == 0 {
+			// Duplicate packet — already counted
+		} else if gap > 0 && gap < 100 {
+			if gap > 1 {
+				// Reasonable forward gap — likely packet loss
+				lost := uint64(gap - 1) // Subtract 1 because gap includes the current packet
+				atomic.AddUint64(&s.stats.PacketsLost, lost)
+
+				// Update sequence gap metrics
+				atomic.AddUint64(&s.stats.SequenceGaps, 1)
+				if gap > int(s.stats.MaxSequenceGap) {
+					s.stats.MaxSequenceGap = uint16(gap)
+				}
+			}
+		} else if gap < 0 && gap > -100 {
+			// Negative gap — likely reordering
+			atomic.AddUint64(&s.stats.ReorderedPackets, 1)
+		} else {
+			// Large gap (>= 100 or <= -100) — likely a reset or severe loss
+			atomic.AddUint64(&s.stats.SequenceResets, 1)
+			s.logger.WithFields(map[string]interface{}{
+				"last_seq":    s.stats.LastSequence,
+				"current_seq": packet.SequenceNumber,
+				"gap":         gap,
+			}).Warn("Large sequence number gap detected")
 		}
 	} else {
 		// First packet
 		s.stats.InitialSequence = packet.SequenceNumber
 	}
 	s.stats.LastSequence = packet.SequenceNumber
+	s.stats.SequenceInitialized = true
 
-	// Get depacketizer and callback safely
+	// Get depacketizer safely
 	depacketizer := s.depacketizer
-	nalCallback := s.nalCallback
 	if depacketizer == nil {
 		s.mu.Unlock()
 		s.logger.Debug("RTP ProcessPacket: No depacketizer available")
 		return
 	}
 
-	// Release lock before depacketization to avoid blocking other packets
+	// Release lock before jitter buffer operations
 	s.mu.Unlock()
 
-	// Depacketize RTP payload (outside lock)
-	nalUnits, err := depacketizer.Depacketize(packet)
-	if err != nil {
-		s.logger.WithError(err).Debug("RTP ProcessPacket: Failed to depacketize RTP payload")
+	// Add packet to jitter buffer
+	if err := s.jitterBuffer.Add(packet); err != nil {
+		s.logger.WithError(err).Error("Failed to add packet to jitter buffer")
+	}
+}
+
+// processJitterBuffer continuously processes packets from the jitter buffer
+func (s *Session) processJitterBuffer() {
+	ticker := time.NewTicker(10 * time.Millisecond) // Process every 10ms
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			// Get ready packets from jitter buffer
+			packets, err := s.jitterBuffer.Get()
+			if err != nil {
+				s.logger.WithError(err).Error("Failed to get packets from jitter buffer")
+				continue
+			}
+
+			// Process each packet
+			for _, packet := range packets {
+				// Detect packet loss
+				if err := s.detectPacketLoss(packet.SequenceNumber); err != nil {
+					// Log packet loss but continue processing
+					s.logger.WithError(err).Debug("Packet loss detection error")
+				}
+				s.processBufferedPacket(packet)
+			}
+		}
+	}
+}
+
+// processBufferedPacket processes a single packet from the jitter buffer
+func (s *Session) processBufferedPacket(packet *rtp.Packet) {
+	s.mu.Lock()
+	depacketizer := s.depacketizer
+	nalCallback := s.nalCallback
+	s.mu.Unlock()
+
+	if depacketizer == nil {
+		s.logger.Debug("No depacketizer available for buffered packet")
 		return
 	}
 
-	s.logger.WithField("nal_units_count", len(nalUnits)).Debug("RTP ProcessPacket: Depacketization successful")
+	// Depacketize RTP payload
+	nalUnits, err := depacketizer.Depacketize(packet)
+	if err != nil {
+		s.logger.WithError(err).Debug("Failed to depacketize buffered RTP payload")
+		return
+	}
 
-	// Send NAL units to callback if set (callback was captured earlier while holding lock)
+	s.logger.WithField("nal_units_count", len(nalUnits)).Debug("Buffered packet depacketization successful")
+
+	// Send NAL units to callback if set
 	if nalCallback != nil && len(nalUnits) > 0 {
-		s.logger.WithField("nal_units_count", len(nalUnits)).Info("RTP Session: About to call NAL callback")
+		s.logger.WithField("nal_units_count", len(nalUnits)).Debug("Sending NAL units from buffered packet")
 		if err := nalCallback(nalUnits); err != nil {
-			s.logger.WithError(err).Error("RTP ProcessPacket: NAL callback failed")
-		} else {
-			s.logger.WithField("nal_units_sent", len(nalUnits)).Info("RTP ProcessPacket: NAL units sent to callback successfully")
+			s.logger.WithError(err).Error("NAL callback failed for buffered packet")
 		}
-	} else if nalCallback == nil {
-		s.logger.Debug("RTP ProcessPacket: No NAL callback set")
-	} else {
-		s.logger.Debug("RTP ProcessPacket: No NAL units to send")
 	}
 }
 
@@ -856,8 +1025,77 @@ func (s *Session) Read(p []byte) (n int, err error) {
 	return 0, errors.New("RTP session does not support direct reading")
 }
 
+// EnableJitterBuffer updates the jitter buffer clock rate if detected
+func (s *Session) EnableJitterBuffer(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if enabled && s.detectedClockRate > 0 {
+		// Update jitter buffer with detected clock rate
+		s.jitterBuffer = NewJitterBuffer(200, 100*time.Millisecond, s.detectedClockRate)
+	}
+}
+
+// SetJitterBufferParams configures jitter buffer parameters
+func (s *Session) SetJitterBufferParams(maxSize int, targetDelay time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	clockRate := s.detectedClockRate
+	if clockRate == 0 {
+		clockRate = 90000 // Default
+	}
+
+	s.jitterBuffer = NewJitterBuffer(maxSize, targetDelay, clockRate)
+}
+
 // Close closes the RTP session
 func (s *Session) Close() error {
 	s.Stop()
 	return nil
+}
+
+// detectPacketLoss detects packet loss for the given sequence number
+func (s *Session) detectPacketLoss(seq uint16) error {
+	if s.packetLossTracker == nil {
+		return nil
+	}
+
+	// Process sequence and detect loss
+	err := s.packetLossTracker.ProcessSequence(seq)
+	if err != nil {
+		return err
+	}
+
+	// Get recovery stats
+	s.recoveryStats = s.packetLossTracker.GetStats()
+
+	// Log significant loss events
+	if s.recoveryStats.TotalLost > 0 && s.recoveryStats.TotalLost%100 == 0 {
+		s.logger.WithFields(map[string]interface{}{
+			"total_lost":        s.recoveryStats.TotalLost,
+			"recovered":         s.recoveryStats.TotalRecovered,
+			"unrecoverable":     s.recoveryStats.UnrecoverableLoss,
+			"avg_loss_rate":     s.recoveryStats.AverageLossRate,
+			"current_loss_rate": s.recoveryStats.CurrentLossRate,
+		}).Warn("Significant packet loss detected")
+	}
+
+	return nil
+}
+
+// GetRecoveryStats returns packet recovery statistics
+func (s *Session) GetRecoveryStats() RecoveryStats {
+	if s.packetLossTracker == nil {
+		return RecoveryStats{}
+	}
+	return s.packetLossTracker.GetStats()
+}
+
+// GetLostPackets returns a list of recently lost packet sequence numbers
+func (s *Session) GetLostPackets(maxCount int) []uint16 {
+	if s.packetLossTracker == nil {
+		return nil
+	}
+	return s.packetLossTracker.GetLostPackets(maxCount)
 }

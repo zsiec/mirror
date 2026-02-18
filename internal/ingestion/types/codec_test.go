@@ -162,12 +162,12 @@ func TestCodecType_GetClockRate(t *testing.T) {
 		{"AAC clock rate", CodecAAC, 48000},
 		{"Opus clock rate", CodecOpus, 48000},
 		{"PCM clock rate", CodecPCM, 48000},
-		{"L16 clock rate", CodecL16, 48000},
+		{"L16 clock rate", CodecL16, 44100},
 		{"Vorbis clock rate", CodecVorbis, 48000},
 
 		// Telephony audio codecs (8kHz/16kHz)
 		{"G.711 clock rate", CodecG711, 8000},
-		{"G.722 clock rate", CodecG722, 16000},
+		{"G.722 clock rate", CodecG722, 8000}, // RFC 3551: RTP clock rate is 8000 (historical)
 		{"Speex clock rate", CodecSpeex, 16000},
 
 		// Special cases
@@ -319,11 +319,11 @@ func TestGetClockRateForPayloadType_EdgeCases(t *testing.T) {
 func TestCodecType_RealWorldScenarios(t *testing.T) {
 	// Test common real-world codec combinations
 	tests := []struct {
-		name         string
-		videoCodec   CodecType
-		audioCodec   CodecType
-		expectedVCR  uint32 // Video clock rate
-		expectedACR  uint32 // Audio clock rate
+		name        string
+		videoCodec  CodecType
+		audioCodec  CodecType
+		expectedVCR uint32 // Video clock rate
+		expectedACR uint32 // Audio clock rate
 	}{
 		{
 			name:        "H.264 + AAC",
@@ -369,7 +369,7 @@ func TestCodecType_RealWorldScenarios(t *testing.T) {
 			assert.False(t, tt.videoCodec.IsAudio(), "Video codec should not be audio")
 			assert.Equal(t, tt.expectedVCR, tt.videoCodec.GetClockRate(), "Video codec clock rate")
 
-			// Verify audio codec properties  
+			// Verify audio codec properties
 			assert.True(t, tt.audioCodec.IsAudio(), "Audio codec should be audio")
 			assert.False(t, tt.audioCodec.IsVideo(), "Audio codec should not be video")
 			assert.Equal(t, tt.expectedACR, tt.audioCodec.GetClockRate(), "Audio codec clock rate")

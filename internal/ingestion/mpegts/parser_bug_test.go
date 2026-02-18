@@ -7,7 +7,7 @@ import (
 
 // TestExtractTimestampPanic demonstrates the buffer overflow bug is fixed
 func TestExtractTimestampPanic(t *testing.T) {
-	parser := &Parser{}
+	parser := NewParser()
 
 	tests := []struct {
 		name        string
@@ -24,19 +24,19 @@ func TestExtractTimestampPanic(t *testing.T) {
 			name:        "empty buffer",
 			data:        []byte{},
 			shouldError: true,
-			wantErr:     "insufficient data for timestamp: need 5 bytes, got 0",
+			wantErr:     "timestamp extraction bounds check failed",
 		},
 		{
 			name:        "1 byte only",
 			data:        []byte{0x21},
 			shouldError: true,
-			wantErr:     "insufficient data for timestamp: need 5 bytes, got 1",
+			wantErr:     "timestamp extraction bounds check failed",
 		},
 		{
 			name:        "4 bytes only",
 			data:        []byte{0x21, 0x00, 0x01, 0x00},
 			shouldError: true,
-			wantErr:     "insufficient data for timestamp: need 5 bytes, got 4",
+			wantErr:     "timestamp extraction bounds check failed",
 		},
 	}
 
@@ -46,7 +46,7 @@ func TestExtractTimestampPanic(t *testing.T) {
 
 			if tt.shouldError {
 				assert.Error(t, err)
-				assert.Equal(t, tt.wantErr, err.Error())
+				assert.Contains(t, err.Error(), tt.wantErr)
 				assert.Equal(t, int64(0), timestamp)
 			} else {
 				assert.NoError(t, err)

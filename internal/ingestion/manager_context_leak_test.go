@@ -14,7 +14,7 @@ import (
 func TestManagerContextLeakFix(t *testing.T) {
 	// This test verifies that stream handlers properly stop when manager shuts down
 	// preventing context leaks that would leave goroutines running indefinitely
-	
+
 	// Setup minimal in-memory test (skip redis for simplicity)
 	testCfg := &config.IngestionConfig{
 		SRT: config.SRTConfig{
@@ -48,13 +48,13 @@ func TestManagerContextLeakFix(t *testing.T) {
 	t.Run("ManagerContextCodeCompiles", func(t *testing.T) {
 		// Test that our code changes compile and basic manager creation works
 		_, err := NewManager(testCfg, logger)
-		
+
 		// We expect this to fail with Redis connection error since Redis isn't running,
 		// but it confirms our code changes compile correctly
 		if err != nil {
 			// Expected - Redis not available, but that's fine for this compilation test
 			t.Logf("Expected Redis connection error: %v", err)
-			assert.Contains(t, err.Error(), "failed to connect to Redis", 
+			assert.Contains(t, err.Error(), "failed to connect to Redis",
 				"Should fail with Redis connection error, not compilation error")
 		} else {
 			t.Log("Manager created successfully")
@@ -63,4 +63,3 @@ func TestManagerContextLeakFix(t *testing.T) {
 
 	t.Log("Context leak fix validated - manager shutdown logic correctly implemented")
 }
-

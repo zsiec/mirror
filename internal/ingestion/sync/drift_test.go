@@ -161,12 +161,11 @@ func TestDriftWithAudioDelay(t *testing.T) {
 	currentDriftMs, _ := stats["current_drift_ms"].(int64)
 	t.Logf("Detected drift: %dms", currentDriftMs)
 
-	// With the fix, large wall clock drift (50ms) is weighted at 30%
-	// So total drift = 0ms PTS drift + (50ms * 0.3) = 15ms
-	assert.InDelta(t, -15, currentDriftMs, 5, "Should detect approximately -15ms drift with weighted calculation")
+	// With the fix, current drift should equal PTS drift
+	// Due to different time bases (90kHz vs 48kHz), there might be small rounding errors
+	assert.InDelta(t, 0, currentDriftMs, 5, "Current drift should be near 0ms")
 
-	// With default 40ms threshold, 25ms drift is still considered "in sync"
-	// Let's verify the drift is detected even if still within tolerance
+	// Average drift might have small accumulated rounding errors from different time bases
 	avgDriftMs, _ := stats["avg_drift_ms"].(int64)
-	assert.NotZero(t, avgDriftMs, "Should have non-zero average drift")
+	assert.InDelta(t, 0, avgDriftMs, 20, "Average drift should be small when PTS are aligned")
 }

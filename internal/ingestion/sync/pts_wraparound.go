@@ -24,30 +24,10 @@ func NewPTSWrapDetector(timeBase types.Rational) *PTSWrapDetector {
 }
 
 // calculateWrapThreshold determines the appropriate wrap threshold based on time base
-func calculateWrapThreshold(timeBase types.Rational) int64 {
-	// Default to 32-bit for most video streams (90kHz)
-	if timeBase.Den == 90000 && timeBase.Num == 1 {
-		return 1 << 32 // 2^32 for standard video
-	}
-
-	// 33-bit for 48kHz audio
-	if timeBase.Den == 48000 && timeBase.Num == 1 {
-		return 1 << 33 // 2^33 for 48kHz audio
-	}
-
-	// 33-bit for 44.1kHz audio
-	if timeBase.Den == 44100 && timeBase.Num == 1 {
-		return 1 << 33 // 2^33 for 44.1kHz audio
-	}
-
-	// For other time bases, calculate based on expected duration
-	// Assume we want to wrap after ~26 hours (typical for 32-bit at 90kHz)
-	hoursBeforeWrap := int64(26)
-	secondsBeforeWrap := hoursBeforeWrap * 3600
-
-	// Calculate how many time base units in the target duration
-	// units = seconds * den / num
-	return (secondsBeforeWrap * int64(timeBase.Den)) / int64(timeBase.Num)
+func calculateWrapThreshold(_ types.Rational) int64 {
+	// MPEG-TS PTS/DTS are always 33-bit values per ISO 13818-1 Section 2.4.3.7,
+	// regardless of clock rate. At 90kHz this wraps at ~26.5 hours.
+	return 1 << 33
 }
 
 // DetectWrap checks if PTS has wrapped around
@@ -90,16 +70,13 @@ func (d *PTSWrapDetector) IsLikelyDiscontinuity(currentPTS, lastPTS int64) bool 
 	return diff > oneSecondInPTS && diff < quarterThreshold
 }
 
-// CalculatePTSDelta calculates the actual PTS delta accounting for potential wraps
+// CalculatePTSDelta calculates the actual PTS delta accounting for potential wraps.
+// wrapCount is the number of wraps that currentPTS has undergone since lastPTS was captured.
+// lastPTS is assumed to have been captured at wrap count 0 (or its wrap count was reset
+// alongside BasePTS).
 func (d *PTSWrapDetector) CalculatePTSDelta(currentPTS, lastPTS int64, wrapCount int) int64 {
-	// Unwrap both PTS values
+	// Unwrap currentPTS based on total wraps since base was captured
 	unwrappedCurrent := d.UnwrapPTS(currentPTS, wrapCount)
-	unwrappedLast := d.UnwrapPTS(lastPTS, wrapCount)
-
-	// If we detect a wrap between these two values, adjust
-	if d.DetectWrap(currentPTS, lastPTS) {
-		unwrappedCurrent += d.wrapThreshold
-	}
-
-	return unwrappedCurrent - unwrappedLast
+	// lastPTS (base) was captured at wrap count 0 — no adjustment needed
+	return unwrappedCurrent - lastPTS
 }

@@ -13,10 +13,10 @@ import (
 func TestLogrusAdapter_Creation(t *testing.T) {
 	logrusLogger := logrus.New()
 	entry := logrus.NewEntry(logrusLogger)
-	
+
 	adapter := NewLogrusAdapter(entry)
 	require.NotNil(t, adapter)
-	
+
 	logrusAdapter, ok := adapter.(*LogrusAdapter)
 	require.True(t, ok)
 	assert.Equal(t, entry, logrusAdapter.entry)
@@ -28,22 +28,22 @@ func TestLogrusAdapter_WithFields(t *testing.T) {
 	logrusLogger.SetOutput(&buf)
 	logrusLogger.SetFormatter(&logrus.JSONFormatter{})
 	logrusLogger.SetLevel(logrus.DebugLevel)
-	
+
 	entry := logrus.NewEntry(logrusLogger)
 	adapter := NewLogrusAdapter(entry)
-	
+
 	fields := map[string]interface{}{
 		"stream_id": "test-stream",
 		"component": "test-component",
 		"number":    42,
 	}
-	
+
 	newAdapter := adapter.WithFields(fields)
 	require.NotNil(t, newAdapter)
-	
+
 	// Test that the new adapter has the fields
 	newAdapter.Info("test message")
-	
+
 	output := buf.String()
 	assert.Contains(t, output, "stream_id")
 	assert.Contains(t, output, "test-stream")
@@ -60,15 +60,15 @@ func TestLogrusAdapter_WithField(t *testing.T) {
 	logrusLogger.SetOutput(&buf)
 	logrusLogger.SetFormatter(&logrus.JSONFormatter{})
 	logrusLogger.SetLevel(logrus.DebugLevel)
-	
+
 	entry := logrus.NewEntry(logrusLogger)
 	adapter := NewLogrusAdapter(entry)
-	
+
 	newAdapter := adapter.WithField("request_id", "req-123")
 	require.NotNil(t, newAdapter)
-	
+
 	newAdapter.Info("processing request")
-	
+
 	output := buf.String()
 	assert.Contains(t, output, "request_id")
 	assert.Contains(t, output, "req-123")
@@ -81,16 +81,16 @@ func TestLogrusAdapter_WithError(t *testing.T) {
 	logrusLogger.SetOutput(&buf)
 	logrusLogger.SetFormatter(&logrus.JSONFormatter{})
 	logrusLogger.SetLevel(logrus.DebugLevel)
-	
+
 	entry := logrus.NewEntry(logrusLogger)
 	adapter := NewLogrusAdapter(entry)
-	
+
 	testErr := errors.New("test error message")
 	newAdapter := adapter.WithError(testErr)
 	require.NotNil(t, newAdapter)
-	
+
 	newAdapter.Error("operation failed")
-	
+
 	output := buf.String()
 	assert.Contains(t, output, "error")
 	assert.Contains(t, output, "test error message")
@@ -106,10 +106,10 @@ func TestLogrusAdapter_LogLevels(t *testing.T) {
 		DisableColors:    true,
 	})
 	logrusLogger.SetLevel(logrus.DebugLevel)
-	
+
 	entry := logrus.NewEntry(logrusLogger)
 	adapter := NewLogrusAdapter(entry)
-	
+
 	tests := []struct {
 		name     string
 		logFunc  func(args ...interface{})
@@ -131,7 +131,7 @@ func TestLogrusAdapter_LogLevels(t *testing.T) {
 		{
 			name:     "Warn level",
 			logFunc:  adapter.Warn,
-			message:  "warn message", 
+			message:  "warn message",
 			expected: "level=warning",
 		},
 		{
@@ -141,12 +141,12 @@ func TestLogrusAdapter_LogLevels(t *testing.T) {
 			expected: "level=error",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			buf.Reset()
 			tt.logFunc(tt.message)
-			
+
 			output := buf.String()
 			assert.Contains(t, output, tt.expected)
 			assert.Contains(t, output, tt.message)
@@ -163,12 +163,12 @@ func TestLogrusAdapter_LogWithLevel(t *testing.T) {
 		DisableColors:    true,
 	})
 	logrusLogger.SetLevel(logrus.DebugLevel)
-	
+
 	entry := logrus.NewEntry(logrusLogger)
 	adapter := NewLogrusAdapter(entry)
-	
+
 	adapter.Log(logrus.WarnLevel, "warning via Log method")
-	
+
 	output := buf.String()
 	assert.Contains(t, output, "level=warning")
 	assert.Contains(t, output, "warning via Log method")
@@ -183,10 +183,10 @@ func TestLogrusAdapter_FormattedMethods(t *testing.T) {
 		DisableColors:    true,
 	})
 	logrusLogger.SetLevel(logrus.DebugLevel)
-	
+
 	entry := logrus.NewEntry(logrusLogger)
 	adapter := NewLogrusAdapter(entry)
-	
+
 	tests := []struct {
 		name     string
 		logFunc  func(format string, args ...interface{})
@@ -228,12 +228,12 @@ func TestLogrusAdapter_FormattedMethods(t *testing.T) {
 			level:    "level=error",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			buf.Reset()
 			tt.logFunc(tt.format, tt.args...)
-			
+
 			output := buf.String()
 			assert.Contains(t, output, tt.level)
 			assert.Contains(t, output, tt.expected)
@@ -250,7 +250,7 @@ func TestLogrusAdapter_Fatal(t *testing.T) {
 		DisableColors:    true,
 	})
 	logrusLogger.SetLevel(logrus.DebugLevel)
-	
+
 	// Override the exit function to prevent actual exit
 	originalExitFunc := logrusLogger.ExitFunc
 	exitCalled := false
@@ -261,12 +261,12 @@ func TestLogrusAdapter_Fatal(t *testing.T) {
 	defer func() {
 		logrusLogger.ExitFunc = originalExitFunc
 	}()
-	
+
 	entry := logrus.NewEntry(logrusLogger)
 	adapter := NewLogrusAdapter(entry)
-	
+
 	adapter.Fatal("fatal error occurred")
-	
+
 	output := buf.String()
 	assert.Contains(t, output, "level=fatal")
 	assert.Contains(t, output, "fatal error occurred")
@@ -279,12 +279,12 @@ func TestLogrusAdapter_ChainedWithMethods(t *testing.T) {
 	logrusLogger.SetOutput(&buf)
 	logrusLogger.SetFormatter(&logrus.JSONFormatter{})
 	logrusLogger.SetLevel(logrus.DebugLevel)
-	
+
 	entry := logrus.NewEntry(logrusLogger)
 	adapter := NewLogrusAdapter(entry)
-	
+
 	testErr := errors.New("chained error")
-	
+
 	// Chain multiple With methods
 	adapter.WithField("component", "test").
 		WithFields(map[string]interface{}{
@@ -293,7 +293,7 @@ func TestLogrusAdapter_ChainedWithMethods(t *testing.T) {
 		}).
 		WithError(testErr).
 		Info("chained logging test")
-	
+
 	output := buf.String()
 	assert.Contains(t, output, "component")
 	assert.Contains(t, output, "test")
@@ -312,34 +312,34 @@ func TestLogrusAdapter_ImmutableChaining(t *testing.T) {
 	logrusLogger.SetOutput(&buf)
 	logrusLogger.SetFormatter(&logrus.JSONFormatter{})
 	logrusLogger.SetLevel(logrus.DebugLevel)
-	
+
 	entry := logrus.NewEntry(logrusLogger)
 	adapter := NewLogrusAdapter(entry)
-	
+
 	// Create a new adapter with a field
 	adapter1 := adapter.WithField("step", 1)
 	adapter2 := adapter.WithField("step", 2)
-	
+
 	// Log with each adapter
 	buf.Reset()
 	adapter1.Info("first step")
 	output1 := buf.String()
-	
+
 	buf.Reset()
 	adapter2.Info("second step")
 	output2 := buf.String()
-	
+
 	buf.Reset()
 	adapter.Info("original")
 	output3 := buf.String()
-	
+
 	// Verify each adapter has its own fields
 	assert.Contains(t, output1, `"step":1`)
 	assert.Contains(t, output1, "first step")
-	
+
 	assert.Contains(t, output2, `"step":2`)
 	assert.Contains(t, output2, "second step")
-	
+
 	// Original adapter should not have step field
 	assert.NotContains(t, output3, "step")
 	assert.Contains(t, output3, "original")
@@ -351,21 +351,21 @@ func TestLogrusAdapter_ComplexFields(t *testing.T) {
 	logrusLogger.SetOutput(&buf)
 	logrusLogger.SetFormatter(&logrus.JSONFormatter{})
 	logrusLogger.SetLevel(logrus.DebugLevel)
-	
+
 	entry := logrus.NewEntry(logrusLogger)
 	adapter := NewLogrusAdapter(entry)
-	
+
 	complexFields := map[string]interface{}{
-		"string_field":   "test_value",
-		"int_field":      42,
-		"float_field":    3.14159,
-		"bool_field":     true,
-		"slice_field":    []string{"a", "b", "c"},
-		"nil_field":      nil,
+		"string_field": "test_value",
+		"int_field":    42,
+		"float_field":  3.14159,
+		"bool_field":   true,
+		"slice_field":  []string{"a", "b", "c"},
+		"nil_field":    nil,
 	}
-	
+
 	adapter.WithFields(complexFields).Info("complex fields test")
-	
+
 	output := buf.String()
 	assert.Contains(t, output, "string_field")
 	assert.Contains(t, output, "test_value")

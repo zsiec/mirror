@@ -56,8 +56,9 @@ func (d *AV1Depacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 	// Skip aggregation header
 	payload = payload[1:]
 
-	// Check for packet loss during fragmentation
-	if d.fragmentedOBU && sequenceNumber != d.lastSeq+1 && d.lastSeq != 0 {
+	// Check for packet loss during fragmentation.
+	// Use fragmentedOBU flag instead of lastSeq != 0 — seq 0 is valid per RFC 3550.
+	if d.fragmentedOBU && sequenceNumber != d.lastSeq+1 {
 		// Packet loss detected, discard fragments
 		d.fragments = [][]byte{}
 		d.fragmentedOBU = false

@@ -12,6 +12,8 @@ type SRTAdapter interface {
 	// Configuration and lifecycle
 	NewListener(address string, port int, config Config) (SRTListener, error)
 	NewConnection(socket SRTSocket) (SRTConnection, error)
+	// Caller mode: connect to a remote SRT listener
+	Connect(ctx context.Context, address string, port int, config Config) (SRTConnection, error)
 }
 
 // SRTListener represents an SRT listener that can accept connections
@@ -48,9 +50,13 @@ type ListenCallback func(socket SRTSocket, version int, addr *net.UDPAddr, strea
 type RejectionReason int
 
 const (
-	RejectionReasonUnauthorized RejectionReason = iota
-	RejectionReasonResourceUnavailable
-	RejectionReasonBadRequest
+	RejectionReasonUnauthorized        RejectionReason = iota // SRT 401
+	RejectionReasonResourceUnavailable                        // SRT 402 (Overload)
+	RejectionReasonBadRequest                                 // SRT 400
+	RejectionReasonForbidden                                  // SRT 403
+	RejectionReasonNotFound                                   // SRT 404
+	RejectionReasonBadMode                                    // SRT 405
+	RejectionReasonUnacceptable                               // SRT 406
 )
 
 // ConnectionStats provides statistics about an SRT connection
@@ -65,6 +71,15 @@ type ConnectionStats struct {
 	BandwidthMbps    float64
 	DeliveryDelayMs  float64
 	ConnectionTimeMs time.Duration
+
+	// Extended stats for spec compliance
+	PacketsDropped            int64   // Too-late-to-play dropped packets (receiver)
+	PacketsReceiveLost        int64   // Packets lost on receiver side
+	PacketsFlightSize         int     // Packets currently in flight
+	NegotiatedLatencyMs       int     // Negotiated TSBPD latency
+	ReceiveRateMbps           float64 // Receiving rate in Mbps
+	EstimatedLinkCapacityMbps float64 // Estimated link bandwidth in Mbps
+	AvailableRcvBuf           int     // Available receiver buffer in bytes
 }
 
 // Config represents SRT configuration options

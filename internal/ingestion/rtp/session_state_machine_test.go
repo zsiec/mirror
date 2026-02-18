@@ -8,32 +8,26 @@ import (
 	"time"
 
 	"github.com/pion/rtp"
-	"github.com/redis/go-redis/v9"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zsiec/mirror/internal/config"
 	"github.com/zsiec/mirror/internal/ingestion/codec"
 	"github.com/zsiec/mirror/internal/ingestion/registry"
 	"github.com/zsiec/mirror/internal/logger"
-	"github.com/sirupsen/logrus"
 )
 
 // TestRTPSession_CodecDetectionStateMachine tests the codec detection state machine for race conditions
 func TestRTPSession_CodecDetectionStateMachine(t *testing.T) {
 	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	codecsCfg := &config.CodecsConfig{Preferred: "h264"}
-	
-	// Use Redis registry with test client
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       1,
-	})
-	redisRegistry := registry.NewRedisRegistry(redisClient, logrus.New())
-	defer redisRegistry.Close()
+
+	// Use mock registry for testing
+	mockRegistry := registry.NewMockRegistry()
+	defer mockRegistry.Close()
 
 	remoteAddr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:12345")
-	session, err := NewSession("test-stream-state", remoteAddr, 12345, redisRegistry, codecsCfg, logger)
+	session, err := NewSession("test-stream-state", remoteAddr, 12345, mockRegistry, codecsCfg, logger)
 	require.NoError(t, err)
 	defer session.Stop()
 
@@ -56,7 +50,7 @@ func TestRTPSession_CodecDetectionStateMachine(t *testing.T) {
 			wg.Add(1)
 			go func(readerID int) {
 				defer wg.Done()
-				
+
 				for {
 					select {
 					case <-stopChan:
@@ -64,12 +58,12 @@ func TestRTPSession_CodecDetectionStateMachine(t *testing.T) {
 					default:
 						// Read state - each individual read should be atomic
 						state := session.getCodecState()
-						
+
 						// Verify state is valid
 						if state < CodecStateUnknown || state > CodecStateTimeout {
 							atomic.AddInt32(&inconsistencies, 1)
 						}
-						
+
 						atomic.AddInt32(&stateReads, 1)
 						time.Sleep(time.Microsecond)
 					}
@@ -82,7 +76,7 @@ func TestRTPSession_CodecDetectionStateMachine(t *testing.T) {
 			wg.Add(1)
 			go func(writerID int) {
 				defer wg.Done()
-				
+
 				for {
 					select {
 					case <-stopChan:
@@ -94,16 +88,16 @@ func TestRTPSession_CodecDetectionStateMachine(t *testing.T) {
 							session.codecState = CodecStateDetecting
 							session.detectionCond.Broadcast()
 							session.codecStateMu.Unlock()
-							
+
 							// Simulate detection work
 							time.Sleep(time.Millisecond)
-							
+
 							session.codecStateMu.Lock()
 							session.codecState = CodecStateUnknown // Reset for next attempt
 							session.detectionCond.Broadcast()
 						}
 						session.codecStateMu.Unlock()
-						
+
 						time.Sleep(time.Microsecond)
 					}
 				}
@@ -115,10 +109,10 @@ func TestRTPSession_CodecDetectionStateMachine(t *testing.T) {
 		close(stopChan)
 		wg.Wait()
 
-		t.Logf("Total state reads: %d, inconsistencies: %d", 
+		t.Logf("Total state reads: %d, inconsistencies: %d",
 			atomic.LoadInt32(&stateReads), atomic.LoadInt32(&inconsistencies))
 
-		assert.Equal(t, int32(0), atomic.LoadInt32(&inconsistencies), 
+		assert.Equal(t, int32(0), atomic.LoadInt32(&inconsistencies),
 			"Should have no state reading inconsistencies")
 	})
 }
@@ -127,18 +121,13 @@ func TestRTPSession_CodecDetectionStateMachine(t *testing.T) {
 func TestRTPSession_CodecDetectionSDP(t *testing.T) {
 	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	codecsCfg := &config.CodecsConfig{Preferred: "h264"}
-	
-	// Use Redis registry with test client
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       1,
-	})
-	redisRegistry := registry.NewRedisRegistry(redisClient, logrus.New())
-	defer redisRegistry.Close()
+
+	// Use mock registry for testing
+	mockRegistry := registry.NewMockRegistry()
+	defer mockRegistry.Close()
 
 	remoteAddr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:12345")
-	session, err := NewSession("test-stream-sdp", remoteAddr, 12345, redisRegistry, codecsCfg, logger)
+	session, err := NewSession("test-stream-sdp", remoteAddr, 12345, mockRegistry, codecsCfg, logger)
 	require.NoError(t, err)
 	defer session.Stop()
 
@@ -150,7 +139,7 @@ func TestRTPSession_CodecDetectionSDP(t *testing.T) {
 		const numGoroutines = 5
 		var errors int32
 		var successes int32
-		
+
 		sdp := `v=0
 o=- 1234567 1234567 IN IP4 192.168.1.1
 s=-
@@ -164,10 +153,10 @@ a=fmtp:96 profile-level-id=42001e`
 			wg.Add(1)
 			go func(goroutineID int) {
 				defer wg.Done()
-				
+
 				// Add small random delay to increase race probability
 				time.Sleep(time.Duration(goroutineID) * time.Microsecond)
-				
+
 				if err := session.SetSDP(sdp); err != nil {
 					// Check if it's a codec mismatch (expected for race conditions)
 					if err.Error() != "codec mismatch: SDP indicates H264 but already detected H264" {
@@ -182,18 +171,18 @@ a=fmtp:96 profile-level-id=42001e`
 
 		wg.Wait()
 
-		t.Logf("Successes: %d, Errors: %d", 
+		t.Logf("Successes: %d, Errors: %d",
 			atomic.LoadInt32(&successes), atomic.LoadInt32(&errors))
 
 		// Should have no unexpected errors from race conditions
 		assert.Equal(t, int32(0), atomic.LoadInt32(&errors), "Should have no unexpected SDP processing errors")
-		
+
 		// At least one should succeed
 		assert.Greater(t, atomic.LoadInt32(&successes), int32(0), "At least one SDP processing should succeed")
-		
+
 		// Final state should be detected
 		assert.Equal(t, CodecStateDetected, session.getCodecState(), "Codec should be detected after SDP")
-		
+
 		session.mu.RLock()
 		assert.Equal(t, codec.TypeH264, session.codecType)
 		assert.NotNil(t, session.depacketizer)
@@ -205,18 +194,13 @@ a=fmtp:96 profile-level-id=42001e`
 func TestRTPSession_CodecDetectionConditionVariable(t *testing.T) {
 	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	codecsCfg := &config.CodecsConfig{Preferred: "h264"}
-	
-	// Use Redis registry with test client
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       1,
-	})
-	redisRegistry := registry.NewRedisRegistry(redisClient, logrus.New())
-	defer redisRegistry.Close()
+
+	// Use mock registry for testing
+	mockRegistry := registry.NewMockRegistry()
+	defer mockRegistry.Close()
 
 	remoteAddr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:12345")
-	session, err := NewSession("test-stream-cond", remoteAddr, 12345, redisRegistry, codecsCfg, logger)
+	session, err := NewSession("test-stream-cond", remoteAddr, 12345, mockRegistry, codecsCfg, logger)
 	require.NoError(t, err)
 	defer session.Stop()
 
@@ -236,13 +220,13 @@ func TestRTPSession_CodecDetectionConditionVariable(t *testing.T) {
 			wg.Add(1)
 			go func(waiterID int) {
 				defer wg.Done()
-				
+
 				session.codecStateMu.Lock()
 				for session.codecState == CodecStateDetecting {
 					session.detectionCond.Wait()
 				}
 				session.codecStateMu.Unlock()
-				
+
 				atomic.AddInt32(&notifiedCount, 1)
 			}(i)
 		}
@@ -258,7 +242,7 @@ func TestRTPSession_CodecDetectionConditionVariable(t *testing.T) {
 
 		wg.Wait()
 
-		assert.Equal(t, int32(numWaiters), atomic.LoadInt32(&notifiedCount), 
+		assert.Equal(t, int32(numWaiters), atomic.LoadInt32(&notifiedCount),
 			"All waiters should be notified")
 	})
 }
@@ -267,18 +251,13 @@ func TestRTPSession_CodecDetectionConditionVariable(t *testing.T) {
 func TestRTPSession_CodecDetectionTimeout(t *testing.T) {
 	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
 	codecsCfg := &config.CodecsConfig{Preferred: "h264"}
-	
-	// Use Redis registry with test client
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       1,
-	})
-	redisRegistry := registry.NewRedisRegistry(redisClient, logrus.New())
-	defer redisRegistry.Close()
+
+	// Use mock registry for testing
+	mockRegistry := registry.NewMockRegistry()
+	defer mockRegistry.Close()
 
 	remoteAddr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:12345")
-	session, err := NewSession("test-stream-timeout", remoteAddr, 12345, redisRegistry, codecsCfg, logger)
+	session, err := NewSession("test-stream-timeout", remoteAddr, 12345, mockRegistry, codecsCfg, logger)
 	require.NoError(t, err)
 	defer session.Stop()
 

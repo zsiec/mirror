@@ -145,10 +145,10 @@ func TestAVSyncDriftCorrection(t *testing.T) {
 	currentDriftMs, _ := stats["current_drift_ms"].(int64)
 	t.Logf("Detected drift: %dms", currentDriftMs)
 
-	// The last audio packet was delayed by 45ms wall clock time
-	// With the fixed calculation: PTS drift is ~0ms, wall clock drift 45ms
-	// Total drift = 0 + 45*0.3 = ~13.5ms
-	assert.InDelta(t, 13.5, float64(absInt64(currentDriftMs)), 2.0, "Should detect weighted drift")
+	// With the fixed calculation: current drift equals PTS drift
+	// Since PTS values are properly spaced, PTS drift should be near 0
+	// Wall clock drift (processing lag) is tracked separately for diagnostics
+	assert.InDelta(t, 0, float64(absInt64(currentDriftMs)), 5.0, "Current drift should equal PTS drift (near 0)")
 
 	// Check if corrections were needed (they may not be if drift is within tolerance)
 	correctionCount, _ := stats["correction_count"].(int)
@@ -162,29 +162,30 @@ func TestAVSyncWithDroppedFrames(t *testing.T) {
 	testLogger := testLogger()
 	streamID := "test-stream"
 
-	config := &SyncConfig{}
+	config := DefaultSyncConfig()
+	config.EnableDriftLogging = true
 
 	manager := NewManager(streamID, config, testLogger)
 
-	// Initialize tracks
+	// Initialize tracks with same timebase for easier calculation
 	manager.InitializeVideo(types.NewRational(1, 90000))
-	manager.InitializeAudio(types.NewRational(1, 48000))
+	manager.InitializeAudio(types.NewRational(1, 90000))
 
 	baseTime := time.Now()
 
-	// Process some frames normally
+	// Process some frames normally with synchronized PTS
 	for i := 0; i < 5; i++ {
 		videoFrame := &types.VideoFrame{
-			PTS:         int64(i) * 3000,
+			PTS:         int64(i) * 3000, // 33.33ms per frame at 90kHz
 			DTS:         int64(i) * 3000,
-			CaptureTime: baseTime.Add(time.Duration(i) * 33 * time.Millisecond),
+			CaptureTime: baseTime.Add(time.Duration(i) * 33333 * time.Microsecond),
 		}
 		manager.ProcessVideoFrame(videoFrame)
 
 		audioPacket := &types.TimestampedPacket{
-			PTS:         int64(i) * 1600,
-			DTS:         int64(i) * 1600,
-			CaptureTime: baseTime.Add(time.Duration(i) * 33 * time.Millisecond),
+			PTS:         int64(i) * 3000, // Same PTS timing as video
+			DTS:         int64(i) * 3000,
+			CaptureTime: baseTime.Add(time.Duration(i) * 33333 * time.Microsecond),
 		}
 		manager.ProcessAudioPacket(audioPacket)
 	}
@@ -192,19 +193,20 @@ func TestAVSyncWithDroppedFrames(t *testing.T) {
 	// Report dropped video frames
 	manager.ReportVideoDropped(3)
 
-	// Continue processing
+	// Continue processing after dropped frames
+	// Even though we skip frames 5-7, the PTS should still be synchronized
 	for i := 8; i < 10; i++ { // Skip frames 5-7
 		videoFrame := &types.VideoFrame{
 			PTS:         int64(i) * 3000,
 			DTS:         int64(i) * 3000,
-			CaptureTime: baseTime.Add(time.Duration(i) * 33 * time.Millisecond),
+			CaptureTime: baseTime.Add(time.Duration(i) * 33333 * time.Microsecond),
 		}
 		manager.ProcessVideoFrame(videoFrame)
 
 		audioPacket := &types.TimestampedPacket{
-			PTS:         int64(i) * 1600,
-			DTS:         int64(i) * 1600,
-			CaptureTime: baseTime.Add(time.Duration(i) * 33 * time.Millisecond),
+			PTS:         int64(i) * 3000, // Still synchronized
+			DTS:         int64(i) * 3000,
+			CaptureTime: baseTime.Add(time.Duration(i) * 33333 * time.Microsecond),
 		}
 		manager.ProcessAudioPacket(audioPacket)
 	}
@@ -215,9 +217,13 @@ func TestAVSyncWithDroppedFrames(t *testing.T) {
 	droppedCount, _ := videoStats["dropped_count"].(uint64)
 	assert.Equal(t, uint64(3), droppedCount, "Should track dropped frames")
 
-	// Should maintain sync despite drops
+	// Should maintain sync despite drops since PTS values are still aligned
 	inSync, _ := stats["in_sync"].(bool)
 	assert.True(t, inSync, "Should maintain sync despite dropped frames")
+
+	// Verify drift is small
+	currentDriftMs, _ := stats["current_drift_ms"].(int64)
+	assert.InDelta(t, 0, currentDriftMs, 5, "Drift should be near 0 with synchronized PTS")
 }
 
 func absInt64(n int64) int64 {

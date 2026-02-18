@@ -70,14 +70,14 @@ func TestP1_6_DriftCalculationFixed(t *testing.T) {
 		assert.NotZero(t, lastDrift.PTSDrift, "PTS drift should be tracked")
 		assert.NotZero(t, lastDrift.ProcessingLag, "Processing lag should be tracked")
 
-		// Total drift should be weighted, not averaged
+		// Total drift should now equal PTS drift (the actual sync error)
+		// Processing lag is tracked separately for diagnostics only
+		assert.Equal(t, lastDrift.PTSDrift, lastDrift.Drift,
+			"Total drift should equal PTS drift (processing lag is diagnostic only)")
+
+		// Verify that processing lag is not mixed into sync calculations
 		avgDrift := (lastDrift.PTSDrift + lastDrift.ProcessingLag) / 2
 		assert.NotEqual(t, avgDrift, lastDrift.Drift,
-			"Total drift should not be simple average of components")
-
-		// With 100ms processing lag, total drift should apply 30% weight to lag
-		expectedDrift := lastDrift.PTSDrift + time.Duration(float64(lastDrift.ProcessingLag)*0.3)
-		assert.InDelta(t, float64(expectedDrift), float64(lastDrift.Drift), float64(time.Millisecond),
-			"Drift should be PTS drift + 30% of processing lag")
+			"Total drift should NOT be an average of PTS drift and processing lag")
 	}
 }

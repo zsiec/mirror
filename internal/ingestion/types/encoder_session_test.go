@@ -244,7 +244,7 @@ func TestEncoderSessionManager_Close(t *testing.T) {
 func TestEncoderSessionManager_Integration(t *testing.T) {
 	t.Run("integration_with_parameter_context", func(t *testing.T) {
 		// Create parameter context with encoder session manager
-		ctx := NewParameterSetContext(CodecH264, "test-integration")
+		ctx := NewParameterSetContextForTest(CodecH264, "test-integration")
 		sessionManager := ctx.GetSessionManager()
 
 		if sessionManager == nil {
@@ -278,7 +278,7 @@ func TestEncoderSessionManager_Integration(t *testing.T) {
 	})
 
 	t.Run("session_persistence_across_parameter_updates", func(t *testing.T) {
-		ctx := NewParameterSetContext(CodecH264, "test-persistence")
+		ctx := NewParameterSetContextForTest(CodecH264, "test-persistence")
 		sessionManager := ctx.GetSessionManager()
 
 		// Add multiple parameter sets over time

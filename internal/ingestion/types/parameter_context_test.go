@@ -6,7 +6,7 @@ import (
 )
 
 func TestParameterSetContext_Creation(t *testing.T) {
-	ctx := NewParameterSetContext(CodecH264, "test-stream-123")
+	ctx := NewParameterSetContextForTest(CodecH264, "test-stream-123")
 
 	if ctx == nil {
 		t.Fatal("Expected context to be created, got nil")
@@ -22,7 +22,7 @@ func TestParameterSetContext_Creation(t *testing.T) {
 }
 
 func TestParameterSetContext_AddSPS_ValidData(t *testing.T) {
-	ctx := NewParameterSetContext(CodecH264, "test-stream")
+	ctx := NewParameterSetContextForTest(CodecH264, "test-stream")
 
 	// Valid H.264 SPS NAL unit data (simplified)
 	spsData := []byte{0x67, 0x42, 0x00, 0x1f, 0xda, 0x01, 0x40, 0x16, 0xec, 0x04, 0x40, 0x00, 0x00, 0x03, 0x00, 0x40, 0x00, 0x00, 0x0f, 0x03, 0xc5, 0x8b, 0xa8}
@@ -38,7 +38,7 @@ func TestParameterSetContext_AddSPS_ValidData(t *testing.T) {
 }
 
 func TestParameterSetContext_AddSPS_WrongCodec(t *testing.T) {
-	ctx := NewParameterSetContext(CodecHEVC, "test-stream")
+	ctx := NewParameterSetContextForTest(CodecHEVC, "test-stream")
 
 	spsData := []byte{0x67, 0x42, 0x00, 0x1f}
 
@@ -53,7 +53,7 @@ func TestParameterSetContext_AddSPS_WrongCodec(t *testing.T) {
 }
 
 func TestParameterSetContext_GetStatistics(t *testing.T) {
-	ctx := NewParameterSetContext(CodecH264, "test-stream-456")
+	ctx := NewParameterSetContextForTest(CodecH264, "test-stream-456")
 
 	stats := ctx.GetStatistics()
 
@@ -79,7 +79,7 @@ func TestParameterSetContext_GetStatistics(t *testing.T) {
 }
 
 func TestParameterSetContext_CanDecodeFrame_EmptyFrame(t *testing.T) {
-	ctx := NewParameterSetContext(CodecH264, "test-stream")
+	ctx := NewParameterSetContextForTest(CodecH264, "test-stream")
 
 	// Test with frame that has no NAL units
 	emptyFrame := &VideoFrame{
@@ -98,8 +98,63 @@ func TestParameterSetContext_CanDecodeFrame_EmptyFrame(t *testing.T) {
 	}
 }
 
+func TestParameterSetContext_RejectCorruptedSPS(t *testing.T) {
+	ctx := NewParameterSetContextForTest(CodecH264, "test-stream")
+
+	// Create corrupted SPS with profile_idc=7 (invalid) and level_idc=146 (invalid)
+	// This matches the corrupted data from the logs
+	corruptedSPS := []byte{
+		0x67, // NAL header (SPS)
+		0x07, // profile_idc = 7 (INVALID)
+		0x00, // constraint flags
+		0x92, // level_idc = 146 (INVALID)
+		0x80, // seq_parameter_set_id = 0 (exp-golomb: 1 stop bit = 10000000)
+		// Add more data to ensure RBSP extraction succeeds
+		0x8d, 0x68, 0x80, 0x00, 0x00,
+	}
+
+	err := ctx.AddSPS(corruptedSPS)
+	// The code now accepts unknown profile_idc values with warnings
+	if err != nil {
+		t.Fatalf("Expected no error when adding SPS with unknown profile_idc=7, got: %v", err)
+	}
+
+	// Verify SPS was stored despite unknown profile
+	stats := ctx.GetStatistics()
+	if spsCount, _ := stats["sps_count"].(int); spsCount != 1 {
+		t.Errorf("Expected 1 SPS stored, but found %d", spsCount)
+	}
+}
+
+func TestParameterSetContext_RejectInvalidLevelIDC(t *testing.T) {
+	ctx := NewParameterSetContextForTest(CodecH264, "test-stream")
+
+	// Create SPS with valid profile but invalid level
+	invalidLevelSPS := []byte{
+		0x67, // NAL header (SPS)
+		0x42, // profile_idc = 66 (Baseline - VALID)
+		0x00, // constraint flags
+		0x92, // level_idc = 146 (INVALID)
+		0x80, // seq_parameter_set_id = 0 (exp-golomb: 1 stop bit = 10000000)
+		// Add more data to ensure RBSP extraction succeeds
+		0x8d, 0x68, 0x80, 0x00, 0x00,
+	}
+
+	err := ctx.AddSPS(invalidLevelSPS)
+	// The code now accepts unknown level_idc values with warnings
+	if err != nil {
+		t.Fatalf("Expected no error when adding SPS with unknown level_idc=146, got: %v", err)
+	}
+
+	// Verify SPS was stored despite unknown level
+	stats := ctx.GetStatistics()
+	if spsCount, _ := stats["sps_count"].(int); spsCount != 1 {
+		t.Errorf("Expected 1 SPS stored, but found %d", spsCount)
+	}
+}
+
 func TestParameterSetContext_GenerateDecodableStream_EmptyFrame(t *testing.T) {
-	ctx := NewParameterSetContext(CodecH264, "test-stream")
+	ctx := NewParameterSetContextForTest(CodecH264, "test-stream")
 
 	emptyFrame := &VideoFrame{
 		ID:       123,
@@ -130,7 +185,7 @@ func TestParameterSetContext_CodecTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := NewParameterSetContext(tt.codec, "test-stream")
+			ctx := NewParameterSetContextForTest(tt.codec, "test-stream")
 			if ctx.codec != tt.codec {
 				t.Errorf("Expected codec %v, got %v", tt.codec, ctx.codec)
 			}
@@ -139,7 +194,7 @@ func TestParameterSetContext_CodecTypes(t *testing.T) {
 }
 
 func TestParameterSetContext_ThreadSafety(t *testing.T) {
-	ctx := NewParameterSetContext(CodecH264, "test-stream")
+	ctx := NewParameterSetContextForTest(CodecH264, "test-stream")
 
 	// Test that we can call GetStatistics concurrently without panic
 	done := make(chan bool, 10)
@@ -162,7 +217,7 @@ func TestParameterSetContext_ThreadSafety(t *testing.T) {
 
 func TestParameterSetContext_LastUpdated(t *testing.T) {
 	before := time.Now()
-	ctx := NewParameterSetContext(CodecH264, "test-stream")
+	ctx := NewParameterSetContextForTest(CodecH264, "test-stream")
 	after := time.Now()
 
 	if ctx.lastUpdated.Before(before) || ctx.lastUpdated.After(after) {
@@ -174,7 +229,7 @@ func TestParameterSetContext_LastUpdated(t *testing.T) {
 
 func TestParameterSetContext_EncoderSessionIntegration(t *testing.T) {
 	t.Run("session_manager_initialization", func(t *testing.T) {
-		ctx := NewParameterSetContext(CodecH264, "test-stream-session")
+		ctx := NewParameterSetContextForTest(CodecH264, "test-stream-session")
 
 		sessionManager := ctx.GetSessionManager()
 		if sessionManager == nil {
@@ -189,7 +244,7 @@ func TestParameterSetContext_EncoderSessionIntegration(t *testing.T) {
 	})
 
 	t.Run("session_change_detection_on_sps_change", func(t *testing.T) {
-		ctx := NewParameterSetContext(CodecH264, "test-stream-session")
+		ctx := NewParameterSetContextForTest(CodecH264, "test-stream-session")
 		sessionManager := ctx.GetSessionManager()
 
 		// Add initial SPS
@@ -218,7 +273,7 @@ func TestParameterSetContext_EncoderSessionIntegration(t *testing.T) {
 	})
 
 	t.Run("no_session_change_on_identical_sps", func(t *testing.T) {
-		ctx := NewParameterSetContext(CodecH264, "test-stream-session")
+		ctx := NewParameterSetContextForTest(CodecH264, "test-stream-session")
 		sessionManager := ctx.GetSessionManager()
 
 		// Add initial SPS
@@ -246,8 +301,8 @@ func TestParameterSetContext_EncoderSessionIntegration(t *testing.T) {
 	})
 
 	t.Run("session_manager_isolation_between_contexts", func(t *testing.T) {
-		ctx1 := NewParameterSetContext(CodecH264, "stream-1")
-		ctx2 := NewParameterSetContext(CodecH264, "stream-2")
+		ctx1 := NewParameterSetContextForTest(CodecH264, "stream-1")
+		ctx2 := NewParameterSetContextForTest(CodecH264, "stream-2")
 
 		session1 := ctx1.GetSessionManager()
 		session2 := ctx2.GetSessionManager()
@@ -279,7 +334,7 @@ func TestParameterSetContext_EncoderSessionIntegration(t *testing.T) {
 
 func TestParameterSetContext_SessionAwareDecoding(t *testing.T) {
 	t.Run("generate_decodable_stream_with_session_context", func(t *testing.T) {
-		ctx := NewParameterSetContext(CodecH264, "test-stream-decode")
+		ctx := NewParameterSetContextForTest(CodecH264, "test-stream-decode")
 
 		// Add valid SPS and PPS
 		spsData := []byte{0x67, 0x42, 0x00, 0x1f, 0xda, 0x01, 0x40, 0x16, 0xec, 0x04}

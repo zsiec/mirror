@@ -20,6 +20,7 @@ import (
 	"github.com/zsiec/mirror/internal/ingestion/registry"
 	rtpListener "github.com/zsiec/mirror/internal/ingestion/rtp"
 	"github.com/zsiec/mirror/internal/ingestion/testdata"
+	"github.com/zsiec/mirror/internal/logger"
 	"github.com/zsiec/mirror/tests"
 )
 
@@ -30,15 +31,16 @@ func TestRTPIntegration_StreamIngestion(t *testing.T) {
 
 	// Setup
 	ctx := context.Background()
-	logger := logrus.New()
-	logger.SetLevel(logrus.DebugLevel)
+	logrusLogger := logrus.New()
+	logrusLogger.SetLevel(logrus.DebugLevel)
+	log := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
 
 	// Create test Redis registry
 	redisClient := tests.SetupTestRedis(t)
-	reg := registry.NewRedisRegistry(redisClient, logger)
+	reg := registry.NewRedisRegistry(redisClient, logrusLogger)
 
 	// Create buffer pool
-	bufferPool := buffer.NewBufferPool(1024*1024, 10, logger) // 1MB buffers
+	bufferPool := buffer.NewBufferPool(1024*1024, 10, logrusLogger) // 1MB buffers
 
 	// Create RTP listener config
 	cfg := &config.RTPConfig{
@@ -55,7 +57,7 @@ func TestRTPIntegration_StreamIngestion(t *testing.T) {
 		Supported: []string{"h264", "hevc"},
 		Preferred: "hevc",
 	}
-	listener := rtpListener.NewListener(cfg, codecsCfg, reg, bufferPool, logger)
+	listener := rtpListener.NewListener(cfg, codecsCfg, reg, log)
 	err := listener.Start()
 	require.NoError(t, err)
 	defer listener.Stop()
@@ -228,7 +230,7 @@ func TestRTPIntegration_StreamIngestion(t *testing.T) {
 			Supported: []string{"h264", "hevc"},
 			Preferred: "hevc",
 		}
-		testListener := rtpListener.NewListener(testCfg, codecsCfg, reg, bufferPool, logger)
+		testListener := rtpListener.NewListener(testCfg, codecsCfg, reg, log)
 		testListener.SetTestTimeouts(500*time.Millisecond, 1*time.Second) // Cleanup every 500ms, timeout after 1s
 
 		err := testListener.Start()
@@ -330,14 +332,12 @@ func TestRTPIntegration_Performance(t *testing.T) {
 	}
 
 	// Setup
-	logger := logrus.New()
+	logrusLogger := logrus.New()
+	log := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
 
 	// Create test Redis registry
 	redisClient := tests.SetupTestRedis(t)
-	reg := registry.NewRedisRegistry(redisClient, logger)
-
-	// Create buffer pool
-	bufferPool := buffer.NewBufferPool(1024*1024, 10, logger)
+	reg := registry.NewRedisRegistry(redisClient, logrusLogger)
 
 	// Create RTP listener
 	cfg := &config.RTPConfig{
@@ -353,7 +353,7 @@ func TestRTPIntegration_Performance(t *testing.T) {
 		Supported: []string{"h264", "hevc"},
 		Preferred: "hevc",
 	}
-	listener := rtpListener.NewListener(cfg, codecsCfg, reg, bufferPool, logger)
+	listener := rtpListener.NewListener(cfg, codecsCfg, reg, log)
 	err := listener.Start()
 	require.NoError(t, err)
 	defer listener.Stop()

@@ -29,8 +29,13 @@ type ValidatorConfig struct {
 
 // DefaultValidatorConfig returns a default validator configuration
 func DefaultValidatorConfig() *ValidatorConfig {
+	// Accept all dynamic payload types (96-127) per RFC 3551 Section 3
+	dynamicPTs := make([]uint8, 32)
+	for i := range dynamicPTs {
+		dynamicPTs[i] = uint8(96 + i)
+	}
 	return &ValidatorConfig{
-		AllowedPayloadTypes: []uint8{96, 97, 98, 99}, // Dynamic payload types
+		AllowedPayloadTypes: dynamicPTs,
 		MaxSequenceGap:      100,
 		MaxTimestampJump:    90000 * 60, // 60 seconds at 90kHz - permissive for video streams
 	}
@@ -97,10 +102,11 @@ func (v *Validator) ValidatePacket(packet *rtp.Packet) error {
 		return ErrInvalidPayloadType
 	}
 
-	// Validate padding if present
+	// Validate padding if present (RFC 3550 Section 5.1)
 	if packet.Padding && len(packet.Raw) > 0 {
 		paddingLen := packet.Raw[len(packet.Raw)-1]
-		if int(paddingLen) > len(packet.Raw) {
+		// Padding count includes itself, so minimum is 1. A value of 0 is invalid.
+		if paddingLen == 0 || int(paddingLen) > len(packet.Raw) {
 			return ErrInvalidPadding
 		}
 	}
@@ -124,22 +130,15 @@ func (v *Validator) ValidatePacket(packet *rtp.Packet) error {
 		return nil
 	}
 
-	// Validate sequence number
-	expectedSeq := (tracker.lastSequence + 1) & 0xFFFF
-	if packet.SequenceNumber != expectedSeq {
-		// Calculate the gap
-		var gap int
-		if packet.SequenceNumber > tracker.lastSequence {
-			gap = int(packet.SequenceNumber - tracker.lastSequence)
-		} else {
-			// Handle wraparound
-			gap = int(packet.SequenceNumber) + (0xFFFF - int(tracker.lastSequence)) + 1
-		}
-
-		if gap > v.config.MaxSequenceGap {
-			v.mu.Unlock()
-			return ErrSequenceGap
-		}
+	// Validate sequence number using signed 16-bit arithmetic for proper wraparound handling
+	seqDelta := int16(packet.SequenceNumber - tracker.lastSequence)
+	absGap := int(seqDelta)
+	if absGap < 0 {
+		absGap = -absGap
+	}
+	if absGap > 1 && absGap >= v.config.MaxSequenceGap {
+		v.mu.Unlock()
+		return ErrSequenceGap
 	}
 
 	// Validate timestamp with B-frame awareness
@@ -180,7 +179,12 @@ func (v *Validator) validateTimestamp(packet *rtp.Packet, tracker *ssrcTracker) 
 	currentTS := packet.Timestamp
 
 	// Handle 32-bit timestamp wraparound
-	currentTS = v.handleTimestampWraparound(currentTS, tracker.lastTimestamp)
+	isWraparound := v.isTimestampWraparound(currentTS, tracker.lastTimestamp)
+	if isWraparound {
+		// On wraparound, reset the monotonic tracker so validation works correctly.
+		// The new timestamp is a valid forward progression despite being numerically smaller.
+		tracker.lastMonotonicTS = currentTS
+	}
 
 	// Update timestamp window (keep last 10 timestamps for analysis)
 	tracker.timestampWindow = append(tracker.timestampWindow, currentTS)
@@ -239,17 +243,13 @@ func (v *Validator) validateTimestamp(packet *rtp.Packet, tracker *ssrcTracker) 
 	return nil
 }
 
-// handleTimestampWraparound handles 32-bit timestamp wraparound
-func (v *Validator) handleTimestampWraparound(currentTS, lastTS uint32) uint32 {
-	// If current timestamp is much smaller than last timestamp,
-	// it might be a wraparound (from ~4.3B back to ~0)
-	if lastTS > 0xF0000000 && currentTS < 0x10000000 {
-		// This is likely a wraparound, treat it as continuous
-		// For validation purposes, we don't need to adjust the value,
-		// just recognize it as valid progression
-		return currentTS
-	}
-	return currentTS
+// handleTimestampWraparound detects 32-bit timestamp wraparound and returns
+// true if wraparound was detected. When wraparound occurs, the caller should
+// treat the timestamp jump as normal forward progression.
+func (v *Validator) isTimestampWraparound(currentTS, lastTS uint32) bool {
+	// If the last timestamp is in the high range and current is in the low range,
+	// this is a 32-bit wraparound (~13.3 hours at 90kHz clock rate)
+	return lastTS > 0xF0000000 && currentTS < 0x10000000
 }
 
 // isPossibleBFrame checks if a timestamp could be from a B-frame

@@ -161,13 +161,13 @@ func TestConnection_GoroutineCleanup(t *testing.T) {
 			// Create a connection
 			streamID := fmt.Sprintf("test-stream-%d", id)
 			conn := &Connection{
-				streamID:   streamID,
-				registry:   &mockRegistry{},
-				logger:     testLogger,
-				startTime:  time.Now(),
-				lastActive: time.Now(),
-				done:       make(chan struct{}),
+				streamID:  streamID,
+				registry:  &mockRegistry{},
+				logger:    testLogger,
+				startTime: time.Now(),
+				done:      make(chan struct{}),
 			}
+			conn.lastActiveNano.Store(time.Now().UnixNano())
 
 			// Create a mock connection read loop
 			go func() {
@@ -211,12 +211,12 @@ func TestConnection_CloseIdempotent(t *testing.T) {
 	testLogger := logger.NewLogrusAdapter(logrus.NewEntry(logrusLogger))
 
 	conn := &Connection{
-		streamID:   "test-stream",
-		logger:     testLogger,
-		startTime:  time.Now(),
-		lastActive: time.Now(),
-		done:       make(chan struct{}),
+		streamID:  "test-stream",
+		logger:    testLogger,
+		startTime: time.Now(),
+		done:      make(chan struct{}),
 	}
+	conn.lastActiveNano.Store(time.Now().UnixNano())
 
 	// Close multiple times should be safe
 	require.NoError(t, conn.Close())

@@ -80,12 +80,15 @@ func (d *H264Detector) DetectBoundaries(pkt *types.TimestampedPacket) (isStart, 
 		d.frameStarted = true
 	}
 
-	// SEI or AUD after VCL NAL ends frame
+	// Non-VCL NAL after VCL NAL signals the end of the current access unit
+	// and the start of the next one (per H.264 Section 7.4.1.2.3)
 	if d.frameStarted && d.isVCLNAL(d.lastNALType) &&
 		(nalType == H264NALTypeSEI || nalType == H264NALTypeAUD ||
 			nalType == H264NALTypeSPS || nalType == H264NALTypePPS) {
 		isEnd = true
-		d.frameStarted = false
+		// SEI/AUD/SPS/PPS after VCL starts the next access unit
+		isStart = true
+		d.frameStarted = true
 	}
 
 	d.lastNALType = nalType
@@ -104,21 +107,44 @@ func (d *H264Detector) handleFUA(pkt *types.TimestampedPacket) (isStart, isEnd b
 	endBit := (fuHeader & 0x40) != 0
 	nalType := fuHeader & 0x1F
 
+	// RFC 6184 Section 5.8: R bit must be 0
+	rBit := (fuHeader & 0x20) != 0
+	if rBit {
+		return false, false
+	}
+
 	if startBit {
-		// First fragment of NAL
+		// First fragment of NAL — apply same frame start logic as single NALs
 		if nalType == H264NALTypeIDR || nalType == H264NALTypeSPS ||
 			nalType == H264NALTypePPS || nalType == H264NALTypeAUD {
 			isStart = true
 			d.frameStarted = true
 		}
+		// VCL NAL after non-VCL NAL starts new frame
+		if d.isVCLNAL(nalType) && !d.isVCLNAL(d.lastNALType) && d.lastNALType != 0 {
+			isStart = true
+			d.frameStarted = true
+		}
+		// Non-VCL NAL after VCL NAL ends current frame and starts next
+		if d.frameStarted && d.isVCLNAL(d.lastNALType) &&
+			(nalType == H264NALTypeSEI || nalType == H264NALTypeAUD ||
+				nalType == H264NALTypeSPS || nalType == H264NALTypePPS) {
+			isEnd = true
+			isStart = true
+			d.frameStarted = true
+		}
 	}
 
-	if endBit && d.frameStarted {
-		// Last fragment
-		if d.isVCLNAL(nalType) {
-			// Frame might end after this NAL
-			// Need to check next packet to be sure
-		}
+	if endBit {
+		// Last fragment — update lastNALType so the next packet's
+		// boundary detection sees the correct previous NAL type
+		d.lastNALType = nalType
+		return isStart, isEnd
+	}
+
+	// For middle fragments, don't update lastNALType
+	if startBit {
+		d.lastNALType = nalType
 	}
 
 	return isStart, isEnd
@@ -192,6 +218,7 @@ func (d *H264Detector) detectBoundariesWithStartCode(pkt *types.TimestampedPacke
 // GetFrameType determines frame type from NAL units
 func (d *H264Detector) GetFrameType(nalUnits []types.NALUnit) types.FrameType {
 	hasIDR := false
+	hasValidIDRSlice := false
 	hasSPS := false
 	hasPPS := false
 	sliceType := -1
@@ -206,29 +233,65 @@ func (d *H264Detector) GetFrameType(nalUnits []types.NALUnit) types.FrameType {
 		switch nalType {
 		case H264NALTypeIDR:
 			hasIDR = true
+			// For IDR NAL units, verify the slice type is actually I-slice
+			if len(nal.Data) > 1 {
+				parsedSliceType := d.parseSliceTypeFromNAL(nal.Data)
+				// IDR frames must have I-slice (type 2 or 7)
+				if parsedSliceType == 2 || parsedSliceType == 7 {
+					hasValidIDRSlice = true
+				}
+				// Keep track of slice type for fallback
+				if sliceType == -1 {
+					sliceType = parsedSliceType
+				}
+			} else {
+				// IDR with no/corrupted slice data - assume it should have been I-slice
+				if sliceType == -1 {
+					sliceType = 2 // Default to I-slice for corrupted IDR
+				}
+			}
 		case H264NALTypeSPS:
 			hasSPS = true
 		case H264NALTypePPS:
 			hasPPS = true
-		case H264NALTypeSlice:
-			// Parse slice header to get slice type
+		case H264NALTypeSlice, H264NALTypeSliceDPA, H264NALTypeSliceDPB, H264NALTypeSliceDPC:
+			// Parse slice header to get slice type for non-IDR slices
 			if sliceType == -1 && len(nal.Data) > 1 {
-				sliceType = d.parseSliceType(nal.Data[1:])
+				sliceType = d.parseSliceTypeFromNAL(nal.Data)
+			}
+		default:
+			// For any other slice-like NAL units, try to parse slice type
+			if d.isVCLNAL(nalType) && sliceType == -1 && len(nal.Data) > 1 {
+				sliceType = d.parseSliceTypeFromNAL(nal.Data)
 			}
 		}
 	}
 
-	if hasIDR {
+	// IDR takes priority over parameter sets per H.264 spec —
+	// an access unit containing IDR + SPS + PPS is an IDR frame, not an SPS frame.
+	if hasValidIDRSlice {
 		return types.FrameTypeIDR
 	}
-	if hasSPS {
-		return types.FrameTypeSPS
-	}
-	if hasPPS {
-		return types.FrameTypePPS
+
+	// If we have an IDR NAL but couldn't parse the slice type (corrupted/too short),
+	// fall back to I-frame. Otherwise let the actual parsed slice type determine
+	// the frame type — even if the NAL says IDR, the slice data is authoritative.
+	if hasIDR && sliceType < 0 {
+		return types.FrameTypeI
 	}
 
-	// Determine P/B frame from slice type
+	// Only classify as pure SPS/PPS if no VCL NAL units are present
+	// (i.e., no slice type was detected from any NAL unit)
+	if sliceType < 0 {
+		if hasSPS {
+			return types.FrameTypeSPS
+		}
+		if hasPPS {
+			return types.FrameTypePPS
+		}
+	}
+
+	// Determine frame type from slice type
 	switch sliceType {
 	case 0, 5: // P slice types
 		return types.FrameTypeP
@@ -236,9 +299,15 @@ func (d *H264Detector) GetFrameType(nalUnits []types.NALUnit) types.FrameType {
 		return types.FrameTypeB
 	case 2, 7: // I slice types
 		return types.FrameTypeI
-	default:
-		return types.FrameTypeP // Default
+	case 3, 8: // SP slice types
+		return types.FrameTypeP // Treat SP as P
+	case 4, 9: // SI slice types
+		return types.FrameTypeI // Treat SI as I
 	}
+
+	// If we couldn't determine the slice type and have no other info,
+	// we can't accurately classify the frame
+	return types.FrameTypeP // Most conservative assumption
 }
 
 // IsKeyframe checks if data contains a keyframe
@@ -251,7 +320,8 @@ func (d *H264Detector) IsKeyframe(data []byte) bool {
 		}
 	}
 
-	// Check with start codes
+	// Check with start codes — only IDR NAL units are keyframes.
+	// SPS/PPS are parameter sets, not keyframes.
 	nalUnits, err := d.findNALUnits(data)
 	if err != nil {
 		// Error finding NAL units, data might be corrupted
@@ -260,7 +330,7 @@ func (d *H264Detector) IsKeyframe(data []byte) bool {
 	for _, nalUnit := range nalUnits {
 		if len(nalUnit) > 0 {
 			nalType := nalUnit[0] & 0x1F
-			if nalType == H264NALTypeIDR || nalType == H264NALTypeSPS || nalType == H264NALTypePPS {
+			if nalType == H264NALTypeIDR {
 				return true
 			}
 		}
@@ -272,6 +342,48 @@ func (d *H264Detector) IsKeyframe(data []byte) bool {
 // GetCodec returns the codec type
 func (d *H264Detector) GetCodec() types.CodecType {
 	return types.CodecH264
+}
+
+// getNALTypeName returns a human-readable name for the NAL type
+func (d *H264Detector) getNALTypeName(nalType uint8) string {
+	switch nalType {
+	case H264NALTypeSlice:
+		return "Slice"
+	case H264NALTypeSliceDPA:
+		return "SliceDPA"
+	case H264NALTypeSliceDPB:
+		return "SliceDPB"
+	case H264NALTypeSliceDPC:
+		return "SliceDPC"
+	case H264NALTypeIDR:
+		return "IDR"
+	case H264NALTypeSEI:
+		return "SEI"
+	case H264NALTypeSPS:
+		return "SPS"
+	case H264NALTypePPS:
+		return "PPS"
+	case H264NALTypeAUD:
+		return "AUD"
+	case H264NALTypeEndSeq:
+		return "EndSeq"
+	case H264NALTypeEndStr:
+		return "EndStr"
+	case H264NALTypeFiller:
+		return "Filler"
+	case H264NALTypeSPSExt:
+		return "SPSExt"
+	case H264NALTypePrefix:
+		return "Prefix"
+	case H264NALTypeSubSPS:
+		return "SubSPS"
+	case H264NALTypeFUA:
+		return "FU-A"
+	case H264NALTypeFUB:
+		return "FU-B"
+	default:
+		return fmt.Sprintf("Unknown(%d)", nalType)
+	}
 }
 
 // isVCLNAL checks if NAL type is VCL (Video Coding Layer)
@@ -293,7 +405,7 @@ func (d *H264Detector) findNALUnits(data []byte) ([][]byte, error) {
 	nalUnits := make([][]byte, 0)
 
 	// Check minimum size for start code search
-	if len(data) < 4 {
+	if len(data) < 3 {
 		return nalUnits, nil
 	}
 
@@ -301,16 +413,24 @@ func (d *H264Detector) findNALUnits(data []byte) ([][]byte, error) {
 	maxNALUnits := security.MaxNALUnitsPerFrame
 
 	i := 0
-	for i < len(data)-3 && len(nalUnits) < maxNALUnits {
-		// Look for start code
+	dataLen := len(data)
+
+	for i < dataLen && len(nalUnits) < maxNALUnits {
+		// Look for start code - ensure we have enough bytes to check
+		// Need at least 3 bytes remaining for 3-byte start code
+		if i+3 > dataLen {
+			break
+		}
+
 		if data[i] == 0 && data[i+1] == 0 {
 			startCodeLen := 0
 
-			// Check bounds for 3-byte start code
-			if i+2 < len(data) && data[i+2] == 1 {
+			// Check for 3-byte start code (0x000001)
+			if data[i+2] == 1 {
 				startCodeLen = 3
-			} else if i+3 < len(data) && data[i+2] == 0 && data[i+3] == 1 {
-				// Check bounds for 4-byte start code
+			} else if i+4 <= dataLen && data[i+2] == 0 && data[i+3] == 1 {
+				// Check for 4-byte start code (0x00000001)
+				// Note: i+4 <= dataLen because we need to check data[i+3]
 				startCodeLen = 4
 			}
 
@@ -319,23 +439,31 @@ func (d *H264Detector) findNALUnits(data []byte) ([][]byte, error) {
 				nalStart := i + startCodeLen
 
 				// Ensure nalStart is within bounds
-				if nalStart >= len(data) {
+				if nalStart >= dataLen {
 					break
 				}
 
-				nalEnd := len(data)
+				// Initialize nalEnd to the end of data
+				nalEnd := dataLen
 
-				// Search for next start code with bounds checking
-				for j := nalStart; j <= len(data)-3; j++ {
-					// Check if we can safely read 3 bytes
-					if j+2 < len(data) && data[j] == 0 && data[j+1] == 0 && data[j+2] == 1 {
-						nalEnd = j
+				// Search for next start code with proper bounds checking
+				for j := nalStart; j < dataLen; j++ {
+					// Need at least 3 bytes remaining to check for start code
+					if j+3 > dataLen {
 						break
 					}
-					// Check if we can safely read 4 bytes
-					if j+3 < len(data) && data[j] == 0 && data[j+1] == 0 && data[j+2] == 0 && data[j+3] == 1 {
-						nalEnd = j
-						break
+
+					if data[j] == 0 && data[j+1] == 0 {
+						// Check for 3-byte start code
+						if data[j+2] == 1 {
+							nalEnd = j
+							break
+						}
+						// Check for 4-byte start code if we have enough bytes
+						if j+4 <= dataLen && data[j+2] == 0 && data[j+3] == 1 {
+							nalEnd = j
+							break
+						}
 					}
 				}
 
@@ -350,6 +478,7 @@ func (d *H264Detector) findNALUnits(data []byte) ([][]byte, error) {
 					return nalUnits, fmt.Errorf(security.ErrMsgNALUnitTooLarge, nalSize, security.MaxNALUnitSize)
 				}
 
+				// Move to the end of this NAL unit
 				i = nalEnd
 				continue
 			}
@@ -365,23 +494,51 @@ func (d *H264Detector) findNALUnits(data []byte) ([][]byte, error) {
 	return nalUnits, nil
 }
 
-// parseSliceType extracts slice type from slice header
-// This is simplified - real implementation needs full bitstream parsing
-func (d *H264Detector) parseSliceType(data []byte) int {
-	if len(data) == 0 {
+// parseSliceTypeFromNAL extracts slice type from a complete NAL unit including header
+func (d *H264Detector) parseSliceTypeFromNAL(nalData []byte) int {
+	if len(nalData) < 2 {
 		return -1
 	}
 
-	// first_mb_in_slice is ue(v), skip it
-	// slice_type is ue(v)
-	// This is a simplified version - proper parsing needs Exp-Golomb decoding
-
-	// For now, use heuristic based on first byte
-	firstByte := data[0]
-	if firstByte&0x80 == 0 {
-		// Rough approximation
-		return int((firstByte >> 5) & 0x07)
+	// Skip NAL header and parse the payload
+	payload := nalData[1:]
+	if len(payload) == 0 {
+		return -1
 	}
 
-	return -1
+	// For slice headers, we need to handle emulation prevention bytes
+	// but NOT remove trailing bytes like RBSP extraction does
+	rbsp, err := types.RemoveEmulationPreventionBytes(payload)
+	if err != nil || len(rbsp) == 0 {
+		// If emulation prevention removal fails, use payload as-is
+		rbsp = payload
+	}
+
+	// Create bit reader for parsing
+	br := types.NewBitReader(rbsp)
+
+	// Read first_mb_in_slice (ue(v))
+	_, err = br.ReadUE()
+	if err != nil {
+		return -1
+	}
+
+	// Read slice_type (ue(v))
+	sliceType, err := br.ReadUE()
+	if err != nil {
+		return -1
+	}
+
+	// H.264 slice types (Table 7-6):
+	// 0, 5 = P slice
+	// 1, 6 = B slice
+	// 2, 7 = I slice
+	// 3, 8 = SP slice
+	// 4, 9 = SI slice
+	// Values >= 10 are invalid
+	if sliceType > 9 {
+		return -1
+	}
+
+	return int(sliceType)
 }

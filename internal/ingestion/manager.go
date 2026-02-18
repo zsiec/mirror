@@ -187,6 +187,9 @@ func (m *Manager) Stop() error {
 		}
 	}
 
+	// Clean up SRT library resources
+	srt.CleanupSRT()
+
 	// Stop RTP listener
 	if m.rtpListener != nil {
 		if err := m.rtpListener.Stop(); err != nil {
@@ -238,6 +241,35 @@ func (m *Manager) Stop() error {
 // GetRegistry returns the stream registry
 func (m *Manager) GetRegistry() registry.Registry {
 	return m.registry
+}
+
+// SRTHealthChecker implements health.Checker for the SRT listener
+type SRTHealthChecker struct {
+	manager *Manager
+}
+
+// NewSRTHealthChecker creates a health checker for SRT ingestion
+func NewSRTHealthChecker(m *Manager) *SRTHealthChecker {
+	return &SRTHealthChecker{manager: m}
+}
+
+// Name returns the checker name
+func (c *SRTHealthChecker) Name() string {
+	return "srt_listener"
+}
+
+// Check verifies the SRT listener is running and accepting connections
+func (c *SRTHealthChecker) Check(_ context.Context) error {
+	c.manager.mu.RLock()
+	defer c.manager.mu.RUnlock()
+
+	if !c.manager.started {
+		return fmt.Errorf("ingestion manager not started")
+	}
+	if c.manager.srtListener == nil {
+		return fmt.Errorf("SRT listener not configured")
+	}
+	return nil
 }
 
 // GetActiveStreams returns all active streams from the registry
