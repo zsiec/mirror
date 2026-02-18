@@ -518,10 +518,14 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 		return
 	}
 
+	// Copy video data to avoid buffer reuse corruption
+	dataCopy := make([]byte, len(videoData))
+	copy(dataCopy, videoData)
+
 	// Create timestamped packet with extracted video data
 	now := time.Now()
 	tspkt := types.TimestampedPacket{
-		Data:        videoData,
+		Data:        dataCopy,
 		CaptureTime: now,
 		StreamID:    a.GetStreamID(),
 		Type:        packetType,
@@ -603,8 +607,9 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 				elapsedPTS = maxElapsedPTS
 			}
 
-			// Calculate new PTS with wraparound handling
-			newPTS := a.lastPCR + elapsedPTS
+			// Convert PCR from 27MHz to 90kHz before adding elapsed PTS
+			pcrAs90kHz := a.lastPCR / 300
+			newPTS := pcrAs90kHz + elapsedPTS
 			const pts33BitMax = int64(1 << 33) // 2^33 for 33-bit PTS per ISO 13818-1
 
 			// Handle wraparound
@@ -643,10 +648,9 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 		a.logger.WithField("stream_id", a.GetStreamID()).Debug("SRT ADAPTER: PCR estimation path completed")
 	}
 
-	// Detect keyframes in video packets
+	// Detect keyframes in video packets using extracted video data (not raw PES)
 	if packetType == types.PacketTypeVideo && tsPkt.PayloadStart {
-		// Simple keyframe detection - look for start codes
-		if a.isKeyframe(tsPkt.Payload) {
+		if a.isKeyframe(videoData) {
 			tspkt.Flags |= types.PacketFlagKeyframe
 		}
 		tspkt.Flags |= types.PacketFlagFrameStart

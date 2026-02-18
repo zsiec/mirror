@@ -150,7 +150,9 @@ func (m *Manager) MonitorSystemHealth(ctx context.Context) {
 			}
 
 			// Get buffer pool stats
+			m.handlersMu.RLock()
 			activeHandlers := len(m.streamHandlers)
+			m.handlersMu.RUnlock()
 
 			m.logger.WithFields(map[string]interface{}{
 				"memory_pressure": memStats.GlobalPressure,

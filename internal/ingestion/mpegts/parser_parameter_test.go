@@ -15,14 +15,14 @@ func TestH264ParameterSetExtraction(t *testing.T) {
 		0xE1,
 		// SPS length (8 bytes)
 		0x00, 0x08,
-		// SPS data
-		0x42, 0x00, 0x1E, 0x8D, 0x84, 0x04, 0x05, 0x06,
+		// SPS data (NAL header 0x67 = SPS, followed by profile/level/etc)
+		0x67, 0x42, 0x00, 0x1E, 0x8D, 0x84, 0x04, 0x05,
 		// Number of PPS (1)
 		0x01,
 		// PPS length (4 bytes)
 		0x00, 0x04,
-		// PPS data
-		0xCE, 0x3C, 0x80, 0x01,
+		// PPS data (NAL header 0x68 = PPS, followed by PPS RBSP)
+		0x68, 0xCE, 0x3C, 0x80,
 	}
 
 	parser := NewParser()
@@ -32,7 +32,7 @@ func TestH264ParameterSetExtraction(t *testing.T) {
 		t.Errorf("Expected 2 parameter sets (1 SPS + 1 PPS), got %d", len(paramSets))
 	}
 
-	// Verify SPS has proper start code and NAL header
+	// Verify SPS has proper start code (NAL header is part of the data from the descriptor)
 	sps := paramSets[0]
 	expectedSPSStart := []byte{0x00, 0x00, 0x00, 0x01, 0x67}
 	if len(sps) < 5 {
@@ -44,7 +44,7 @@ func TestH264ParameterSetExtraction(t *testing.T) {
 		}
 	}
 
-	// Verify PPS has proper start code and NAL header
+	// Verify PPS has proper start code (NAL header is part of the data from the descriptor)
 	pps := paramSets[1]
 	expectedPPSStart := []byte{0x00, 0x00, 0x00, 0x01, 0x68}
 	if len(pps) < 5 {
@@ -293,8 +293,8 @@ func TestCorruptedAVCDescriptor(t *testing.T) {
 		0xE1,
 		// SPS length (8 bytes)
 		0x00, 0x08,
-		// SPS data
-		0x42, 0x00, 0x1E, 0x8D, 0x84, 0x04, 0x05, 0x06,
+		// SPS data (NAL header 0x67 + 7 bytes)
+		0x67, 0x42, 0x00, 0x1E, 0x8D, 0x84, 0x04, 0x05,
 		// Number of PPS (1)
 		0x01,
 		// PPS length (1656 bytes - the problematic value)
@@ -313,8 +313,8 @@ func TestCorruptedAVCDescriptor(t *testing.T) {
 	// Verify the SPS was extracted correctly
 	if len(paramSets) > 0 {
 		sps := paramSets[0]
-		if len(sps) != 13 { // 5 bytes header + 8 bytes data
-			t.Errorf("Expected SPS length of 13 bytes, got %d", len(sps))
+		if len(sps) != 12 { // 4 bytes start code + 8 bytes data (including NAL header)
+			t.Errorf("Expected SPS length of 12 bytes, got %d", len(sps))
 		}
 	}
 }

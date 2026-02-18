@@ -96,6 +96,12 @@ func (t *TrackSyncManager) GetPresentationTime(pts int64) time.Time {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
+	return t.getPresentationTimeLocked(pts)
+}
+
+// getPresentationTimeLocked calculates the presentation time for a given PTS.
+// The caller must hold at least an RLock on t.mu.
+func (t *TrackSyncManager) getPresentationTimeLocked(pts int64) time.Time {
 	// Handle uninitialized state
 	if t.sync.BaseTime.IsZero() {
 		return time.Now()
@@ -122,7 +128,7 @@ func (t *TrackSyncManager) GetDecodeTime(dts int64) time.Time {
 
 	// Use PTS as base if DTS equals PTS
 	if dts == t.sync.LastPTS {
-		return t.GetPresentationTime(dts)
+		return t.getPresentationTimeLocked(dts)
 	}
 
 	// Calculate relative to base PTS/time

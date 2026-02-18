@@ -353,14 +353,14 @@ func (aq *AdaptiveQuality) determineTargetProfile(score float64) int {
 				target = current - 1
 			}
 		}
+	} else if score < 0.3 || cpu > 0.95 || memory > 0.95 {
+		// Emergency quality reduction (move toward Minimum/higher index)
+		target = min(len(aq.profiles)-1, current+2)
 	} else if score < 0.5 || cpu > 0.85 || memory > 0.85 {
 		// System is struggling, decrease quality (move toward Minimum/higher index)
 		if current < len(aq.profiles)-1 {
 			target = current + 1
 		}
-	} else if score < 0.3 || cpu > 0.95 || memory > 0.95 {
-		// Emergency quality reduction (move toward Minimum/higher index)
-		target = min(len(aq.profiles)-1, current+2)
 	}
 
 	return target

@@ -400,7 +400,7 @@ func TestParser_ParseWithExtractor(t *testing.T) {
 
 	packets, err := parser.ParseWithExtractor(data, nil)
 	assert.NoError(t, err)
-	assert.Len(t, packets, 0) // No valid PES packets in this simple test
+	assert.Len(t, packets, 1) // Packet included even if PES header parsing fails
 }
 
 func TestParser_Constants(t *testing.T) {

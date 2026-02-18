@@ -348,6 +348,11 @@ func (d *JPEGXSDepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte
 
 	// Process packet
 	frames, err := d.JPEGXSDepacketizer.Depacketize(packet)
+	if err != nil {
+		d.memController.ReleaseMemory(d.streamID, estimatedSize)
+		d.currentUsage -= estimatedSize
+		return nil, err
+	}
 
 	// If we got complete frames, release fragment memory
 	if len(frames) > 0 {
@@ -368,7 +373,7 @@ func (d *JPEGXSDepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte
 		d.currentUsage = 0
 	}
 
-	return frames, err
+	return frames, nil
 }
 
 // Reset clears the depacketizer state and releases memory

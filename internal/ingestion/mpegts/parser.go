@@ -130,13 +130,11 @@ func (p *Parser) ParseWithExtractor(data []byte, extractor ParameterSetExtractor
 
 		// **NEW: Extract parameter sets from PES packets**
 		if pkt.PayloadStart && pkt.PayloadExists {
-			if err := p.parsePESHeader(pkt); err == nil {
-				// Check if this PES packet contains parameter sets
-				if extractor != nil && pkt.PID == p.videoPID {
-					p.extractParameterSetsFromPES(pkt, extractor)
-				}
-				packets = append(packets, pkt)
+			_ = p.parsePESHeader(pkt) // Best-effort PES parsing
+			if extractor != nil && pkt.PID == p.videoPID {
+				p.extractParameterSetsFromPES(pkt, extractor)
 			}
+			packets = append(packets, pkt)
 		} else if pkt.PayloadExists {
 			// Continuation of PES packet - assemble complete PES
 			if extractor != nil && pkt.PID == p.videoPID {
@@ -728,14 +726,13 @@ func (p *Parser) extractH264ParameterSetsFromDescriptor(data []byte) [][]byte {
 		offset += 2
 
 		if offset+spsLength <= len(data) {
-			// Add NAL header (0x00 0x00 0x00 0x01 0x67) for H.264 SPS
-			spsWithHeader := make([]byte, 5+spsLength)
+			// Add start code prefix before SPS data (which already includes the NAL header byte)
+			spsWithHeader := make([]byte, 4+spsLength)
 			spsWithHeader[0] = 0x00
 			spsWithHeader[1] = 0x00
 			spsWithHeader[2] = 0x00
 			spsWithHeader[3] = 0x01
-			spsWithHeader[4] = 0x67 // H.264 SPS NAL header
-			copy(spsWithHeader[5:], data[offset:offset+spsLength])
+			copy(spsWithHeader[4:], data[offset:offset+spsLength])
 			parameterSets = append(parameterSets, spsWithHeader)
 			offset += spsLength
 		}
@@ -775,14 +772,13 @@ func (p *Parser) extractH264ParameterSetsFromDescriptor(data []byte) [][]byte {
 		offset += 2
 
 		if offset+ppsLength <= len(data) {
-			// Add NAL header (0x00 0x00 0x00 0x01 0x68) for H.264 PPS
-			ppsWithHeader := make([]byte, 5+ppsLength)
+			// Add start code prefix before PPS data (which already includes the NAL header byte)
+			ppsWithHeader := make([]byte, 4+ppsLength)
 			ppsWithHeader[0] = 0x00
 			ppsWithHeader[1] = 0x00
 			ppsWithHeader[2] = 0x00
 			ppsWithHeader[3] = 0x01
-			ppsWithHeader[4] = 0x68 // H.264 PPS NAL header
-			copy(ppsWithHeader[5:], data[offset:offset+ppsLength])
+			copy(ppsWithHeader[4:], data[offset:offset+ppsLength])
 			parameterSets = append(parameterSets, ppsWithHeader)
 			offset += ppsLength
 		}

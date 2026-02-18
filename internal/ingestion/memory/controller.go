@@ -275,7 +275,7 @@ func (c *Controller) evictMemory(targetSize int64) int64 {
 func (c *Controller) ResetStreamUsage(streamID string) {
 	if streamUsage, ok := c.streamUsage.LoadAndDelete(streamID); ok {
 		usage := streamUsage.(*atomic.Int64)
-		remaining := usage.Load()
+		remaining := usage.Swap(0) // Atomically zero AND get the old value
 		if remaining > 0 {
 			c.usage.Add(-remaining)
 		}

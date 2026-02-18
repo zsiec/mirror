@@ -490,6 +490,7 @@ func (b *Buffer) dropOldGOPs(count int, includeKeyframes bool) []*types.VideoFra
 				} else {
 					dropped = append(dropped, frame)
 					delete(b.frameIndex, frame.ID)
+					b.currentBytes -= int64(frame.TotalSize)
 				}
 			}
 

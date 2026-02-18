@@ -87,7 +87,7 @@ func (s *Session) GetDiagnostics() *SessionDiagnostics {
 		Duration:      now.Sub(s.firstPacketTime),
 		LastPacketAge: now.Sub(s.lastPacket),
 		PayloadType:   s.stats.LastPayloadType,
-		ClockRate:     s.GetClockRate(),
+		ClockRate:     s.getClockRateLocked(),
 	}
 
 	// Codec information
@@ -158,7 +158,7 @@ func (s *Session) GetDiagnostics() *SessionDiagnostics {
 	diag.RateLimitDrops = s.stats.RateLimitDrops
 
 	// State
-	if s.IsActive() {
+	if s.isActiveLocked() {
 		diag.State = "active"
 	} else {
 		diag.State = "inactive"

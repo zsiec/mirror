@@ -202,6 +202,8 @@ func (d *HEVCDetector) detectBoundariesWithStartCode(pkt *types.TimestampedPacke
 		if d.isVCLNAL(nalType) {
 			d.frameStarted = true
 		}
+
+		d.lastNALType = nalType
 	}
 
 	return isStart, isEnd

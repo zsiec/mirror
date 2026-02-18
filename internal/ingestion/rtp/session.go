@@ -462,6 +462,11 @@ func (s *Session) reportStats() {
 func (s *Session) IsActive() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.isActiveLocked()
+}
+
+// isActiveLocked checks if the session is active. The caller must hold at least s.mu.RLock().
+func (s *Session) isActiveLocked() bool {
 	timeout := s.timeout
 	if timeout == 0 {
 		timeout = 10 * time.Second // Default
@@ -500,7 +505,11 @@ func (s *Session) GetEncodingName() string {
 func (s *Session) GetClockRate() uint32 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.getClockRateLocked()
+}
 
+// getClockRateLocked returns the clock rate. The caller must hold at least s.mu.RLock().
+func (s *Session) getClockRateLocked() uint32 {
 	// Return detected clock rate if available (from SDP)
 	if s.detectedClockRate > 0 {
 		return s.detectedClockRate
@@ -582,26 +591,22 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 		return true
 
 	case CodecStateDetecting:
-		// Another goroutine is detecting - wait with timeout
-		done := make(chan struct{})
-		go func() {
-			for s.codecState == CodecStateDetecting {
-				s.detectionCond.Wait()
-			}
-			close(done)
-		}()
-
 		s.codecStateMu.Unlock()
-
-		// Wait up to 1 second for detection to complete
-		select {
-		case <-done:
-			s.codecStateMu.Lock()
-			result := s.codecState == CodecStateDetected
-			s.codecStateMu.Unlock()
-			return result
-		case <-time.After(time.Second):
-			return false // Timeout waiting for detection
+		// Wait for detection to complete with timeout
+		deadline := time.After(1 * time.Second)
+		for {
+			select {
+			case <-deadline:
+				return false // Timeout waiting for detection
+			case <-time.After(10 * time.Millisecond):
+				s.codecStateMu.Lock()
+				if s.codecState != CodecStateDetecting {
+					result := s.codecState == CodecStateDetected
+					s.codecStateMu.Unlock()
+					return result
+				}
+				s.codecStateMu.Unlock()
+			}
 		}
 
 	case CodecStateError, CodecStateTimeout:
