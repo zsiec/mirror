@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -41,7 +42,7 @@ func TestNewSmartRecoveryHandler(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	assert.NotNil(t, handler)
 	assert.NotNil(t, handler.idrDetector)
@@ -63,7 +64,7 @@ func TestSmartRecoveryHandler_ProcessFrame(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	// Process IDR frame
 	idrFrame := &types.VideoFrame{
@@ -100,7 +101,7 @@ func TestSmartRecoveryHandler_ErrorPatternAnalysis(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	// Simulate repeated errors for pattern detection
 	now := time.Now()
@@ -137,7 +138,7 @@ func TestSmartRecoveryHandler_FastRecovery(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	// Add frames to buffer including recovery points
 	handler.frameBuffer = []*types.VideoFrame{
@@ -175,7 +176,7 @@ func TestSmartRecoveryHandler_AdaptiveRecovery(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	// Set up IDR detector state
 	handler.idrDetector = frame.NewIDRDetector(types.CodecH264, testSmartLogger())
@@ -211,7 +212,7 @@ func TestSmartRecoveryHandler_PreemptiveRecovery(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	// Set up corruption scenario
 	handler.idrDetector.ReportCorruption()
@@ -231,7 +232,7 @@ func TestSmartRecoveryHandler_FrameQualityAssessment(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	tests := []struct {
 		name     string
@@ -300,7 +301,7 @@ func TestSmartRecoveryHandler_RecoveryPointSelection(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	points := []frame.RecoveryPoint{
 		{FrameNumber: 100, PTS: 1000, IsIDR: false, Confidence: 0.7},
@@ -333,7 +334,7 @@ func TestSmartRecoveryHandler_Statistics(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	// Set up some recovery history
 	handler.recoveryAttempts = 5
@@ -361,7 +362,7 @@ func TestSmartRecoveryHandler_MissingReferences(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	// Set up frame buffer
 	handler.frameBuffer = []*types.VideoFrame{
@@ -389,7 +390,7 @@ func TestSmartRecoveryHandler_UpdateRecoveryMetrics(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	// First recovery
 	handler.recoveryCount.Store(1)
@@ -424,7 +425,7 @@ func TestSmartRecoveryHandler_Integration(t *testing.T) {
 	}
 
 	gopBuffer := createTestGOPBuffer()
-	handler := NewSmartRecoveryHandler("test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
+	handler := NewSmartRecoveryHandler(context.Background(), "test-stream", config, gopBuffer, types.CodecH264, testSmartLogger())
 
 	// Set up callbacks
 	handler.SetCallbacks(

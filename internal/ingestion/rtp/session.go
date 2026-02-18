@@ -591,23 +591,28 @@ func (s *Session) handleCodecDetection(packet *rtp.Packet) bool {
 		return true
 
 	case CodecStateDetecting:
-		s.codecStateMu.Unlock()
-		// Wait for detection to complete with timeout
-		deadline := time.After(1 * time.Second)
-		for {
+		// Wait for detection to complete using condition variable with timeout
+		waitDone := make(chan struct{})
+		go func() {
+			time.Sleep(1 * time.Second)
+			s.detectionCond.Broadcast() // Wake up waiter on timeout
+			close(waitDone)
+		}()
+		for s.codecState == CodecStateDetecting {
+			s.detectionCond.Wait()
 			select {
-			case <-deadline:
-				return false // Timeout waiting for detection
-			case <-time.After(10 * time.Millisecond):
-				s.codecStateMu.Lock()
-				if s.codecState != CodecStateDetecting {
-					result := s.codecState == CodecStateDetected
+			case <-waitDone:
+				// Timeout elapsed - if still detecting, give up
+				if s.codecState == CodecStateDetecting {
 					s.codecStateMu.Unlock()
-					return result
+					return false
 				}
-				s.codecStateMu.Unlock()
+			default:
 			}
 		}
+		result := s.codecState == CodecStateDetected
+		s.codecStateMu.Unlock()
+		return result
 
 	case CodecStateError, CodecStateTimeout:
 		s.codecStateMu.Unlock()

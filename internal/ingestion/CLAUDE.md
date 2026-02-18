@@ -8,17 +8,17 @@ The ingestion system follows a layered architecture:
 
 ```
 Protocol Layer (SRT/RTP)
-    ↓
+    |
 Connection Adapter Layer
-    ↓
+    |
 Buffer Management Layer
-    ↓
+    |
 Video Processing Pipeline
     ├── Codec Detection
     ├── Frame Assembly
     ├── GOP Management
     └── A/V Synchronization
-    ↓
+    |
 Output Queue Layer
 ```
 
@@ -31,6 +31,7 @@ Central orchestrator for all ingestion operations:
 - Coordinates between components
 - Enforces connection limits
 - Provides system-wide statistics
+- Backpressure integration (`manager_backpressure.go`)
 
 ### Stream Handler (`stream_handler.go`)
 Manages individual stream processing:
@@ -40,177 +41,144 @@ Manages individual stream processing:
 - Provides per-stream statistics
 - Implements recovery mechanisms
 
-### Video Pipeline (`pipeline/video_pipeline.go`)
-Processes video data through stages:
-1. **Packet Input**: Receives raw packets from protocol layer
-2. **Frame Assembly**: Reconstructs complete frames
-3. **GOP Building**: Groups frames into GOPs
-4. **Output Queue**: Delivers processed data
+### Connection Adapters
+- `srt_connection_adapter.go`: Adapts SRT connections to common interface
+- `rtp_connection_adapter.go`: Adapts RTP connections to common interface
 
-## Protocol Implementations
+### Codec Detection (`codec_detection.go`)
+Automatic codec identification from raw packet data.
 
-### SRT (Secure Reliable Transport)
-- **Listener** (`srt/listener.go`): Accepts incoming SRT connections
-- **Connection** (`srt/connection.go`): Handles individual SRT streams
-- **Features**:
-  - MPEG-TS parsing
-  - Automatic stream ID extraction
-  - Bitrate monitoring
-  - Connection recovery
+## Subdirectories
 
-### RTP (Real-time Transport Protocol)
-- **Listener** (`rtp/listener.go`): UDP listener for RTP packets
-- **Session** (`rtp/session.go`): Manages RTP stream state
-- **Validator** (`rtp/validator.go`): Packet validation and sequencing
-- **Features**:
-  - SSRC-based stream identification
-  - Sequence number validation
-  - Jitter buffer management
-  - RTCP support (future)
+### Protocol Implementations
 
-## Video Processing Components
+#### SRT (`srt/`)
+- **Listener** (`listener.go`): Accepts incoming SRT connections
+- **Connection** (`connection.go`): Handles individual SRT streams
+- MPEG-TS parsing, stream ID extraction, bitrate monitoring, connection recovery
 
-### Buffer Management (`buffer/`)
-Provides efficient, video-aware buffering:
+#### RTP (`rtp/`)
+- **Listener** (`listener.go`): UDP listener for RTP packets
+- **Session** (`session.go`): Manages RTP stream state
+- **Validator** (`validator.go`): Packet validation and sequencing
+- SSRC-based stream identification, sequence number validation, jitter buffering
 
-#### Ring Buffer (`ring.go`)
-- Thread-safe circular buffer
-- Zero-copy operations where possible
-- Automatic size management
-- Bitrate calculation
+### Video Processing
 
-#### Sized Buffer (`sized.go`)
-- Size-limited buffer wrapper
-- Backpressure signaling
-- Overflow protection
+#### Buffer Management (`buffer/`)
+- Ring buffer (`ring.go`): Thread-safe circular buffer with bitrate calculation
+- Sized buffer (`sized.go`): Size-limited buffer with backpressure signaling
+- Buffer pool (`pool.go`): Reusable buffer allocation for reduced GC pressure
 
-#### Buffer Pool (`pool.go`)
-- Reusable buffer allocation
-- Memory efficiency
-- Reduced GC pressure
+#### Codec Support (`codec/`)
+Depacketizers for each supported codec:
+- **H.264/AVC**: NAL unit reassembly, STAP-A/FU-A handling
+- **H.265/HEVC**: NAL unit reassembly with layer support
+- **AV1**: OBU parsing and reassembly
+- **JPEG-XS**: Low-latency codec support
 
-### Codec Support (`codec/`)
-Handles multiple video codecs with automatic detection:
+#### Frame Assembly (`frame/`)
+- Frame assembler (`assembler.go`): Packet ordering, timeout handling, boundary detection
+- Codec-specific frame boundary detectors (NAL unit parsing, OBU parsing, marker bits)
 
-#### Supported Codecs
-- **H.264/AVC**: Most common, wide compatibility
-- **H.265/HEVC**: Higher efficiency, 4K/8K support
-- **AV1**: Next-gen codec, better compression
-- **JPEG-XS**: Low-latency, high-quality
+#### GOP Management (`gop/`)
+- GOP buffer (`buffer.go`): Complete GOPs in memory, indexed access, duration tracking
+- GOP detector (`detector.go`): Boundary detection, open/closed GOP handling
 
-#### Depacketizers
-Each codec has a specialized depacketizer:
-- Handles codec-specific packetization
-- Reconstructs access units
-- Extracts timing information
-- Preserves codec parameters
+#### A/V Synchronization (`sync/`)
+- Sync manager (`manager.go`): Multi-stream tracking, drift calculation, corrections
+- Track sync (`track_sync.go`): Per-track PTS/DTS handling, drift detection
 
-### Frame Assembly (`frame/`)
-Reconstructs complete frames from packets:
+#### Resolution Detection (`resolution/`)
+- Video resolution detection from bitstream analysis
+- H.264 SPS parsing (`h264_parser.go`) and HEVC SPS parsing (`hevc_parser.go`)
+- Exp-Golomb decoding (`golomb.go`)
 
-#### Frame Assembler (`assembler.go`)
-- Packet ordering and buffering
-- Timeout handling for missing packets
-- Frame boundary detection
-- Codec-agnostic interface
+#### MPEG-TS Parsing (`mpegts/`)
+- MPEG-TS packet parser for SRT streams
+- PES extraction, parameter set detection
+- Timestamp safety validation
 
-#### Frame Detectors
-Codec-specific frame boundary detection:
-- NAL unit parsing (H.264/HEVC)
-- OBU parsing (AV1)
-- Marker bit detection (JPEG-XS)
+#### Types (`types/`)
+Shared type definitions used across the ingestion system:
+- Codec types and detection (`codec.go`)
+- Frame types (`frame.go`, `simplified_frame.go`)
+- GOP types (`gop.go`)
+- Packet types (`packet.go`)
+- Parameter set management (`parameter_context.go`, `parameter_cache.go`, `parameter_validation.go`)
+- H.264 bitstream parsing (`h264_parser.go`, `rbsp.go`, `nal_header_fix.go`)
+- Encoder session tracking (`encoder_session.go`)
+- Rational number type for timebase math (`rational.go`)
 
-### GOP Management (`gop/`)
-Groups frames into GOPs for efficient processing:
+#### Validation (`validation/`)
+Stream integrity validation:
+- PES validation (`pes.go`)
+- PTS/DTS validation (`pts_dts_validator.go`)
+- Continuity counter checking (`continuity.go`)
+- Alignment validation (`alignment.go`)
+- Fragment validation (`fragment.go`)
 
-#### GOP Buffer (`buffer.go`)
-- Maintains complete GOPs in memory
-- Indexed frame access
-- Duration tracking
-- Smart frame dropping
+#### Timestamp Mapping (`timestamp/`)
+- Timestamp mapper for timebase conversion between protocols
 
-#### GOP Detector (`detector.go`)
-- Identifies GOP boundaries
-- Tracks GOP structure
-- Handles open/closed GOPs
+### Flow Control
 
-### A/V Synchronization (`sync/`)
-Ensures audio and video alignment:
-
-#### Sync Manager (`manager.go`)
-- Tracks multiple streams
-- Calculates drift
-- Applies corrections
-
-#### Track Sync (`track_sync.go`)
-- Per-track timing management
-- PTS/DTS handling
-- Drift detection algorithms
-
-#### Drift Correction
-- Threshold-based detection
-- Gradual correction
-- Frame dropping/duplication
-
-## Flow Control
-
-### Backpressure (`backpressure/`)
-Prevents system overload:
+#### Backpressure (`backpressure/`)
+Watermark-based backpressure control:
 - Monitor downstream capacity
 - Signal upstream to slow down
 - GOP-aware frame dropping
-- Maintains video quality
+- Configurable watermarks (25/50/75/90%)
 
-### Memory Management (`memory/`)
+#### Memory Management (`memory/`)
 Controls memory usage:
-- Global memory limits
-- Per-stream allocations
-- Memory pressure monitoring
-- Graceful degradation
+- Global memory limits (8GB default)
+- Per-stream allocations (400MB default)
+- Memory pressure monitoring and eviction
 
-### Rate Limiting (`ratelimit/`)
-Controls connection and bandwidth:
-- Connection rate limiting
-- Bandwidth throttling
-- Fair resource allocation
+#### Rate Limiting (`ratelimit/`)
+Connection and bandwidth rate limiting.
 
-## Error Handling and Recovery
+### Error Handling and Recovery
 
-### Recovery System (`recovery/`)
-Handles errors gracefully:
-- Automatic retry logic
-- Exponential backoff
-- State preservation
-- Metric tracking
+#### Recovery (`recovery/`)
+- Automatic retry with exponential backoff (`recovery.go`)
+- Smart recovery with state awareness (`smart_recovery.go`)
+- Stream-level recovery (`stream_recovery.go`)
+- Frame recovery (`frame_recovery.go`)
+- Adaptive quality degradation (`adaptive_quality.go`)
 
-### Reconnection (`reconnect/`)
-Manages connection failures:
-- Automatic reconnection
-- Configuration preservation
-- Seamless stream resumption
+#### Reconnection (`reconnect/`)
+Automatic reconnection with configuration preservation.
 
-## Metrics and Monitoring
+### Monitoring and Integrity
 
-The ingestion system provides comprehensive metrics:
+#### Monitoring (`monitoring/`)
+- Health monitor (`health_monitor.go`)
+- Alert definitions (`alerts.go`)
+- Corruption detection (`corruption_detector.go`)
+- Type definitions (`types.go`)
 
-### Stream Metrics
-- Active stream count
-- Packets/frames/GOPs processed
-- Bitrate (input/output)
-- Codec distribution
-- Error rates
+#### Integrity (`integrity/`)
+- Checksum validation (`checksum.go`)
+- Health scoring (`health_scorer.go`)
+- Stream validation (`stream_validator.go`)
 
-### Performance Metrics
-- Processing latency
-- Memory usage
-- CPU utilization
-- Queue depths
+#### Security (`security/`)
+- LEB128 parsing with safety limits (`leb128.go`)
+- Size limit enforcement (`limits.go`)
 
-### Quality Metrics
-- Frame drops
-- Sync drift
-- Recovery attempts
-- Connection stability
+#### Diagnostics (`diagnostics/`)
+Stream diagnostics (currently empty, placeholder for future use).
+
+### Pipeline (`pipeline/`)
+Video processing pipeline orchestration — coordinates the flow from packet input through frame assembly, GOP building, and output.
+
+### Test Support
+
+#### Test Data (`testdata/`)
+- Test helpers (`helpers.go`)
+- HEVC test data generator (`hevc_generator.go`)
 
 ## API Endpoints
 
@@ -235,79 +203,43 @@ The ingestion system provides comprehensive metrics:
 
 ## Configuration
 
-Key configuration parameters:
+Key configuration parameters (in `configs/default.yaml` under `ingestion:`):
 
 ```yaml
 ingestion:
-  srt_port: 30000              # SRT listener port
-  rtp_port: 5004               # RTP listener port
-  max_connections: 25          # Maximum concurrent streams
-  buffer_size: 1048576         # Ring buffer size (1MB)
-  gop_buffer_size: 3           # Number of GOPs to buffer
-  frame_timeout: 5s            # Frame assembly timeout
-  sync_threshold: 100ms        # A/V sync threshold
+  queue_dir: "/tmp/mirror/queue"
+  srt:
+    port: 1234
+    max_connections: 25
+    latency: 120ms
+    max_bandwidth: 52428800  # 50 Mbps
+  rtp:
+    port: 5004
+    max_sessions: 25
+    session_timeout: 10s
+  buffer:
+    ring_size: 4194304       # 4MB per stream
+    pool_size: 50
   memory:
-    global_limit: 8GB          # Total memory limit
-    per_stream_limit: 400MB    # Per-stream limit
+    max_total: 8589934592    # 8GB
+    max_per_stream: 419430400  # 400MB
+  stream_handling:
+    frame_assembly_timeout: 200ms
+    gop_buffer_size: 15
+    max_gop_age: 5s
+  backpressure:
+    low_watermark: 0.25
+    high_watermark: 0.75
+    critical_watermark: 0.9
 ```
 
 ## Testing
 
-The package includes comprehensive tests:
-
-### Unit Tests
-- Component isolation
-- Mock interfaces
-- Edge case coverage
-- Concurrent operations
-
-### Integration Tests
-- Protocol testing (SRT/RTP)
-- Pipeline validation
-- Memory limit enforcement
-- Recovery scenarios
-
-### Stress Tests
-- High packet rates
-- Memory pressure
-- Concurrent streams
-- Network failures
-
-## Best Practices
-
-### Stream Handling
-1. Always check stream state before operations
-2. Handle backpressure signals promptly
-3. Monitor memory usage continuously
-4. Log with stream context
-
-### Error Recovery
-1. Use exponential backoff for retries
-2. Preserve stream state during recovery
-3. Emit metrics for all failures
-4. Implement circuit breakers
-
-### Performance
-1. Use buffer pools for allocations
-2. Minimize lock contention
-3. Batch operations where possible
-4. Profile regularly
-
-## Future Enhancements
-
-### Protocol Support
-- WebRTC ingestion
-- RTMP fallback
-- Custom protocols
-
-### Video Features
-- B-frame reordering
-- Advanced sync algorithms
-- ML-based quality optimization
-- Real-time analytics
-
-### Scalability
-- Distributed ingestion
-- Stream migration
-- Load balancing
-- Horizontal scaling
+The package includes comprehensive tests at multiple levels:
+- Unit tests per component
+- Integration tests (`backpressure_integration_test.go`)
+- Race condition tests (`stream_handler_backpressure_race_test.go`, `frame_copy_race_test.go`)
+- Memory tests (`stream_handler_memory_test.go`)
+- Corruption tests (`stream_handler_corruption_test.go`)
+- PTS wraparound tests (`pts_wraparound_test.go`)
+- B-frame reordering tests (`srt_bframe_dts_test.go`, `srt_bframe_simple_test.go`)

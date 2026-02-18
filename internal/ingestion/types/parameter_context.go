@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/sirupsen/logrus"
 	"github.com/zsiec/mirror/internal/logger"
@@ -303,15 +304,9 @@ func (ctx *ParameterSetContext) AddSPS(data []byte) error {
 	// Check if cleanup is needed for memory management
 	ctx.checkAndPerformCleanup()
 
-	// Release the lock before doing expensive version creation
-	ctx.mu.Unlock()
-
 	if needsVersion && snapshot != nil {
 		ctx.versionManager.CreateVersionFromSnapshot(snapshot)
 	}
-
-	// Re-acquire lock to satisfy defer
-	ctx.mu.Lock()
 
 	return nil
 }
@@ -1511,18 +1506,29 @@ func (ctx *ParameterSetContext) GetCleanupStats() map[string]interface{} {
 	}
 }
 
-// CopyParameterSetsFrom copies all parameter sets from another context with bounds checking
-// Returns negative value on critical errors that should be logged/alerted
+// CopyParameterSetsFrom copies all parameter sets from another context with bounds checking.
+// Returns negative value on critical errors that should be logged/alerted.
+// Lock ordering: acquires locks by pointer address (lower first) to prevent deadlocks.
 func (ctx *ParameterSetContext) CopyParameterSetsFrom(sourceCtx *ParameterSetContext) int {
 	if sourceCtx == nil {
 		return 0
 	}
+	if ctx == sourceCtx {
+		return 0
+	}
 
-	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
-
-	sourceCtx.mu.RLock()
-	defer sourceCtx.mu.RUnlock()
+	// Acquire locks in consistent order by pointer address to prevent ABBA deadlocks
+	if uintptr(unsafe.Pointer(ctx)) < uintptr(unsafe.Pointer(sourceCtx)) {
+		ctx.mu.Lock()
+		defer ctx.mu.Unlock()
+		sourceCtx.mu.RLock()
+		defer sourceCtx.mu.RUnlock()
+	} else {
+		sourceCtx.mu.RLock()
+		defer sourceCtx.mu.RUnlock()
+		ctx.mu.Lock()
+		defer ctx.mu.Unlock()
+	}
 
 	// Check current size and enforce hard limits
 	currentTotal := len(ctx.spsMap) + len(ctx.ppsMap) + len(ctx.vpsMap) + len(ctx.hevcSpsMap) + len(ctx.hevcPpsMap)

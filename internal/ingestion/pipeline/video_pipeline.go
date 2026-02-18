@@ -40,6 +40,7 @@ type VideoPipeline struct {
 	sampledLogger *logger.SampledLogger
 	wg            sync.WaitGroup
 	closeOnce     sync.Once
+	flushDone     chan struct{} // signals processReorderedFrames has finished
 }
 
 // Config holds pipeline configuration
@@ -105,6 +106,7 @@ func NewVideoPipeline(ctx context.Context, cfg Config, input <-chan types.Timest
 		cancel:          cancel,
 		logger:          baseLogger,
 		sampledLogger:   sampledLogger,
+		flushDone:       make(chan struct{}),
 	}
 
 	return pipeline, nil
@@ -158,6 +160,14 @@ func (p *VideoPipeline) Stop() error {
 		} else {
 			p.logger.Debug("Frame assembler stopped successfully")
 		}
+	}
+
+	// Wait for processReorderedFrames to finish flushing before closing output
+	select {
+	case <-p.flushDone:
+		p.logger.Debug("Reorderer flush completed")
+	case <-time.After(2 * time.Second):
+		p.logger.Warn("Timeout waiting for reorderer flush")
 	}
 
 	p.closeOnce.Do(func() {
@@ -367,6 +377,7 @@ func (p *VideoPipeline) processFrames() {
 // processReorderedFrames handles flushing the reorderer on shutdown
 func (p *VideoPipeline) processReorderedFrames() {
 	defer p.wg.Done()
+	defer close(p.flushDone) // Signal that flushing is complete before Stop() closes output
 
 	// Wait for context cancellation
 	<-p.ctx.Done()
@@ -377,32 +388,22 @@ func (p *VideoPipeline) processReorderedFrames() {
 	p.logger.WithField("frames_to_flush", len(remainingFrames)).Debug("Flushing remaining frames from reorderer")
 
 	for i, frame := range remainingFrames {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					p.logger.WithFields(map[string]interface{}{
-						"frame_id": frame.ID,
-						"panic":    r,
-					}).Warn("Recovered from panic during frame flush (channel closed)")
-				}
-			}()
-			select {
-			case p.output <- frame:
-				p.framesOutput.Add(1)
-				p.framesReordered.Add(1)
-				p.logger.WithFields(map[string]interface{}{
-					"frame_index":  i + 1,
-					"total_frames": len(remainingFrames),
-					"frame_id":     frame.ID,
-				}).Debug("Successfully flushed frame during shutdown")
-			case <-time.After(100 * time.Millisecond):
-				p.logger.WithFields(map[string]interface{}{
-					"frame_id":       frame.ID,
-					"frames_dropped": len(remainingFrames) - i,
-				}).Warn("Timeout flushing frame during shutdown, dropping remaining frames")
-				return
-			}
-		}()
+		select {
+		case p.output <- frame:
+			p.framesOutput.Add(1)
+			p.framesReordered.Add(1)
+			p.logger.WithFields(map[string]interface{}{
+				"frame_index":  i + 1,
+				"total_frames": len(remainingFrames),
+				"frame_id":     frame.ID,
+			}).Debug("Successfully flushed frame during shutdown")
+		case <-time.After(100 * time.Millisecond):
+			p.logger.WithFields(map[string]interface{}{
+				"frame_id":       frame.ID,
+				"frames_dropped": len(remainingFrames) - i,
+			}).Warn("Timeout flushing frame during shutdown, dropping remaining frames")
+			return
+		}
 	}
 
 	p.logger.WithField("frames_flushed", len(remainingFrames)).Debug("All remaining frames flushed successfully")

@@ -678,10 +678,11 @@ func (h *StreamHandler) Stop() error {
 
 	h.cleanupRecentFrames()
 
-	// Release memory reservation
+	// Release memory reservation and clean up stream usage tracking
 	if h.memoryReserved > 0 {
 		h.memoryController.ReleaseMemory(h.streamID, h.memoryReserved)
 	}
+	h.memoryController.ResetStreamUsage(h.streamID)
 
 	h.cleanupBitrateWindow()
 

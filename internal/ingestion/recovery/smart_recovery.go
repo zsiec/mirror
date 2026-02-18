@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -35,6 +36,10 @@ type SmartRecoveryHandler struct {
 	frameBuffer []*types.VideoFrame
 	bufferSize  int
 
+	// Lifecycle management for background goroutines
+	ctx context.Context
+	wg  sync.WaitGroup
+
 	mu sync.RWMutex
 }
 
@@ -58,6 +63,7 @@ type SmartConfig struct {
 
 // NewSmartRecoveryHandler creates an enhanced recovery handler
 func NewSmartRecoveryHandler(
+	ctx context.Context,
 	streamID string,
 	config SmartConfig,
 	gopBuffer *gop.Buffer,
@@ -76,12 +82,18 @@ func NewSmartRecoveryHandler(
 		bufferSize:      config.FrameBufferSize,
 		frameBuffer:     make([]*types.VideoFrame, 0, config.FrameBufferSize),
 		errorHistory:    make([]ErrorEvent, 0, 100),
+		ctx:             ctx,
 	}
 
 	// Override base callbacks with smart versions
 	h.SetSmartCallbacks()
 
 	return h
+}
+
+// Stop waits for all background goroutines to finish
+func (h *SmartRecoveryHandler) Stop() {
+	h.wg.Wait()
 }
 
 // HandleError implements smart error recovery
@@ -226,6 +238,7 @@ func (h *SmartRecoveryHandler) applyAdaptiveRecovery(errorType ErrorType, detail
 	// If keyframe is coming soon, wait for it
 	if waitTime < 500*time.Millisecond {
 		h.logger.WithField("wait_time", waitTime).Info("Waiting for natural keyframe")
+		h.wg.Add(1)
 		go h.waitForKeyframeWithTimeout(waitTime + 100*time.Millisecond)
 		return nil
 	}
@@ -260,6 +273,7 @@ func (h *SmartRecoveryHandler) applyPreemptiveRecovery(errorType ErrorType, deta
 			h.logger.WithField("frame_number", upcomingRecovery.FrameNumber).
 				Info("Preparing for recovery at upcoming I-frame")
 			// Set up monitoring for this frame
+			h.wg.Add(1)
 			go h.monitorRecoveryPoint(upcomingRecovery)
 		}
 
@@ -467,32 +481,32 @@ func (h *SmartRecoveryHandler) requestKeyframeImmediate(reason string) error {
 }
 
 func (h *SmartRecoveryHandler) waitForKeyframeWithTimeout(timeout time.Duration) {
+	defer h.wg.Done()
+
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
 	startTime := time.Now()
 
-	select {
-	case <-timer.C:
-		// Timeout - escalate
-		h.logger.Warn("Keyframe wait timeout, escalating")
-		h.HandleError(ErrorTypeTimeout, "keyframe_timeout")
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
 
-	case <-time.After(50 * time.Millisecond):
-		// Check periodically
-		for {
+		case <-timer.C:
+			// Timeout - escalate
+			h.logger.Warn("Keyframe wait timeout, escalating")
+			h.UpdateRecoveryMetrics(time.Since(startTime), false)
+			h.HandleError(ErrorTypeTimeout, "keyframe_timeout")
+			return
+
+		case <-ticker.C:
 			if h.GetState() == StateNormal {
-				duration := time.Since(startTime)
-				h.UpdateRecoveryMetrics(duration, true)
+				h.UpdateRecoveryMetrics(time.Since(startTime), true)
 				return
-			}
-
-			select {
-			case <-timer.C:
-				h.UpdateRecoveryMetrics(time.Since(startTime), false)
-				return
-			case <-time.After(50 * time.Millisecond):
-				continue
 			}
 		}
 	}
@@ -516,6 +530,8 @@ func (h *SmartRecoveryHandler) findUpcomingRecoveryPoint() *frame.RecoveryPoint 
 }
 
 func (h *SmartRecoveryHandler) monitorRecoveryPoint(point *frame.RecoveryPoint) {
+	defer h.wg.Done()
+
 	// Monitor for the specific recovery frame
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
@@ -525,6 +541,9 @@ func (h *SmartRecoveryHandler) monitorRecoveryPoint(point *frame.RecoveryPoint) 
 
 	for {
 		select {
+		case <-h.ctx.Done():
+			return
+
 		case <-timeout.C:
 			h.logger.Warn("Recovery point monitoring timeout")
 			return

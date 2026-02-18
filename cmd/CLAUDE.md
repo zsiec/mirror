@@ -18,11 +18,11 @@ Key features:
 
 Usage:
 ```bash
-# Run with default config
+# Run with default config (port 443)
 ./mirror
 
-# Run with custom config
-./mirror -config configs/production.yaml
+# Run with development config (port 8443)
+./mirror -config configs/development.yaml
 
 # Run with environment overrides
 MIRROR_SERVER_HTTP3_PORT=8443 ./mirror
@@ -37,7 +37,7 @@ Features:
 - Response body and header display
 - JSON response pretty-printing
 
-Usage:
+Usage (port depends on config — 443 default, 8443 development):
 ```bash
 # Test health endpoint
 ./test-client -url https://localhost:8443/health
@@ -49,24 +49,24 @@ Usage:
 ./test-client -url https://localhost:8443/api/v1/streams
 ./test-client -url https://localhost:8443/api/v1/stats
 
-# Test metrics endpoint
-./test-client -url https://localhost:8443/metrics
+# Test metrics endpoint (HTTP, separate port)
+curl http://localhost:9090/metrics
 ```
 
 ## Building
 
-Both applications are built as static binaries for easy deployment:
+Both applications are built via the Makefile (which handles SRT environment setup):
 
 ```bash
-# Build both applications
+# Build main application (requires SRT library)
 make build
 
-# Build specific application
+# Build with version information (automatic via Makefile)
+# Version, git commit, and build time are injected via ldflags
+
+# Manual build (requires SRT env — use `source scripts/srt-env.sh` first)
 go build -o bin/mirror cmd/mirror/main.go
 go build -o bin/test-client cmd/test-client/main.go
-
-# Build with version information
-go build -ldflags "-X github.com/zsiec/mirror/pkg/version.Version=1.0.0" -o bin/mirror cmd/mirror/main.go
 ```
 
 ## Docker
@@ -83,17 +83,20 @@ docker-compose up -d
 
 ## Stream Testing
 
-To test stream ingestion:
+To test stream ingestion (ports depend on config — shown with development.yaml):
 
 ```bash
-# Send test stream via SRT
-ffmpeg -re -i test_video.mp4 -c copy -f mpegts srt://localhost:30000?streamid=test-stream
+# Send test stream via SRT (port 30000 in development, 1234 in default)
+ffmpeg -re -i test_video.mp4 -c copy -f mpegts "srt://localhost:30000?streamid=test-stream"
 
-# Send test stream via RTP
-ffmpeg -re -i test_video.mp4 -c copy -f rtp rtp://localhost:5004
+# Send test stream via RTP (port 15004 in development, 5004 in default)
+ffmpeg -re -i test_video.mp4 -c copy -f rtp rtp://localhost:15004
 
 # Check active streams
 ./test-client -url https://localhost:8443/api/v1/streams
+
+# Run full integration test with Rich dashboard
+make test-full-integration
 ```
 
 ## Future Applications

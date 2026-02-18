@@ -149,10 +149,12 @@ func (m *Manager) HandleStreamSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Send response
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		m.logger.WithError(err).Error("Failed to encode sync response")
+	// Send response - marshal first to avoid implicit WriteHeader(200) before error check
+	data, err := json.Marshal(response)
+	if err != nil {
 		writeError(r.Context(), w, http.StatusInternalServerError, "Failed to encode response", err)
+		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
 }

@@ -25,15 +25,6 @@ Stream Ingestion Service:
 - Comprehensive metrics and monitoring
 - Redis-based stream registry
 
-### phase-2-bugs-found.md
-Comprehensive bug analysis from implementation testing
-
-### phase-2-bug-analysis-summary.md
-Summary of critical bugs and their impact
-
-### phase-2-priority-fixes.md
-Prioritized list of bugs to fix before Phase 3
-
 ### phase-3.md
 Video Processing and Transcoding:
 - FFmpeg integration with go-astiav

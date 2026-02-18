@@ -11,13 +11,15 @@ import (
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	versionInfo := version.GetInfo()
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-
-	if err := json.NewEncoder(w).Encode(versionInfo); err != nil {
+	data, err := json.Marshal(versionInfo)
+	if err != nil {
 		s.logger.WithError(err).Error("Failed to encode version response")
 		s.errorHandler.HandleError(w, r, err)
+		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Write(data)
 }
 
 // handleStreamsPlaceholder is a placeholder for the streams endpoint when ingestion is not enabled
@@ -30,11 +32,14 @@ func (s *Server) handleStreamsPlaceholder(w http.ResponseWriter, r *http.Request
 		Phase:   "2",
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	data, err := json.Marshal(response)
+	if err != nil {
 		s.logger.WithError(err).Error("Failed to encode response")
 		s.errorHandler.HandleError(w, r, err)
+		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
 }
 
 // writeJSON is a helper to write JSON responses

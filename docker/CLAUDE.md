@@ -5,6 +5,32 @@ This directory contains Docker-related files for containerizing the Mirror appli
 ## Files
 
 ### Dockerfile
+Multi-stage Dockerfile optimized for production deployment.
+
+### Dockerfile.test
+Docker image for running tests in CI.
+
+### docker-compose.yml
+Development environment orchestration.
+
+### docker-compose.override.yml
+Local overrides (not checked in — create as needed).
+
+### prometheus.yml
+Prometheus scrape configuration.
+
+### nginx.conf
+Nginx configuration (for reverse proxy/load balancing scenarios).
+
+### srt-test/
+SRT test tooling for Docker-based stream testing.
+
+### logs/
+Log output directory for containerized runs.
+
+---
+
+### Dockerfile Details
 Multi-stage Dockerfile optimized for production deployment:
 - **Stage 1**: Build stage using Go 1.23 Alpine with CGO support
 - **Stage 2**: Runtime stage using NVIDIA CUDA base image
@@ -22,7 +48,7 @@ Key features:
   - 30000/udp (SRT stream ingestion)
   - 5004/udp (RTP stream ingestion)
 
-### docker-compose.yml
+### docker-compose.yml Details
 Development environment orchestration including:
 - Mirror application service
 - Redis for state management
@@ -158,10 +184,8 @@ The docker-compose setup creates a custom network for service communication:
 
 Use `docker-compose.override.yml` for local customizations:
 ```bash
-# Copy the example file
-cp docker/docker-compose.override.yml.example docker/docker-compose.override.yml
-
-# Edit as needed, then run normally
+# Create an override file (not checked in)
+# Edit docker/docker-compose.override.yml as needed, then run normally
 make docker-compose
 ```
 
