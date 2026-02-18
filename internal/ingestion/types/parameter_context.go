@@ -430,6 +430,154 @@ func (ctx *ParameterSetContext) AddPPS(data []byte) error {
 	return nil
 }
 
+// AddVPS adds an HEVC VPS parameter set
+func (ctx *ParameterSetContext) AddVPS(data []byte) error {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	if ctx.codec != CodecHEVC {
+		return fmt.Errorf("cannot add HEVC VPS to %s context", ctx.codec)
+	}
+
+	if len(data) < 4 {
+		return fmt.Errorf("VPS data too short: %d bytes", len(data))
+	}
+
+	// Extract VPS ID from NAL unit header
+	// HEVC VPS: after start code, NAL header is 2 bytes, then vps_video_parameter_set_id is 4 bits
+	nalStart := 0
+	if data[0] == 0x00 && data[1] == 0x00 {
+		if data[2] == 0x01 {
+			nalStart = 3
+		} else if data[2] == 0x00 && len(data) > 3 && data[3] == 0x01 {
+			nalStart = 4
+		}
+	}
+
+	if nalStart+2 >= len(data) {
+		return fmt.Errorf("VPS data too short after start code")
+	}
+
+	// VPS ID is the first 4 bits of the byte after the 2-byte NAL header
+	vpsID := uint8(0)
+	if nalStart+2 < len(data) {
+		vpsID = (data[nalStart+2] >> 4) & 0x0F
+	}
+
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+
+	ctx.vpsMap[vpsID] = &ParameterSet{
+		ID:       vpsID,
+		Data:     dataCopy,
+		ParsedAt: time.Now(),
+		Size:     len(data),
+		Valid:    true,
+	}
+	ctx.lastUpdated = time.Now()
+	ctx.lastParameterSetUpdate = time.Now()
+
+	return nil
+}
+
+// AddHEVCSPS adds an HEVC SPS parameter set
+func (ctx *ParameterSetContext) AddHEVCSPS(data []byte) error {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	if ctx.codec != CodecHEVC {
+		return fmt.Errorf("cannot add HEVC SPS to %s context", ctx.codec)
+	}
+
+	if len(data) < 4 {
+		return fmt.Errorf("HEVC SPS data too short: %d bytes", len(data))
+	}
+
+	// Find NAL unit start
+	nalStart := 0
+	if data[0] == 0x00 && data[1] == 0x00 {
+		if data[2] == 0x01 {
+			nalStart = 3
+		} else if data[2] == 0x00 && len(data) > 3 && data[3] == 0x01 {
+			nalStart = 4
+		}
+	}
+
+	if nalStart+2 >= len(data) {
+		return fmt.Errorf("HEVC SPS data too short after start code")
+	}
+
+	// SPS ID is in the first 4 bits of byte after 2-byte NAL header
+	spsID := uint8(0)
+	if nalStart+2 < len(data) {
+		spsID = (data[nalStart+2] >> 4) & 0x0F
+	}
+
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+
+	ctx.hevcSpsMap[spsID] = &ParameterSet{
+		ID:       spsID,
+		Data:     dataCopy,
+		ParsedAt: time.Now(),
+		Size:     len(data),
+		Valid:    true,
+	}
+	ctx.lastUpdated = time.Now()
+	ctx.lastParameterSetUpdate = time.Now()
+
+	return nil
+}
+
+// AddHEVCPPS adds an HEVC PPS parameter set
+func (ctx *ParameterSetContext) AddHEVCPPS(data []byte) error {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	if ctx.codec != CodecHEVC {
+		return fmt.Errorf("cannot add HEVC PPS to %s context", ctx.codec)
+	}
+
+	if len(data) < 4 {
+		return fmt.Errorf("HEVC PPS data too short: %d bytes", len(data))
+	}
+
+	// Find NAL unit start
+	nalStart := 0
+	if data[0] == 0x00 && data[1] == 0x00 {
+		if data[2] == 0x01 {
+			nalStart = 3
+		} else if data[2] == 0x00 && len(data) > 3 && data[3] == 0x01 {
+			nalStart = 4
+		}
+	}
+
+	if nalStart+2 >= len(data) {
+		return fmt.Errorf("HEVC PPS data too short after start code")
+	}
+
+	// PPS ID is in the first 6 bits of byte after 2-byte NAL header
+	ppsID := uint8(0)
+	if nalStart+2 < len(data) {
+		ppsID = (data[nalStart+2] >> 2) & 0x3F
+	}
+
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+
+	ctx.hevcPpsMap[ppsID] = &ParameterSet{
+		ID:       ppsID,
+		Data:     dataCopy,
+		ParsedAt: time.Now(),
+		Size:     len(data),
+		Valid:    true,
+	}
+	ctx.lastUpdated = time.Now()
+	ctx.lastParameterSetUpdate = time.Now()
+
+	return nil
+}
+
 // GetDecodingRequirements analyzes a frame to determine its parameter set needs
 func (ctx *ParameterSetContext) GetDecodingRequirements(frame *VideoFrame) (*FrameDecodingRequirements, error) {
 	if len(frame.NALUnits) == 0 {

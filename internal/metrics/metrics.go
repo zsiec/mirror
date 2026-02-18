@@ -5,8 +5,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+// NOTE: Per-stream metrics (keyed by stream_id) are intentionally excluded from
+// Prometheus to avoid unbounded cardinality. Each new stream would create new
+// time series that are never cleaned up, leading to a "cardinality bomb."
+//
+// For per-stream operational visibility, use structured logging or a separate
+// metrics backend (e.g., an in-memory map exposed via a custom API endpoint)
+// that supports stream lifecycle cleanup.
+
 var (
-	// Stream ingestion metrics
+	// Stream ingestion metrics (aggregate, no per-stream breakdown)
 	streamsActiveTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "stream_ingestion_active_total",
 		Help: "Number of active ingestion streams",
@@ -14,93 +22,53 @@ var (
 
 	streamBytesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "stream_ingestion_bytes_total",
-		Help: "Total bytes received per stream",
-	}, []string{"stream_id", "protocol"})
+		Help: "Total bytes received across all streams",
+	}, []string{"protocol"})
 
 	streamPacketsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "stream_ingestion_packets_total",
-		Help: "Total packets received per stream",
-	}, []string{"stream_id", "protocol"})
+		Help: "Total packets received across all streams",
+	}, []string{"protocol"})
 
 	streamPacketsLostTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "stream_ingestion_packets_lost_total",
-		Help: "Total packets lost per stream",
-	}, []string{"stream_id", "protocol"})
+		Help: "Total packets lost across all streams",
+	}, []string{"protocol"})
 
 	streamErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "stream_ingestion_errors_total",
-		Help: "Total errors per stream",
-	}, []string{"stream_id", "error_type", "protocol"})
+		Help: "Total errors across all streams",
+	}, []string{"error_type", "protocol"})
 
-	streamBitrate = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "stream_ingestion_bitrate",
-		Help: "Current bitrate in bits per second",
-	}, []string{"stream_id", "protocol"})
-
-	// Connection metrics
+	// Connection metrics (aggregate)
 	connectionDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "connection_duration_seconds",
 		Help:    "Connection duration in seconds",
 		Buckets: prometheus.ExponentialBuckets(1, 2, 15), // 1s to ~16k seconds
-	}, []string{"stream_id", "protocol"})
+	}, []string{"protocol"})
 
 	connectionReconnectsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "connection_reconnects_total",
 		Help: "Total number of reconnection attempts",
-	}, []string{"stream_id", "protocol"})
+	}, []string{"protocol"})
 
-	// SRT specific metrics
-	srtLatency = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "srt_latency_milliseconds",
-		Help: "SRT connection latency in milliseconds",
-	}, []string{"stream_id"})
-
-	srtRTT = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "srt_rtt_milliseconds",
-		Help: "SRT round-trip time in milliseconds",
-	}, []string{"stream_id"})
-
-	srtPacketsLost = promauto.NewCounterVec(prometheus.CounterOpts{
+	// SRT specific metrics (aggregate, no per-stream breakdown)
+	srtPacketsLost = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "srt_packets_lost_total",
 		Help: "Total SRT packets lost (receiver side)",
-	}, []string{"stream_id"})
+	})
 
-	srtPacketsDropped = promauto.NewCounterVec(prometheus.CounterOpts{
+	srtPacketsDropped = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "srt_packets_dropped_total",
 		Help: "Total SRT packets dropped (too late to play)",
-	}, []string{"stream_id"})
+	})
 
-	srtPacketsRetransmitted = promauto.NewCounterVec(prometheus.CounterOpts{
+	srtPacketsRetransmitted = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "srt_packets_retransmitted_total",
 		Help: "Total SRT packets retransmitted",
-	}, []string{"stream_id"})
-
-	srtFlightSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "srt_flight_size_packets",
-		Help: "SRT packets currently in flight",
-	}, []string{"stream_id"})
-
-	srtReceiveRateMbps = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "srt_receive_rate_mbps",
-		Help: "SRT receive rate in megabits per second",
-	}, []string{"stream_id"})
-
-	srtBandwidthMbps = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "srt_bandwidth_mbps",
-		Help: "SRT estimated link bandwidth in megabits per second",
-	}, []string{"stream_id"})
-
-	srtAvailableRcvBuf = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "srt_available_rcv_buffer_bytes",
-		Help: "SRT available receiver buffer in bytes",
-	}, []string{"stream_id"})
+	})
 
 	// RTP specific metrics
-	rtpJitter = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "rtp_jitter_milliseconds",
-		Help: "RTP stream jitter in milliseconds",
-	}, []string{"stream_id"})
-
 	rtpSessionsActive = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "rtp_sessions_active_total",
 		Help: "Number of active RTP sessions",
@@ -144,17 +112,20 @@ var (
 	}, []string{"component"})
 )
 
-// UpdateStreamMetrics updates metrics for a stream
+// UpdateStreamMetrics updates aggregate metrics for stream ingestion.
+// The streamID parameter is accepted for caller convenience but is not used
+// as a Prometheus label to avoid unbounded cardinality.
 func UpdateStreamMetrics(streamID string, protocol string, bytesReceived, packetsReceived, packetsLost int64, bitrate float64) {
-	streamBytesTotal.WithLabelValues(streamID, protocol).Add(float64(bytesReceived))
-	streamPacketsTotal.WithLabelValues(streamID, protocol).Add(float64(packetsReceived))
-	streamPacketsLostTotal.WithLabelValues(streamID, protocol).Add(float64(packetsLost))
-	streamBitrate.WithLabelValues(streamID, protocol).Set(bitrate)
+	streamBytesTotal.WithLabelValues(protocol).Add(float64(bytesReceived))
+	streamPacketsTotal.WithLabelValues(protocol).Add(float64(packetsReceived))
+	streamPacketsLostTotal.WithLabelValues(protocol).Add(float64(packetsLost))
 }
 
-// IncrementStreamError increments the error counter for a stream
+// IncrementStreamError increments the error counter for a stream.
+// The streamID parameter is accepted for caller convenience but is not used
+// as a Prometheus label to avoid unbounded cardinality.
 func IncrementStreamError(streamID, errorType, protocol string) {
-	streamErrorsTotal.WithLabelValues(streamID, errorType, protocol).Inc()
+	streamErrorsTotal.WithLabelValues(errorType, protocol).Inc()
 }
 
 // SetActiveStreams sets the number of active streams for a protocol
@@ -162,24 +133,32 @@ func SetActiveStreams(protocol string, count int) {
 	streamsActiveTotal.WithLabelValues(protocol).Set(float64(count))
 }
 
-// RecordConnectionDuration records the duration of a connection
+// RecordConnectionDuration records the duration of a connection.
+// The streamID parameter is accepted for caller convenience but is not used
+// as a Prometheus label to avoid unbounded cardinality.
 func RecordConnectionDuration(streamID, protocol string, duration float64) {
-	connectionDuration.WithLabelValues(streamID, protocol).Observe(duration)
+	connectionDuration.WithLabelValues(protocol).Observe(duration)
 }
 
-// IncrementReconnects increments the reconnection counter
+// IncrementReconnects increments the reconnection counter.
+// The streamID parameter is accepted for caller convenience but is not used
+// as a Prometheus label to avoid unbounded cardinality.
 func IncrementReconnects(streamID, protocol string) {
-	connectionReconnectsTotal.WithLabelValues(streamID, protocol).Inc()
+	connectionReconnectsTotal.WithLabelValues(protocol).Inc()
 }
 
-// SetSRTLatency sets the SRT connection latency
+// SetSRTLatency is a no-op; per-stream SRT latency is not tracked in Prometheus
+// to avoid unbounded cardinality. Use structured logging for per-stream diagnostics.
 func SetSRTLatency(streamID string, latencyMs float64) {
-	srtLatency.WithLabelValues(streamID).Set(latencyMs)
+	// Per-stream gauge removed to avoid cardinality bomb.
+	// Use structured logging for per-stream SRT latency.
 }
 
-// SetRTPJitter sets the RTP stream jitter
+// SetRTPJitter is a no-op; per-stream RTP jitter is not tracked in Prometheus
+// to avoid unbounded cardinality. Use structured logging for per-stream diagnostics.
 func SetRTPJitter(streamID string, jitterMs float64) {
-	rtpJitter.WithLabelValues(streamID).Set(jitterMs)
+	// Per-stream gauge removed to avoid cardinality bomb.
+	// Use structured logging for per-stream RTP jitter.
 }
 
 // SetActiveRTPSessions sets the number of active RTP sessions
@@ -217,14 +196,14 @@ func IncrementContextCancellation(component, reason string) {
 	contextCancellations.WithLabelValues(component, reason).Inc()
 }
 
-// UpdateSRTBytesReceived updates the SRT bytes received counter
+// UpdateSRTBytesReceived updates the SRT bytes received counter (aggregate)
 func UpdateSRTBytesReceived(streamID string, bytes int64) {
-	streamBytesTotal.WithLabelValues(streamID, "srt_recv").Add(float64(bytes))
+	streamBytesTotal.WithLabelValues("srt").Add(float64(bytes))
 }
 
-// UpdateSRTBytesSent updates the SRT bytes sent counter
+// UpdateSRTBytesSent updates the SRT bytes sent counter (aggregate)
 func UpdateSRTBytesSent(streamID string, bytes int64) {
-	streamBytesTotal.WithLabelValues(streamID, "srt_send").Add(float64(bytes))
+	streamBytesTotal.WithLabelValues("srt_send").Add(float64(bytes))
 }
 
 // IncrementSRTConnections increments the SRT connection counter
@@ -237,21 +216,23 @@ func DecrementSRTConnections() {
 	streamsActiveTotal.WithLabelValues("srt").Dec()
 }
 
-// UpdateSRTStats updates all SRT-specific gauges for a stream.
+// UpdateSRTStats updates aggregate SRT-specific counters.
+// The streamID parameter is accepted for caller convenience but is not used
+// as a Prometheus label to avoid unbounded cardinality.
 // Counters (lost, dropped, retransmitted) expect deltas, not cumulative values.
+// Per-stream gauges (RTT, flight size, receive rate, bandwidth, available buffer)
+// have been removed to avoid cardinality issues; use structured logging instead.
 func UpdateSRTStats(streamID string, rttMs float64, packetsLostDelta, packetsDroppedDelta, packetsRetransDelta int64, flightSize int, receiveRateMbps, bandwidthMbps float64, availRcvBuf int) {
-	srtRTT.WithLabelValues(streamID).Set(rttMs)
 	if packetsLostDelta > 0 {
-		srtPacketsLost.WithLabelValues(streamID).Add(float64(packetsLostDelta))
+		srtPacketsLost.Add(float64(packetsLostDelta))
 	}
 	if packetsDroppedDelta > 0 {
-		srtPacketsDropped.WithLabelValues(streamID).Add(float64(packetsDroppedDelta))
+		srtPacketsDropped.Add(float64(packetsDroppedDelta))
 	}
 	if packetsRetransDelta > 0 {
-		srtPacketsRetransmitted.WithLabelValues(streamID).Add(float64(packetsRetransDelta))
+		srtPacketsRetransmitted.Add(float64(packetsRetransDelta))
 	}
-	srtFlightSize.WithLabelValues(streamID).Set(float64(flightSize))
-	srtReceiveRateMbps.WithLabelValues(streamID).Set(receiveRateMbps)
-	srtBandwidthMbps.WithLabelValues(streamID).Set(bandwidthMbps)
-	srtAvailableRcvBuf.WithLabelValues(streamID).Set(float64(availRcvBuf))
+	// Per-stream gauges (RTT, flight size, receive rate, bandwidth, rcv buffer)
+	// are intentionally not tracked in Prometheus to avoid cardinality bomb.
+	// Use structured logging for per-stream SRT diagnostics.
 }

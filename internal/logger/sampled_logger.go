@@ -12,7 +12,7 @@ import (
 type SampledLogger struct {
 	base          Logger
 	samplers      map[string]*LogSampler
-	samplersMutex sync.RWMutex
+	samplersMutex *sync.RWMutex
 }
 
 // LogSampler handles sampling for a specific log category
@@ -37,8 +37,9 @@ type LogSampler struct {
 // NewSampledLogger creates a new sampled logger
 func NewSampledLogger(base Logger) *SampledLogger {
 	return &SampledLogger{
-		base:     base,
-		samplers: make(map[string]*LogSampler),
+		base:          base,
+		samplers:      make(map[string]*LogSampler),
+		samplersMutex: &sync.RWMutex{},
 	}
 }
 
@@ -251,22 +252,25 @@ func NewVideoLogger(base Logger) *SampledLogger {
 // Implement Logger interface for SampledLogger
 func (s *SampledLogger) WithFields(fields map[string]interface{}) Logger {
 	return &SampledLogger{
-		base:     s.base.WithFields(fields),
-		samplers: s.samplers,
+		base:          s.base.WithFields(fields),
+		samplers:      s.samplers,
+		samplersMutex: s.samplersMutex,
 	}
 }
 
 func (s *SampledLogger) WithField(key string, value interface{}) Logger {
 	return &SampledLogger{
-		base:     s.base.WithField(key, value),
-		samplers: s.samplers,
+		base:          s.base.WithField(key, value),
+		samplers:      s.samplers,
+		samplersMutex: s.samplersMutex,
 	}
 }
 
 func (s *SampledLogger) WithError(err error) Logger {
 	return &SampledLogger{
-		base:     s.base.WithError(err),
-		samplers: s.samplers,
+		base:          s.base.WithError(err),
+		samplers:      s.samplers,
+		samplersMutex: s.samplersMutex,
 	}
 }
 

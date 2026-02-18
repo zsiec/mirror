@@ -6,7 +6,19 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/sirupsen/logrus"
 	"github.com/zsiec/mirror/internal/ingestion/memory"
+)
+
+// Bitrate validation constants
+const (
+	// maxBitrate is the maximum allowed bitrate (1 Gbps). Any bitrate above
+	// this is capped to prevent unbounded memory allocation.
+	maxBitrate int64 = 1_000_000_000
+
+	// minBitrate is the minimum allowed bitrate (1 Kbps). Bitrates below
+	// this are likely erroneous.
+	minBitrate int64 = 1_000
 )
 
 // ProperSizedBuffer is a properly sized buffer implementation with memory sections
@@ -47,6 +59,22 @@ type ProperSizedBuffer struct {
 
 // NewProperSizedBuffer creates a new properly sized buffer based on bitrate
 func NewProperSizedBuffer(streamID string, bitrate int64, memCtrl *memory.Controller) (*ProperSizedBuffer, error) {
+	// Validate and cap bitrate to prevent unbounded allocation
+	if bitrate <= 0 {
+		return nil, fmt.Errorf("invalid bitrate %d: must be positive", bitrate)
+	}
+	if bitrate < minBitrate {
+		return nil, fmt.Errorf("invalid bitrate %d: below minimum %d bps", bitrate, minBitrate)
+	}
+	if bitrate > maxBitrate {
+		logrus.WithFields(logrus.Fields{
+			"stream_id":         streamID,
+			"requested_bitrate": bitrate,
+			"capped_bitrate":    maxBitrate,
+		}).Warn("Bitrate exceeds maximum, capping to limit")
+		bitrate = maxBitrate
+	}
+
 	// Calculate proper size: 30 seconds at bitrate
 	totalSeconds := 30
 	bytesPerSecond := bitrate / 8

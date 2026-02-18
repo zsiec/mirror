@@ -10,62 +10,53 @@ import (
 )
 
 func TestUpdateStreamMetrics(t *testing.T) {
-	// Test updating stream metrics
-	streamID := "test-stream-1"
 	protocol := "srt"
 
-	// Initial metrics update
-	UpdateStreamMetrics(streamID, protocol, 1024, 100, 5, 5000.0)
+	// Get initial values
+	initialBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(protocol))
+	initialPackets := testutil.ToFloat64(streamPacketsTotal.WithLabelValues(protocol))
+	initialLost := testutil.ToFloat64(streamPacketsLostTotal.WithLabelValues(protocol))
+
+	// Initial metrics update (streamID is ignored for Prometheus labels)
+	UpdateStreamMetrics("test-stream-1", protocol, 1024, 100, 5, 5000.0)
 
 	// Verify bytes counter
-	bytesCounter := streamBytesTotal.WithLabelValues(streamID, protocol)
-	assert.Equal(t, float64(1024), testutil.ToFloat64(bytesCounter))
+	assert.Equal(t, initialBytes+float64(1024), testutil.ToFloat64(streamBytesTotal.WithLabelValues(protocol)))
 
 	// Verify packets counter
-	packetsCounter := streamPacketsTotal.WithLabelValues(streamID, protocol)
-	assert.Equal(t, float64(100), testutil.ToFloat64(packetsCounter))
+	assert.Equal(t, initialPackets+float64(100), testutil.ToFloat64(streamPacketsTotal.WithLabelValues(protocol)))
 
 	// Verify lost packets counter
-	lostCounter := streamPacketsLostTotal.WithLabelValues(streamID, protocol)
-	assert.Equal(t, float64(5), testutil.ToFloat64(lostCounter))
-
-	// Verify bitrate gauge
-	bitrateGauge := streamBitrate.WithLabelValues(streamID, protocol)
-	assert.Equal(t, float64(5000), testutil.ToFloat64(bitrateGauge))
+	assert.Equal(t, initialLost+float64(5), testutil.ToFloat64(streamPacketsLostTotal.WithLabelValues(protocol)))
 
 	// Update metrics again to test accumulation
-	UpdateStreamMetrics(streamID, protocol, 2048, 200, 10, 6000.0)
+	UpdateStreamMetrics("test-stream-1", protocol, 2048, 200, 10, 6000.0)
 
 	// Counters should accumulate
-	assert.Equal(t, float64(3072), testutil.ToFloat64(bytesCounter))
-	assert.Equal(t, float64(300), testutil.ToFloat64(packetsCounter))
-	assert.Equal(t, float64(15), testutil.ToFloat64(lostCounter))
-
-	// Gauge should be set to new value
-	assert.Equal(t, float64(6000), testutil.ToFloat64(bitrateGauge))
+	assert.Equal(t, initialBytes+float64(3072), testutil.ToFloat64(streamBytesTotal.WithLabelValues(protocol)))
+	assert.Equal(t, initialPackets+float64(300), testutil.ToFloat64(streamPacketsTotal.WithLabelValues(protocol)))
+	assert.Equal(t, initialLost+float64(15), testutil.ToFloat64(streamPacketsLostTotal.WithLabelValues(protocol)))
 }
 
 func TestIncrementStreamError(t *testing.T) {
-	streamID := "test-stream-2"
 	errorType := "decode_error"
 	protocol := "rtp"
 
 	// Get initial value
-	errorCounter := streamErrorsTotal.WithLabelValues(streamID, errorType, protocol)
-	initialValue := testutil.ToFloat64(errorCounter)
+	initialValue := testutil.ToFloat64(streamErrorsTotal.WithLabelValues(errorType, protocol))
 
-	// Increment error
-	IncrementStreamError(streamID, errorType, protocol)
+	// Increment error (streamID is not used as a label)
+	IncrementStreamError("test-stream-2", errorType, protocol)
 
 	// Verify increment
-	assert.Equal(t, initialValue+1, testutil.ToFloat64(errorCounter))
+	assert.Equal(t, initialValue+1, testutil.ToFloat64(streamErrorsTotal.WithLabelValues(errorType, protocol)))
 
 	// Increment multiple times
-	IncrementStreamError(streamID, errorType, protocol)
-	IncrementStreamError(streamID, errorType, protocol)
+	IncrementStreamError("test-stream-2", errorType, protocol)
+	IncrementStreamError("test-stream-2", errorType, protocol)
 
 	// Verify total increments
-	assert.Equal(t, initialValue+3, testutil.ToFloat64(errorCounter))
+	assert.Equal(t, initialValue+3, testutil.ToFloat64(streamErrorsTotal.WithLabelValues(errorType, protocol)))
 }
 
 func TestSetActiveStreams(t *testing.T) {
@@ -88,75 +79,57 @@ func TestSetActiveStreams(t *testing.T) {
 }
 
 func TestRecordConnectionDuration(t *testing.T) {
-	streamID := "test-stream-3"
 	protocol := "srt"
 
-	// Record multiple durations
+	// Record multiple durations (streamID is ignored for Prometheus labels)
 	durations := []float64{10.5, 30.2, 60.0, 120.5, 300.0}
 
 	for _, duration := range durations {
-		RecordConnectionDuration(streamID, protocol, duration)
+		RecordConnectionDuration("test-stream-3", protocol, duration)
 	}
 
 	// Get histogram
-	histogram := connectionDuration.WithLabelValues(streamID, protocol).(prometheus.Histogram)
+	histogram := connectionDuration.WithLabelValues(protocol).(prometheus.Histogram)
 
 	// Create a DTO to inspect the histogram
 	var dto dto.Metric
 	histogram.Write(&dto)
 
-	// Verify count
-	assert.Equal(t, uint64(len(durations)), dto.Histogram.GetSampleCount())
-
-	// Verify sum is correct
-	expectedSum := 0.0
-	for _, d := range durations {
-		expectedSum += d
-	}
-	assert.InDelta(t, expectedSum, dto.Histogram.GetSampleSum(), 0.01)
+	// Verify count includes our observations (may include others from parallel tests)
+	assert.GreaterOrEqual(t, dto.Histogram.GetSampleCount(), uint64(len(durations)))
 }
 
 func TestIncrementReconnects(t *testing.T) {
-	streamID := "test-stream-4"
 	protocol := "rtp"
 
 	// Get counter
-	reconnectCounter := connectionReconnectsTotal.WithLabelValues(streamID, protocol)
-	initialValue := testutil.ToFloat64(reconnectCounter)
+	initialValue := testutil.ToFloat64(connectionReconnectsTotal.WithLabelValues(protocol))
 
-	// Increment reconnects
-	IncrementReconnects(streamID, protocol)
-	assert.Equal(t, initialValue+1, testutil.ToFloat64(reconnectCounter))
+	// Increment reconnects (streamID is ignored for Prometheus labels)
+	IncrementReconnects("test-stream-4", protocol)
+	assert.Equal(t, initialValue+1, testutil.ToFloat64(connectionReconnectsTotal.WithLabelValues(protocol)))
 
 	// Increment multiple times
 	for i := 0; i < 5; i++ {
-		IncrementReconnects(streamID, protocol)
+		IncrementReconnects("test-stream-4", protocol)
 	}
-	assert.Equal(t, initialValue+6, testutil.ToFloat64(reconnectCounter))
+	assert.Equal(t, initialValue+6, testutil.ToFloat64(connectionReconnectsTotal.WithLabelValues(protocol)))
 }
 
-func TestSetSRTLatency(t *testing.T) {
-	streamID := "test-srt-stream"
-	latencies := []float64{20.5, 30.0, 25.5, 40.0}
-
-	for _, latency := range latencies {
-		SetSRTLatency(streamID, latency)
-
-		gauge := srtLatency.WithLabelValues(streamID)
-		assert.Equal(t, latency, testutil.ToFloat64(gauge))
-	}
+func TestSetSRTLatency_NoOp(t *testing.T) {
+	// SetSRTLatency is now a no-op; verify it does not panic
+	assert.NotPanics(t, func() {
+		SetSRTLatency("test-srt-stream", 20.5)
+		SetSRTLatency("test-srt-stream", 30.0)
+	})
 }
 
-func TestSetRTPJitter(t *testing.T) {
-	streamID := "test-rtp-stream"
-	jitters := []float64{5.5, 10.0, 7.5, 12.0}
-
-	for _, jitter := range jitters {
-		SetRTPJitter(streamID, jitter)
-
-		gauge := rtpJitter.WithLabelValues(streamID)
-		assert.Equal(t, jitter, testutil.ToFloat64(gauge))
-	}
+func TestSetRTPJitter_NoOp(t *testing.T) {
+	// SetRTPJitter is now a no-op; verify it does not panic
+	assert.NotPanics(t, func() {
+		SetRTPJitter("test-rtp-stream", 5.5)
+		SetRTPJitter("test-rtp-stream", 10.0)
+	})
 }
 
 func TestSetActiveRTPSessions(t *testing.T) {
@@ -168,56 +141,42 @@ func TestSetActiveRTPSessions(t *testing.T) {
 	}
 }
 
-func TestMultipleStreamsMetrics(t *testing.T) {
-	// Test that metrics work correctly with multiple streams
-	streams := []struct {
-		id       string
-		protocol string
-		bytes    int64
-		packets  int64
-		lost     int64
-		bitrate  float64
-	}{
-		{"stream-a", "srt", 1000, 100, 2, 5000},
-		{"stream-b", "srt", 2000, 200, 5, 6000},
-		{"stream-c", "rtp", 3000, 300, 8, 7000},
-		{"stream-d", "rtp", 4000, 400, 10, 8000},
-	}
+func TestMultipleStreamsMetrics_Aggregate(t *testing.T) {
+	// Test that metrics from multiple streams are aggregated by protocol
+	protocol := "test_agg"
 
-	// Update metrics for all streams
-	for _, s := range streams {
-		UpdateStreamMetrics(s.id, s.protocol, s.bytes, s.packets, s.lost, s.bitrate)
-	}
+	initialBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(protocol))
+	initialPackets := testutil.ToFloat64(streamPacketsTotal.WithLabelValues(protocol))
+	initialLost := testutil.ToFloat64(streamPacketsLostTotal.WithLabelValues(protocol))
 
-	// Verify each stream has independent metrics
-	for _, s := range streams {
-		bytesCounter := streamBytesTotal.WithLabelValues(s.id, s.protocol)
-		assert.Equal(t, float64(s.bytes), testutil.ToFloat64(bytesCounter))
+	// Update metrics for multiple streams — all aggregate under the same protocol
+	UpdateStreamMetrics("stream-a", protocol, 1000, 100, 2, 5000)
+	UpdateStreamMetrics("stream-b", protocol, 2000, 200, 5, 6000)
+	UpdateStreamMetrics("stream-c", protocol, 3000, 300, 8, 7000)
 
-		packetsCounter := streamPacketsTotal.WithLabelValues(s.id, s.protocol)
-		assert.Equal(t, float64(s.packets), testutil.ToFloat64(packetsCounter))
-
-		lostCounter := streamPacketsLostTotal.WithLabelValues(s.id, s.protocol)
-		assert.Equal(t, float64(s.lost), testutil.ToFloat64(lostCounter))
-
-		bitrateGauge := streamBitrate.WithLabelValues(s.id, s.protocol)
-		assert.Equal(t, s.bitrate, testutil.ToFloat64(bitrateGauge))
-	}
+	// Verify aggregate totals
+	assert.Equal(t, initialBytes+float64(6000), testutil.ToFloat64(streamBytesTotal.WithLabelValues(protocol)))
+	assert.Equal(t, initialPackets+float64(600), testutil.ToFloat64(streamPacketsTotal.WithLabelValues(protocol)))
+	assert.Equal(t, initialLost+float64(15), testutil.ToFloat64(streamPacketsLostTotal.WithLabelValues(protocol)))
 }
 
 func TestConcurrentMetricsUpdates(t *testing.T) {
 	// Test that metrics are thread-safe
-	streamID := "concurrent-stream"
-	protocol := "srt"
+	protocol := "concurrent_test"
+
+	initialBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(protocol))
+	initialPackets := testutil.ToFloat64(streamPacketsTotal.WithLabelValues(protocol))
+	initialErrors := testutil.ToFloat64(streamErrorsTotal.WithLabelValues("test_error", protocol))
+	initialReconnects := testutil.ToFloat64(connectionReconnectsTotal.WithLabelValues(protocol))
 
 	// Run concurrent updates
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func() {
 			for j := 0; j < 100; j++ {
-				UpdateStreamMetrics(streamID, protocol, 10, 1, 0, 1000)
-				IncrementStreamError(streamID, "test_error", protocol)
-				IncrementReconnects(streamID, protocol)
+				UpdateStreamMetrics("concurrent-stream", protocol, 10, 1, 0, 1000)
+				IncrementStreamError("concurrent-stream", "test_error", protocol)
+				IncrementReconnects("concurrent-stream", protocol)
 			}
 			done <- true
 		}()
@@ -229,15 +188,8 @@ func TestConcurrentMetricsUpdates(t *testing.T) {
 	}
 
 	// Verify final values
-	bytesCounter := streamBytesTotal.WithLabelValues(streamID, protocol)
-	assert.Equal(t, float64(10000), testutil.ToFloat64(bytesCounter))
-
-	packetsCounter := streamPacketsTotal.WithLabelValues(streamID, protocol)
-	assert.Equal(t, float64(1000), testutil.ToFloat64(packetsCounter))
-
-	errorCounter := streamErrorsTotal.WithLabelValues(streamID, "test_error", protocol)
-	assert.Equal(t, float64(1000), testutil.ToFloat64(errorCounter))
-
-	reconnectCounter := connectionReconnectsTotal.WithLabelValues(streamID, protocol)
-	assert.Equal(t, float64(1000), testutil.ToFloat64(reconnectCounter))
+	assert.Equal(t, initialBytes+float64(10000), testutil.ToFloat64(streamBytesTotal.WithLabelValues(protocol)))
+	assert.Equal(t, initialPackets+float64(1000), testutil.ToFloat64(streamPacketsTotal.WithLabelValues(protocol)))
+	assert.Equal(t, initialErrors+float64(1000), testutil.ToFloat64(streamErrorsTotal.WithLabelValues("test_error", protocol)))
+	assert.Equal(t, initialReconnects+float64(1000), testutil.ToFloat64(connectionReconnectsTotal.WithLabelValues(protocol)))
 }

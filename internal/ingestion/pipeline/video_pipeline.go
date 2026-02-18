@@ -123,11 +123,10 @@ func (p *VideoPipeline) Start() error {
 	}).Info("Starting pipeline workers")
 
 	// Start pipeline workers
-	p.wg.Add(4)
+	p.wg.Add(3)
 	go p.processPackets()
 	go p.processFrames()
 	go p.processReorderedFrames()
-	go p.drainFramesToDevNull() // Temporary drain until transcoder is implemented
 
 	p.logger.Info("Video pipeline started")
 	return nil
@@ -378,72 +377,35 @@ func (p *VideoPipeline) processReorderedFrames() {
 	p.logger.WithField("frames_to_flush", len(remainingFrames)).Debug("Flushing remaining frames from reorderer")
 
 	for i, frame := range remainingFrames {
-		select {
-		case p.output <- frame:
-			p.framesOutput.Add(1)
-			p.framesReordered.Add(1)
-			p.logger.WithFields(map[string]interface{}{
-				"frame_index":  i + 1,
-				"total_frames": len(remainingFrames),
-				"frame_id":     frame.ID,
-			}).Debug("Successfully flushed frame during shutdown")
-		case <-time.After(100 * time.Millisecond):
-			p.logger.WithFields(map[string]interface{}{
-				"frame_id":       frame.ID,
-				"frames_dropped": len(remainingFrames) - i,
-			}).Warn("Timeout flushing frame during shutdown, dropping remaining frames")
-			return // Exit early to prevent hanging
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					p.logger.WithFields(map[string]interface{}{
+						"frame_id": frame.ID,
+						"panic":    r,
+					}).Warn("Recovered from panic during frame flush (channel closed)")
+				}
+			}()
+			select {
+			case p.output <- frame:
+				p.framesOutput.Add(1)
+				p.framesReordered.Add(1)
+				p.logger.WithFields(map[string]interface{}{
+					"frame_index":  i + 1,
+					"total_frames": len(remainingFrames),
+					"frame_id":     frame.ID,
+				}).Debug("Successfully flushed frame during shutdown")
+			case <-time.After(100 * time.Millisecond):
+				p.logger.WithFields(map[string]interface{}{
+					"frame_id":       frame.ID,
+					"frames_dropped": len(remainingFrames) - i,
+				}).Warn("Timeout flushing frame during shutdown, dropping remaining frames")
+				return
+			}
+		}()
 	}
 
 	p.logger.WithField("frames_flushed", len(remainingFrames)).Debug("All remaining frames flushed successfully")
-}
-
-// drainFramesToDevNull consumes frames from output channel and discards them
-func (p *VideoPipeline) drainFramesToDevNull() {
-	defer p.wg.Done()
-
-	p.logger.Info("Started frame drain worker (temporary until transcoder implementation)")
-
-	frameCount := uint64(0)
-	for {
-		select {
-		case <-p.ctx.Done():
-			p.logger.WithFields(map[string]interface{}{
-				"frames_drained": frameCount,
-			}).Info("Frame drain worker stopped")
-			return
-		case frame, ok := <-p.output:
-			if !ok {
-				p.logger.WithFields(map[string]interface{}{
-					"frames_drained": frameCount,
-				}).Info("Output channel closed, drain worker exiting")
-				return
-			}
-
-			frameCount++
-
-			// Log periodically to show progress
-			if frameCount%100 == 0 {
-				p.logger.WithFields(map[string]interface{}{
-					"frames_drained": frameCount,
-					"frame_id":       frame.ID,
-					"frame_size":     frame.TotalSize,
-					"frame_type":     frame.Type.String(),
-					"is_keyframe":    frame.IsKeyframe(),
-				}).Info("Frame drain progress (every 100 frames)")
-			} else {
-				p.logger.WithFields(map[string]interface{}{
-					"frame_id":    frame.ID,
-					"frame_size":  frame.TotalSize,
-					"frame_type":  frame.Type.String(),
-					"is_keyframe": frame.IsKeyframe(),
-				}).Debug("Frame drained to /dev/null")
-			}
-
-			// Frame is now "consumed" and will be garbage collected
-		}
-	}
 }
 
 // GetOutput returns the output channel for assembled frames

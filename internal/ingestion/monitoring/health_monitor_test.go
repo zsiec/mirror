@@ -378,12 +378,12 @@ func TestCorruptionDetector(t *testing.T) {
 	t.Run("Sync Drift Detection", func(t *testing.T) {
 		cd := NewCorruptionDetector("test-stream", logger.NewNullLogger())
 
-		// Small drift (acceptable)
+		// Small drift (acceptable) - 50 ticks at 90kHz = ~0.56ms, well under 200ms threshold
 		cd.CheckSyncDrift(1000, 1050)
 		assert.Empty(t, cd.GetRecentEvents())
 
-		// Large drift
-		cd.CheckSyncDrift(1000, 2000)
+		// Large drift - 90000 ticks at 90kHz = 1000ms = 1s, exceeds 200ms threshold
+		cd.CheckSyncDrift(1000, 91000)
 
 		events := cd.GetRecentEvents()
 		assert.Len(t, events, 1)

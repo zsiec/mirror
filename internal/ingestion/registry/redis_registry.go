@@ -262,30 +262,30 @@ func (r *RedisRegistry) ListPaginated(ctx context.Context, cursor uint64, count 
 func (r *RedisRegistry) UpdateHeartbeat(ctx context.Context, streamID string) error {
 	key := r.prefix + streamID
 
-	// Get current stream data
-	data, err := r.client.Get(ctx, key).Bytes()
+	// Use Lua script for atomic read-modify-write
+	script := redis.NewScript(`
+		local key = KEYS[1]
+		local ttl = tonumber(ARGV[1])
+		local now = ARGV[2]
+		local data = redis.call('GET', key)
+		if not data then
+			return redis.error_reply("stream not found")
+		end
+		local stream = cjson.decode(data)
+		stream.last_heartbeat = now
+		local updated = cjson.encode(stream)
+		redis.call('SET', key, updated, 'PX', ttl)
+		return "OK"
+	`)
+
+	ttlMs := r.ttl.Milliseconds()
+	now := time.Now().Format(time.RFC3339Nano)
+
+	_, err := script.Run(ctx, r.client, []string{key}, ttlMs, now).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return fmt.Errorf("stream %s not found", streamID)
 		}
-		return fmt.Errorf("failed to get stream: %w", err)
-	}
-
-	var stream Stream
-	if err := json.Unmarshal(data, &stream); err != nil {
-		return fmt.Errorf("failed to unmarshal stream: %w", err)
-	}
-
-	// Update heartbeat using the stream's thread-safe method
-	stream.UpdateHeartbeat()
-
-	updatedData, err := json.Marshal(&stream)
-	if err != nil {
-		return fmt.Errorf("failed to marshal stream: %w", err)
-	}
-
-	// Update with new TTL
-	if err := r.client.Set(ctx, key, updatedData, r.ttl).Err(); err != nil {
 		return fmt.Errorf("failed to update heartbeat: %w", err)
 	}
 
@@ -296,31 +296,32 @@ func (r *RedisRegistry) UpdateHeartbeat(ctx context.Context, streamID string) er
 func (r *RedisRegistry) UpdateStatus(ctx context.Context, streamID string, status StreamStatus) error {
 	key := r.prefix + streamID
 
-	// Get current stream data
-	data, err := r.client.Get(ctx, key).Bytes()
+	// Use Lua script for atomic read-modify-write
+	script := redis.NewScript(`
+		local key = KEYS[1]
+		local ttl = tonumber(ARGV[1])
+		local status = ARGV[2]
+		local now = ARGV[3]
+		local data = redis.call('GET', key)
+		if not data then
+			return redis.error_reply("stream not found")
+		end
+		local stream = cjson.decode(data)
+		stream.status = status
+		stream.last_heartbeat = now
+		local updated = cjson.encode(stream)
+		redis.call('SET', key, updated, 'PX', ttl)
+		return "OK"
+	`)
+
+	ttlMs := r.ttl.Milliseconds()
+	now := time.Now().Format(time.RFC3339Nano)
+
+	_, err := script.Run(ctx, r.client, []string{key}, ttlMs, string(status), now).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return fmt.Errorf("stream %s not found", streamID)
 		}
-		return fmt.Errorf("failed to get stream: %w", err)
-	}
-
-	var stream Stream
-	if err := json.Unmarshal(data, &stream); err != nil {
-		return fmt.Errorf("failed to unmarshal stream: %w", err)
-	}
-
-	// Update status using thread-safe methods
-	stream.SetStatus(status)
-	stream.UpdateHeartbeat()
-
-	updatedData, err := json.Marshal(&stream)
-	if err != nil {
-		return fmt.Errorf("failed to marshal stream: %w", err)
-	}
-
-	// Update with new TTL
-	if err := r.client.Set(ctx, key, updatedData, r.ttl).Err(); err != nil {
 		return fmt.Errorf("failed to update status: %w", err)
 	}
 
@@ -336,31 +337,43 @@ func (r *RedisRegistry) UpdateStatus(ctx context.Context, streamID string, statu
 func (r *RedisRegistry) UpdateStats(ctx context.Context, streamID string, stats *StreamStats) error {
 	key := r.prefix + streamID
 
-	// Get current stream data
-	data, err := r.client.Get(ctx, key).Bytes()
+	// Marshal the stats to pass to Lua script
+	statsJSON, err := json.Marshal(stats)
+	if err != nil {
+		return fmt.Errorf("failed to marshal stats: %w", err)
+	}
+
+	// Use Lua script for atomic read-modify-write
+	// Stats fields are at the top level of the Stream struct, not nested
+	script := redis.NewScript(`
+		local key = KEYS[1]
+		local ttl = tonumber(ARGV[1])
+		local stats_json = ARGV[2]
+		local now = ARGV[3]
+		local data = redis.call('GET', key)
+		if not data then
+			return redis.error_reply("stream not found")
+		end
+		local stream = cjson.decode(data)
+		local stats = cjson.decode(stats_json)
+		stream.bytes_received = stats.BytesReceived
+		stream.packets_received = stats.PacketsReceived
+		stream.packets_lost = stats.PacketsLost
+		stream.bitrate = stats.Bitrate
+		stream.last_heartbeat = now
+		local updated = cjson.encode(stream)
+		redis.call('SET', key, updated, 'PX', ttl)
+		return "OK"
+	`)
+
+	ttlMs := r.ttl.Milliseconds()
+	now := time.Now().Format(time.RFC3339Nano)
+
+	_, err = script.Run(ctx, r.client, []string{key}, ttlMs, string(statsJSON), now).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return fmt.Errorf("stream %s not found", streamID)
 		}
-		return fmt.Errorf("failed to get stream: %w", err)
-	}
-
-	var stream Stream
-	if err := json.Unmarshal(data, &stream); err != nil {
-		return fmt.Errorf("failed to unmarshal stream: %w", err)
-	}
-
-	// Update stats using thread-safe methods
-	stream.UpdateStats(stats)
-	stream.UpdateHeartbeat()
-
-	updatedData, err := json.Marshal(&stream)
-	if err != nil {
-		return fmt.Errorf("failed to marshal stream: %w", err)
-	}
-
-	// Update with new TTL
-	if err := r.client.Set(ctx, key, updatedData, r.ttl).Err(); err != nil {
 		return fmt.Errorf("failed to update stats: %w", err)
 	}
 

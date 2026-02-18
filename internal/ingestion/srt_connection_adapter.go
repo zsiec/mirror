@@ -709,22 +709,49 @@ func (a *SRTConnectionAdapter) processTSPacket(tsPkt *mpegts.Packet) {
 	}).Debug("SRT ADAPTER: Finished channel send operation")
 }
 
-// isKeyframe performs simple keyframe detection
+// isKeyframe performs simple keyframe detection for H.264 and HEVC
 func (a *SRTConnectionAdapter) isKeyframe(data []byte) bool {
-	// Look for H.264/HEVC NAL units in PES payload
-
 	// Skip PES header
 	if len(data) < 9 {
 		return false
 	}
 
+	// Detect codec type from parser
+	detectedCodec := a.GetDetectedVideoCodec()
+
 	// Look for start codes and check NAL type
 	for i := 0; i < len(data)-4; i++ {
 		if data[i] == 0 && data[i+1] == 0 && data[i+2] == 1 {
-			// Found start code, check NAL type
-			if i+3 < len(data) {
-				nalType := data[i+3] & 0x1F // H.264
-				if nalType == 5 || nalType == 7 || nalType == 8 {
+			startCodeLen := 3
+			if i > 0 && data[i-1] == 0 {
+				startCodeLen = 4
+			}
+			_ = startCodeLen
+
+			nalOffset := i + 3
+			if nalOffset >= len(data) {
+				continue
+			}
+
+			switch detectedCodec {
+			case types.CodecHEVC:
+				// HEVC uses 2-byte NAL header
+				if nalOffset+1 >= len(data) {
+					continue
+				}
+				hevcNalType := (data[nalOffset] >> 1) & 0x3F
+				// IRAP NAL types 16-23: BLA_W_LP, BLA_W_RADL, BLA_N_LP, IDR_W_RADL, IDR_N_LP, CRA_NUT
+				if hevcNalType >= 16 && hevcNalType <= 23 {
+					return true
+				}
+				// VPS (32), SPS (33), PPS (34) indicate keyframe access unit
+				if hevcNalType >= 32 && hevcNalType <= 34 {
+					return true
+				}
+			default:
+				// H.264 (default)
+				nalType := data[nalOffset] & 0x1F
+				if nalType == 5 || nalType == 7 || nalType == 8 { // IDR, SPS, PPS
 					return true
 				}
 			}
@@ -934,11 +961,62 @@ func (a *SRTConnectionAdapter) parameterSetExtractor(parameterSets [][]byte, str
 
 		case 0x24: // HEVC
 			nalType = (paramSet[nalStart] >> 1) & 0x3F
-			// HEVC parameter set handling would go here
 			a.logger.WithFields(map[string]interface{}{
-				"stream_id": streamID,
-				"nal_type":  nalType,
-			}).Debug("TRANSPORT STREAM: HEVC parameter set detected (handling not implemented)")
+				"stream_id":  streamID,
+				"set_index":  i,
+				"nal_type":   nalType,
+				"param_size": len(paramSet),
+			}).Debug("TRANSPORT STREAM: Processing HEVC NAL unit")
+
+			if nalType == 32 { // VPS
+				if err := a.parameterSetCache.AddVPS(paramSet); err != nil {
+					a.logger.WithError(err).WithFields(map[string]interface{}{
+						"stream_id":  streamID,
+						"set_index":  i,
+						"param_size": len(paramSet),
+					}).Warn("TRANSPORT STREAM: Failed to add HEVC VPS")
+				} else {
+					a.logger.WithFields(map[string]interface{}{
+						"stream_id":  streamID,
+						"set_index":  i,
+						"param_size": len(paramSet),
+					}).Debug("TRANSPORT STREAM: Successfully extracted HEVC VPS")
+				}
+			} else if nalType == 33 { // SPS
+				if err := a.parameterSetCache.AddHEVCSPS(paramSet); err != nil {
+					a.logger.WithError(err).WithFields(map[string]interface{}{
+						"stream_id":  streamID,
+						"set_index":  i,
+						"param_size": len(paramSet),
+					}).Warn("TRANSPORT STREAM: Failed to add HEVC SPS")
+				} else {
+					a.logger.WithFields(map[string]interface{}{
+						"stream_id":  streamID,
+						"set_index":  i,
+						"param_size": len(paramSet),
+					}).Debug("TRANSPORT STREAM: Successfully extracted HEVC SPS")
+				}
+			} else if nalType == 34 { // PPS
+				if err := a.parameterSetCache.AddHEVCPPS(paramSet); err != nil {
+					a.logger.WithError(err).WithFields(map[string]interface{}{
+						"stream_id":  streamID,
+						"set_index":  i,
+						"param_size": len(paramSet),
+					}).Warn("TRANSPORT STREAM: Failed to add HEVC PPS")
+				} else {
+					a.logger.WithFields(map[string]interface{}{
+						"stream_id":  streamID,
+						"set_index":  i,
+						"param_size": len(paramSet),
+					}).Debug("TRANSPORT STREAM: Successfully extracted HEVC PPS")
+				}
+			} else {
+				a.logger.WithFields(map[string]interface{}{
+					"stream_id": streamID,
+					"set_index": i,
+					"nal_type":  nalType,
+				}).Debug("TRANSPORT STREAM: Non-parameter HEVC NAL unit")
+			}
 
 		case 0x51: // AV1
 			// AV1 parameter set handling would go here
@@ -1038,31 +1116,6 @@ func (a *SRTConnectionAdapter) extractVideoBitstream(tsPkt *mpegts.Packet) []byt
 
 	// Extract the actual video bitstream (skip PES header)
 	videoBitstream := payload[pesPayloadStart:]
-
-	// IMPORTANT: Strip MPEG-TS padding (0xFF bytes) from the end
-	// MPEG-TS packets are fixed 188 bytes and use 0xFF for padding
-	// Only strip if there are multiple consecutive 0xFF bytes (likely padding)
-	originalLen := len(videoBitstream)
-	paddingStart := len(videoBitstream)
-
-	// Count consecutive 0xFF bytes from the end
-	for i := len(videoBitstream) - 1; i >= 0 && videoBitstream[i] == 0xFF; i-- {
-		paddingStart = i
-	}
-
-	// Only strip if we have at least 2 consecutive 0xFF bytes
-	// Single 0xFF could be valid video data
-	paddingBytes := len(videoBitstream) - paddingStart
-	if paddingBytes >= 2 {
-		videoBitstream = videoBitstream[:paddingStart]
-
-		a.logger.WithFields(map[string]interface{}{
-			"stream_id":     streamID,
-			"original_len":  originalLen,
-			"stripped_len":  len(videoBitstream),
-			"padding_bytes": paddingBytes,
-		}).Debug("Stripped MPEG-TS padding from video bitstream")
-	}
 
 	a.logger.WithFields(map[string]interface{}{
 		"stream_id":         streamID,

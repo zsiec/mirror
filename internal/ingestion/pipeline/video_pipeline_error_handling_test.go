@@ -267,12 +267,20 @@ func TestVideoPipelineResourceCleanupEnhanced(t *testing.T) {
 		err = pipeline.Stop()
 		require.NoError(t, err)
 
-		// Verify channel is closed
-		select {
-		case _, ok := <-pipeline.GetOutput():
-			assert.False(t, ok, "Output channel should be closed")
-		case <-time.After(100 * time.Millisecond):
-			t.Error("Output channel should have been closed")
+		// Drain any remaining frames, then verify channel is closed
+		timeout := time.After(500 * time.Millisecond)
+		closed := false
+		for !closed {
+			select {
+			case _, ok := <-pipeline.GetOutput():
+				if !ok {
+					closed = true
+				}
+				// else: frame received, keep draining
+			case <-timeout:
+				t.Error("Output channel should have been closed")
+				closed = true // break the loop
+			}
 		}
 	})
 }

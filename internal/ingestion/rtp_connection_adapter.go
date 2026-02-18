@@ -49,6 +49,7 @@ type RTPConnectionAdapter struct {
 
 	logger logger.Logger
 	mu     sync.RWMutex
+	wg     sync.WaitGroup
 }
 
 // Ensure it implements both interfaces
@@ -61,7 +62,7 @@ func NewRTPConnectionAdapter(session *rtpPkg.Session, codecType types.CodecType)
 		return nil
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	adapter := &RTPConnectionAdapter{
 		Session:      session,
@@ -71,7 +72,8 @@ func NewRTPConnectionAdapter(session *rtpPkg.Session, codecType types.CodecType)
 		codecType:    codecType,
 		isAudioTrack: codecType.IsAudio(),
 		ctx:          ctx,
-		logger:       logger.NewLogrusAdapter(logger.FromContext(ctx).WithField("stream_id", session.GetStreamID())),
+		cancel:       cancel,
+		logger:       logger.NewLogrusAdapter(logger.FromContext(context.Background()).WithField("stream_id", session.GetStreamID())),
 	}
 
 	// Initialize timestamp mappers based on codec
@@ -98,6 +100,7 @@ func NewRTPConnectionAdapter(session *rtpPkg.Session, codecType types.CodecType)
 	adapter.logger.Info("RTP Adapter: NAL callback set successfully")
 
 	// Start packet processor in background
+	adapter.wg.Add(1)
 	go adapter.processPackets()
 
 	adapter.logger.Info("RTP Adapter: Created successfully")
@@ -247,6 +250,7 @@ func (a *RTPConnectionAdapter) Close() error {
 	if a.cancel != nil {
 		a.cancel()
 	}
+	a.wg.Wait()
 	close(a.videoOutput)
 	close(a.audioOutput)
 	return a.Session.Close()
@@ -264,9 +268,10 @@ func (a *RTPConnectionAdapter) GetAudioOutput() <-chan types.TimestampedPacket {
 
 // processPackets runs in background to convert RTP packets to TimestampedPackets
 func (a *RTPConnectionAdapter) processPackets() {
-	// This would hook into the Session's packet processing
-	// For now, we'll add the conversion logic that would be called
-	// when the Session receives packets
+	defer a.wg.Done()
+	// Wait for context cancellation - this goroutine is a placeholder
+	// that will be expanded when the RTP session processing is implemented
+	<-a.ctx.Done()
 }
 
 // ProcessPacket converts an RTP packet to TimestampedPacket

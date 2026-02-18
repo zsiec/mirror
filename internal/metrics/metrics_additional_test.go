@@ -103,30 +103,28 @@ func TestIncrementContextCancellation(t *testing.T) {
 }
 
 func TestUpdateSRTBytesReceived(t *testing.T) {
-	streamID := "srt_test_stream"
 	bytes := int64(1024)
 
-	// Get initial value
-	initialBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_recv"))
+	// Get initial value — SRT bytes received are aggregated under "srt" protocol
+	initialBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues("srt"))
 
-	UpdateSRTBytesReceived(streamID, bytes)
+	UpdateSRTBytesReceived("srt_test_stream", bytes)
 
 	// Check bytes counter
-	finalBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_recv"))
+	finalBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues("srt"))
 	assert.Equal(t, initialBytes+float64(bytes), finalBytes, "SRT bytes received should increase")
 }
 
 func TestUpdateSRTBytesSent(t *testing.T) {
-	streamID := "srt_test_stream_sent"
 	bytes := int64(2048)
 
-	// Get initial value
-	initialBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_send"))
+	// Get initial value — SRT bytes sent are aggregated under "srt_send" protocol
+	initialBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues("srt_send"))
 
-	UpdateSRTBytesSent(streamID, bytes)
+	UpdateSRTBytesSent("srt_test_stream_sent", bytes)
 
 	// Check bytes counter
-	finalBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_send"))
+	finalBytes := testutil.ToFloat64(streamBytesTotal.WithLabelValues("srt_send"))
 	assert.Equal(t, initialBytes+float64(bytes), finalBytes, "SRT bytes sent should increase")
 }
 
@@ -158,21 +156,20 @@ func TestDecrementSRTConnections(t *testing.T) {
 }
 
 func TestSRTBytesReceivedAndSent(t *testing.T) {
-	streamID := "srt_bidirectional_stream"
 	receivedBytes := int64(1000)
 	sentBytes := int64(500)
 
 	// Get initial values
-	initialRecv := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_recv"))
-	initialSend := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_send"))
+	initialRecv := testutil.ToFloat64(streamBytesTotal.WithLabelValues("srt"))
+	initialSend := testutil.ToFloat64(streamBytesTotal.WithLabelValues("srt_send"))
 
 	// Test receiving bytes
-	UpdateSRTBytesReceived(streamID, receivedBytes)
-	bytesAfterReceive := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_recv"))
+	UpdateSRTBytesReceived("srt_bidirectional_stream", receivedBytes)
+	bytesAfterReceive := testutil.ToFloat64(streamBytesTotal.WithLabelValues("srt"))
 
 	// Test sending bytes (tracked separately from received)
-	UpdateSRTBytesSent(streamID, sentBytes)
-	bytesAfterSend := testutil.ToFloat64(streamBytesTotal.WithLabelValues(streamID, "srt_send"))
+	UpdateSRTBytesSent("srt_bidirectional_stream", sentBytes)
+	bytesAfterSend := testutil.ToFloat64(streamBytesTotal.WithLabelValues("srt_send"))
 
 	// Received and sent should be tracked independently
 	assert.Equal(t, initialRecv+float64(receivedBytes), bytesAfterReceive, "received bytes should be tracked")
@@ -269,48 +266,33 @@ func TestLockContentionDifferentLocks(t *testing.T) {
 }
 
 func TestUpdateSRTStats(t *testing.T) {
-	streamID := "srt_stats_test_stream"
-
 	// Get initial counter values
-	initialLost := testutil.ToFloat64(srtPacketsLost.WithLabelValues(streamID))
-	initialDropped := testutil.ToFloat64(srtPacketsDropped.WithLabelValues(streamID))
-	initialRetrans := testutil.ToFloat64(srtPacketsRetransmitted.WithLabelValues(streamID))
+	initialLost := testutil.ToFloat64(srtPacketsLost)
+	initialDropped := testutil.ToFloat64(srtPacketsDropped)
+	initialRetrans := testutil.ToFloat64(srtPacketsRetransmitted)
 
-	// Update stats
-	UpdateSRTStats(streamID, 15.5, 10, 5, 3, 42, 48.2, 100.0, 4194304)
-
-	// Verify gauges
-	assert.Equal(t, 15.5, testutil.ToFloat64(srtRTT.WithLabelValues(streamID)), "RTT should be set")
-	assert.Equal(t, 42.0, testutil.ToFloat64(srtFlightSize.WithLabelValues(streamID)), "flight size should be set")
-	assert.Equal(t, 48.2, testutil.ToFloat64(srtReceiveRateMbps.WithLabelValues(streamID)), "receive rate should be set")
-	assert.Equal(t, 100.0, testutil.ToFloat64(srtBandwidthMbps.WithLabelValues(streamID)), "bandwidth should be set")
-	assert.Equal(t, 4194304.0, testutil.ToFloat64(srtAvailableRcvBuf.WithLabelValues(streamID)), "available rcv buf should be set")
+	// Update stats (streamID is accepted for caller convenience but not used as label)
+	UpdateSRTStats("srt_stats_test_stream", 15.5, 10, 5, 3, 42, 48.2, 100.0, 4194304)
 
 	// Verify counters (deltas)
-	assert.Equal(t, initialLost+10, testutil.ToFloat64(srtPacketsLost.WithLabelValues(streamID)), "packets lost should increase by delta")
-	assert.Equal(t, initialDropped+5, testutil.ToFloat64(srtPacketsDropped.WithLabelValues(streamID)), "packets dropped should increase by delta")
-	assert.Equal(t, initialRetrans+3, testutil.ToFloat64(srtPacketsRetransmitted.WithLabelValues(streamID)), "packets retransmitted should increase by delta")
+	assert.Equal(t, initialLost+10, testutil.ToFloat64(srtPacketsLost), "packets lost should increase by delta")
+	assert.Equal(t, initialDropped+5, testutil.ToFloat64(srtPacketsDropped), "packets dropped should increase by delta")
+	assert.Equal(t, initialRetrans+3, testutil.ToFloat64(srtPacketsRetransmitted), "packets retransmitted should increase by delta")
 }
 
 func TestUpdateSRTStats_ZeroDeltas(t *testing.T) {
-	streamID := "srt_stats_zero_delta"
-
 	// Set initial values
-	UpdateSRTStats(streamID, 10.0, 5, 3, 2, 10, 25.0, 50.0, 1024)
+	UpdateSRTStats("srt_stats_zero_delta", 10.0, 5, 3, 2, 10, 25.0, 50.0, 1024)
 
 	// Get current counter values
-	lostBefore := testutil.ToFloat64(srtPacketsLost.WithLabelValues(streamID))
-	droppedBefore := testutil.ToFloat64(srtPacketsDropped.WithLabelValues(streamID))
-	retransBefore := testutil.ToFloat64(srtPacketsRetransmitted.WithLabelValues(streamID))
+	lostBefore := testutil.ToFloat64(srtPacketsLost)
+	droppedBefore := testutil.ToFloat64(srtPacketsDropped)
+	retransBefore := testutil.ToFloat64(srtPacketsRetransmitted)
 
 	// Update with zero deltas — counters should NOT change
-	UpdateSRTStats(streamID, 12.0, 0, 0, 0, 8, 30.0, 55.0, 2048)
+	UpdateSRTStats("srt_stats_zero_delta", 12.0, 0, 0, 0, 8, 30.0, 55.0, 2048)
 
-	assert.Equal(t, lostBefore, testutil.ToFloat64(srtPacketsLost.WithLabelValues(streamID)), "zero delta should not change counter")
-	assert.Equal(t, droppedBefore, testutil.ToFloat64(srtPacketsDropped.WithLabelValues(streamID)), "zero delta should not change counter")
-	assert.Equal(t, retransBefore, testutil.ToFloat64(srtPacketsRetransmitted.WithLabelValues(streamID)), "zero delta should not change counter")
-
-	// But gauges should be updated
-	assert.Equal(t, 12.0, testutil.ToFloat64(srtRTT.WithLabelValues(streamID)), "RTT gauge should be updated")
-	assert.Equal(t, 8.0, testutil.ToFloat64(srtFlightSize.WithLabelValues(streamID)), "flight size gauge should be updated")
+	assert.Equal(t, lostBefore, testutil.ToFloat64(srtPacketsLost), "zero delta should not change counter")
+	assert.Equal(t, droppedBefore, testutil.ToFloat64(srtPacketsDropped), "zero delta should not change counter")
+	assert.Equal(t, retransBefore, testutil.ToFloat64(srtPacketsRetransmitted), "zero delta should not change counter")
 }

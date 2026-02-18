@@ -111,6 +111,11 @@ func (m *Manager) Start(ctx context.Context) {
 		m.mu.Unlock()
 		return
 	}
+	if m.onConnect == nil {
+		m.mu.Unlock()
+		m.logger.Error("Cannot start reconnection: onConnect callback is nil")
+		return
+	}
 	m.running = true
 	m.mu.Unlock()
 

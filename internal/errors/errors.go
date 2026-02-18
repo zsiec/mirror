@@ -1,6 +1,7 @@
 package errors
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -129,13 +130,14 @@ func NewServiceDownError(service string) *AppError {
 
 // IsAppError checks if an error is an AppError.
 func IsAppError(err error) bool {
-	_, ok := err.(*AppError)
-	return ok
+	var appErr *AppError
+	return errors.As(err, &appErr)
 }
 
 // GetAppError extracts AppError from an error.
 func GetAppError(err error) (*AppError, bool) {
-	appErr, ok := err.(*AppError)
+	var appErr *AppError
+	ok := errors.As(err, &appErr)
 	return appErr, ok
 }
 
@@ -193,13 +195,14 @@ func (e *StreamError) WithDetailsMap(details map[string]interface{}) *StreamErro
 
 // IsStreamError checks if an error is a StreamError
 func IsStreamError(err error) bool {
-	_, ok := err.(*StreamError)
-	return ok
+	var streamErr *StreamError
+	return errors.As(err, &streamErr)
 }
 
 // GetStreamError extracts StreamError from an error
 func GetStreamError(err error) (*StreamError, bool) {
-	streamErr, ok := err.(*StreamError)
+	var streamErr *StreamError
+	ok := errors.As(err, &streamErr)
 	return streamErr, ok
 }
 

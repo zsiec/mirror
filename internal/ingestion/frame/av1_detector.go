@@ -281,20 +281,16 @@ func (d *AV1Detector) parseFrameType(data []byte) uint8 {
 		return AV1FrameTypeInter
 	}
 
-	// Frame header starts with show_existing_frame flag
-	// If not set, next bits contain frame_type
-	// This is a simplified heuristic
+	// Frame header starts with show_existing_frame flag (bit 7)
 	firstByte := data[0]
 
 	if firstByte&0x80 != 0 {
-		// show_existing_frame = 1
+		// show_existing_frame = 1 — references an existing frame
 		return AV1FrameTypeInter
 	}
 
-	// Simplified: check second bit for key frame
-	if firstByte&0x40 != 0 {
-		return AV1FrameTypeKey
-	}
-
-	return AV1FrameTypeInter
+	// frame_type is a 2-bit field in bits 6-5:
+	// 00 = KEY_FRAME, 01 = INTER, 10 = INTRA_ONLY, 11 = S_FRAME
+	frameType := (firstByte >> 5) & 0x03
+	return frameType
 }

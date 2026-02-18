@@ -3,9 +3,11 @@ package codec
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/pion/rtp"
 	"github.com/zsiec/mirror/internal/ingestion/memory"
+	"github.com/zsiec/mirror/internal/ingestion/security"
 )
 
 // AV1Depacketizer handles depacketization of AV1 RTP streams
@@ -16,6 +18,7 @@ type AV1Depacketizer struct {
 	fragmentedOBU   bool
 	obuType         uint8
 	temporalUnitBuf [][]byte
+	mu              sync.Mutex
 }
 
 // OBU (Open Bitstream Unit) type constants
@@ -39,6 +42,9 @@ const (
 
 // Depacketize processes an RTP packet and returns complete OBUs
 func (d *AV1Depacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	// Extract payload and sequence number from packet
 	payload := packet.Payload
 	sequenceNumber := packet.SequenceNumber
@@ -48,8 +54,10 @@ func (d *AV1Depacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 
 	// Parse AV1 aggregation header (first byte)
 	aggHeader := payload[0]
-	zBit := (aggHeader & 0x80) != 0   // First OBU fragment indicator
-	yBit := (aggHeader & 0x40) != 0   // Last OBU fragment indicator
+	// Z=1 means "continuation from previous packet" (this is NOT the first fragment)
+	zBit := (aggHeader & 0x80) != 0
+	// Y=1 means "will continue in next packet" (this is NOT the last fragment)
+	yBit := (aggHeader & 0x40) != 0
 	wField := (aggHeader & 0x30) >> 4 // Number of OBU elements (0-3)
 	nBit := (aggHeader & 0x08) != 0   // New temporal unit indicator
 
@@ -57,13 +65,12 @@ func (d *AV1Depacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 	payload = payload[1:]
 
 	// Check for packet loss during fragmentation.
-	// Use fragmentedOBU flag instead of lastSeq != 0 — seq 0 is valid per RFC 3550.
 	if d.fragmentedOBU && sequenceNumber != d.lastSeq+1 {
 		// Packet loss detected, discard fragments
 		d.fragments = [][]byte{}
 		d.fragmentedOBU = false
-		// After packet loss, ignore fragments until we get a new first fragment
-		if !zBit {
+		// After packet loss, ignore continuation fragments until we get a new first fragment
+		if zBit {
 			d.lastSeq = sequenceNumber
 			return [][]byte{}, nil
 		}
@@ -79,29 +86,74 @@ func (d *AV1Depacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 		d.temporalUnitBuf = [][]byte{}
 	}
 
-	// Process based on W field (number of OBU elements)
-	switch wField {
-	case 0:
-		// Single OBU element (may be fragmented)
-		obu, err := d.processSingleOBU(payload, zBit, yBit)
-		if err != nil {
-			return nil, err
+	// Handle fragmentation state
+	if zBit {
+		// Continuation fragment (not-first)
+		if !d.fragmentedOBU || len(d.fragments) == 0 {
+			// Received continuation without start, discard
+			return obus, nil
 		}
-		if obu != nil {
+
+		// Check fragment accumulation size limit
+		currentSize := 0
+		for _, frag := range d.fragments {
+			currentSize += len(frag)
+		}
+		if currentSize+len(payload) > security.MaxNALUnitSize {
+			d.fragments = [][]byte{}
+			d.fragmentedOBU = false
+			return obus, fmt.Errorf("AV1 fragment accumulation exceeds size limit")
+		}
+
+		fragment := make([]byte, len(payload))
+		copy(fragment, payload)
+		d.fragments = append(d.fragments, fragment)
+
+		if !yBit {
+			// Last fragment (Y=0 means "does not continue"), assemble complete OBU
+			totalSize := 0
+			for _, frag := range d.fragments {
+				totalSize += len(frag)
+			}
+			obu := make([]byte, 0, totalSize)
+			for _, frag := range d.fragments {
+				obu = append(obu, frag...)
+			}
+			d.fragments = [][]byte{}
+			d.fragmentedOBU = false
 			d.temporalUnitBuf = append(d.temporalUnitBuf, obu)
 		}
+		// If yBit is set, more fragments coming, continue collecting
+	} else if yBit && !zBit {
+		// First fragment of a fragmented OBU (Z=0, Y=1)
+		d.fragments = [][]byte{}
+		d.fragmentedOBU = true
+		d.obuType, _ = d.parseOBUHeader(payload)
 
-	case 1, 2, 3:
-		// Multiple OBU elements
-		obuList, err := d.processMultipleOBUs(payload, int(wField))
-		if err != nil {
-			return nil, err
+		fragment := make([]byte, len(payload))
+		copy(fragment, payload)
+		d.fragments = append(d.fragments, fragment)
+	} else if !zBit && !yBit {
+		// Non-fragmented packet: complete OBU element(s)
+		if wField == 0 {
+			// Single complete OBU
+			if len(payload) > 0 {
+				obu := make([]byte, len(payload))
+				copy(obu, payload)
+				d.temporalUnitBuf = append(d.temporalUnitBuf, obu)
+			}
+		} else {
+			// Multiple OBU elements (W=1,2,3)
+			// Per spec: first W-1 OBUs have LEB128 length prefix, last extends to end
+			obuList, err := d.processMultipleOBUs(payload, int(wField))
+			if err != nil {
+				return obus, err
+			}
+			d.temporalUnitBuf = append(d.temporalUnitBuf, obuList...)
 		}
-		d.temporalUnitBuf = append(d.temporalUnitBuf, obuList...)
 	}
 
-	// If this is a complete temporal unit (next packet will have N bit set)
-	// we can return the buffered OBUs
+	// If this is a complete temporal unit (not fragmented) and we have buffered OBUs
 	if !d.fragmentedOBU && len(d.temporalUnitBuf) > 0 {
 		// Check if we have a temporal delimiter
 		for _, obu := range d.temporalUnitBuf {
@@ -120,57 +172,15 @@ func (d *AV1Depacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 	return obus, nil
 }
 
-// processSingleOBU handles a single OBU element (which may be fragmented)
-func (d *AV1Depacketizer) processSingleOBU(payload []byte, zBit, yBit bool) ([]byte, error) {
-	if len(payload) == 0 {
-		return nil, errors.New("empty OBU payload")
-	}
-
-	if zBit {
-		// First fragment of OBU
-		d.fragments = [][]byte{}
-		d.fragmentedOBU = true
-
-		// Parse OBU header to get type
-		d.obuType, _ = d.parseOBUHeader(payload)
-	} else if !d.fragmentedOBU {
-		// Non-fragmented packet received when not expecting fragments
-		return nil, errors.New("unexpected non-first fragment")
-	}
-
-	// Add fragment
-	fragment := make([]byte, len(payload))
-	copy(fragment, payload)
-	d.fragments = append(d.fragments, fragment)
-
-	if yBit {
-		// Last fragment, combine all fragments
-		totalSize := 0
-		for _, frag := range d.fragments {
-			totalSize += len(frag)
-		}
-
-		obu := make([]byte, 0, totalSize)
-		for _, frag := range d.fragments {
-			obu = append(obu, frag...)
-		}
-
-		d.fragments = [][]byte{}
-		d.fragmentedOBU = false
-		return obu, nil
-	}
-
-	// Middle fragment, continue collecting
-	return nil, nil
-}
-
 // processMultipleOBUs handles multiple OBU elements in a single packet
+// Per AV1 RTP spec: the first W-1 OBUs have LEB128 length prefix,
+// the last OBU extends to end of payload (no length prefix)
 func (d *AV1Depacketizer) processMultipleOBUs(payload []byte, count int) ([][]byte, error) {
 	var obus [][]byte
 	offset := 0
 
-	// Each OBU is preceded by a length field
-	for i := 0; i < count && offset < len(payload); i++ {
+	// First W-1 OBUs have length prefix
+	for i := 0; i < count-1 && offset < len(payload); i++ {
 		// Parse LEB128 encoded length
 		length, bytesRead, err := d.parseLEB128(payload[offset:])
 		if err != nil {
@@ -188,6 +198,14 @@ func (d *AV1Depacketizer) processMultipleOBUs(payload []byte, count int) ([][]by
 		obus = append(obus, obu)
 
 		offset += int(length)
+	}
+
+	// Last OBU extends to end of payload (no length prefix)
+	if offset < len(payload) {
+		remaining := len(payload) - offset
+		obu := make([]byte, remaining)
+		copy(obu, payload[offset:])
+		obus = append(obus, obu)
 	}
 
 	return obus, nil
@@ -306,6 +324,13 @@ func (d *AV1DepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, e
 	// Process packet
 	obus, err := d.AV1Depacketizer.Depacketize(packet)
 
+	// Release memory on error
+	if err != nil {
+		d.memController.ReleaseMemory(d.streamID, estimatedSize)
+		d.currentUsage -= estimatedSize
+		return nil, err
+	}
+
 	// If we got complete OBUs, release fragment memory
 	if len(obus) > 0 {
 		// Calculate actual memory used
@@ -325,7 +350,7 @@ func (d *AV1DepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, e
 		d.currentUsage = 0
 	}
 
-	return obus, err
+	return obus, nil
 }
 
 // Reset clears the depacketizer state and releases memory

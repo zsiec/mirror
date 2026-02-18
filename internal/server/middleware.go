@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -95,7 +97,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 		// Set CORS headers
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-API-Key")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 
 		// Handle preflight requests
@@ -141,6 +143,35 @@ func (s *Server) timeoutMiddleware(timeout time.Duration) func(http.Handler) htt
 			http.TimeoutHandler(next, timeout, "Request timeout").ServeHTTP(w, r)
 		})
 	}
+}
+
+// apiKeyMiddleware checks for a valid API key on destructive (POST, PUT, DELETE, PATCH) requests.
+// If no API key is configured, the middleware is a no-op and all requests pass through.
+func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// No-op if no API key is configured
+		if s.config.APIKey == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Only enforce on destructive methods
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
+			// Check the X-API-Key header
+			provided := r.Header.Get("X-API-Key")
+			if subtle.ConstantTimeCompare([]byte(provided), []byte(s.config.APIKey)) != 1 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error": "unauthorized: invalid or missing API key",
+				})
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // rateLimitMiddleware implements rate limiting (placeholder for now)

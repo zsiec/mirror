@@ -269,7 +269,14 @@ func (l *Listener) acceptLoop() {
 
 		// Create connection object
 		conn := NewConnectionWithSRTConn(streamID, srtConn, addr.String(), l.registry, l.codecDetector, l.logger)
-		l.connections.Store(streamID, conn)
+		if _, loaded := l.connections.LoadOrStore(streamID, conn); loaded {
+			// Another connection with same stream ID was accepted between
+			// handleIncomingConnection check and here - reject this one
+			l.logger.WithField("stream_id", streamID).Warn("Duplicate stream ID detected during accept, closing connection")
+			l.connLimiter.Release(streamID)
+			conn.Close()
+			continue
+		}
 
 		// Handle the connection
 		l.wg.Add(1)

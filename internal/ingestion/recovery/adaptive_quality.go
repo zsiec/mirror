@@ -345,22 +345,22 @@ func (aq *AdaptiveQuality) determineTargetProfile(score float64) int {
 	target := current
 
 	if score > 0.8 && cpu < 0.6 && memory < 0.6 {
-		// System is healthy, can increase quality
-		if current < len(aq.profiles)-1 {
+		// System is healthy, can increase quality (move toward Ultra/index 0)
+		if current > 0 {
 			// Check if bandwidth supports higher quality
-			nextProfile := aq.profiles[current+1]
+			nextProfile := aq.profiles[current-1]
 			if bandwidth > nextProfile.Bitrate*120/100 { // 20% headroom
-				target = current + 1
+				target = current - 1
 			}
 		}
 	} else if score < 0.5 || cpu > 0.85 || memory > 0.85 {
-		// System is struggling, decrease quality
-		if current > 0 {
-			target = current - 1
+		// System is struggling, decrease quality (move toward Minimum/higher index)
+		if current < len(aq.profiles)-1 {
+			target = current + 1
 		}
 	} else if score < 0.3 || cpu > 0.95 || memory > 0.95 {
-		// Emergency quality reduction
-		target = max(0, current-2)
+		// Emergency quality reduction (move toward Minimum/higher index)
+		target = min(len(aq.profiles)-1, current+2)
 	}
 
 	return target

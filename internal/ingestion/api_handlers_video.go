@@ -428,13 +428,15 @@ func (m *Manager) HandleStreamIframe(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// If all fallbacks fail, return detailed error
+		spsIDs := safeUint8Slice(sessionStats["sps_ids"])
+		ppsIDs := safeUint8Slice(sessionStats["pps_ids"])
 		detailedMessage := fmt.Sprintf(
 			"Frame not decodable: %s. Session stats: %d SPS (IDs: %v), %d PPS (IDs: %v), Session duration: %dms",
 			reason,
-			len(sessionStats["sps_ids"].([]uint8)),
-			sessionStats["sps_ids"],
-			len(sessionStats["pps_ids"].([]uint8)),
-			sessionStats["pps_ids"],
+			len(spsIDs),
+			spsIDs,
+			len(ppsIDs),
+			ppsIDs,
 			sessionStats["session_duration_ms"],
 		)
 
@@ -533,8 +535,8 @@ func (m *Manager) HandleStreamParameters(w http.ResponseWriter, r *http.Request)
 	}{
 		StreamID: streamID,
 		Stats:    sessionStats,
-		SPSIDs:   sessionStats["sps_ids"].([]uint8),
-		PPSIDs:   sessionStats["pps_ids"].([]uint8),
+		SPSIDs:   safeUint8Slice(sessionStats["sps_ids"]),
+		PPSIDs:   safeUint8Slice(sessionStats["pps_ids"]),
 	}
 
 	m.logger.WithFields(map[string]interface{}{
@@ -765,6 +767,17 @@ func (m *Manager) convertRobustStreamToJPEG(decodableStream []byte, codec types.
 	}).Info("Successfully converted robust stream to JPEG")
 
 	return jpegData, nil
+}
+
+// safeUint8Slice safely extracts a []uint8 from an interface{} value
+func safeUint8Slice(v interface{}) []uint8 {
+	if v == nil {
+		return nil
+	}
+	if s, ok := v.([]uint8); ok {
+		return s
+	}
+	return nil
 }
 
 // getInputFormatFromCodec returns the appropriate FFmpeg input format for the codec type

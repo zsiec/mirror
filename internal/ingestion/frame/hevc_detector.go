@@ -112,6 +112,16 @@ func (d *HEVCDetector) DetectBoundaries(pkt *types.TimestampedPacket) (isStart, 
 }
 
 // handleFU handles fragmentation units
+//
+// NOTE on multi-slice frames: In HEVC, a single access unit (frame) may contain
+// multiple slices, each potentially carried in its own FU sequence. We must NOT
+// signal a frame boundary on the FU end-bit alone, because another VCL NAL
+// (i.e., another slice of the same frame) may follow. Instead, we update
+// lastNALType when the FU completes so that the next call to DetectBoundaries
+// can determine whether a new access unit has started (e.g., non-VCL NAL follows,
+// or first_slice_segment_in_pic_flag is set in the next VCL NAL). Full detection
+// of multi-slice boundaries would require parsing the slice segment header to
+// check first_slice_segment_in_pic_flag, which is not yet implemented.
 func (d *HEVCDetector) handleFU(pkt *types.TimestampedPacket) (isStart, isEnd bool) {
 	if len(pkt.Data) < 3 {
 		return false, false
@@ -131,12 +141,29 @@ func (d *HEVCDetector) handleFU(pkt *types.TimestampedPacket) (isStart, isEnd bo
 			isStart = true
 			d.frameStarted = true
 		}
+
+		// Non-VCL NAL after VCL NAL ends current frame and starts next
+		if d.frameStarted && d.isVCLNAL(d.lastNALType) &&
+			(nalType == HEVCNALTypeAUD || nalType == HEVCNALTypeVPS ||
+				nalType == HEVCNALTypeSPS || nalType == HEVCNALTypePPS) {
+			isEnd = true
+			isStart = true
+			d.frameStarted = true
+		}
 	}
 
-	if endBit && d.frameStarted && d.isVCLNAL(nalType) {
-		// Last fragment of VCL NAL — signal frame end
-		isEnd = true
-		d.frameStarted = false
+	if endBit {
+		// Last fragment — update lastNALType so the next packet's boundary
+		// detection sees the correct previous NAL type. Do NOT signal frame
+		// end here: in multi-slice frames, another VCL FU sequence for the
+		// same access unit may follow.
+		d.lastNALType = nalType
+		return isStart, isEnd
+	}
+
+	// For middle fragments, don't update lastNALType
+	if startBit {
+		d.lastNALType = nalType
 	}
 
 	return isStart, isEnd

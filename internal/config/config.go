@@ -32,6 +32,9 @@ type ServerConfig struct {
 	HTTPSRedirect  bool `mapstructure:"https_redirect"`  // Redirect HTTP to HTTPS
 	DebugEndpoints bool `mapstructure:"debug_endpoints"` // Enable debug endpoints (pprof, etc.)
 
+	// Authentication
+	APIKey string `mapstructure:"api_key"` // API key for destructive endpoints; empty disables auth
+
 	// QUIC specific
 	MaxIncomingStreams    int64         `mapstructure:"max_incoming_streams"`
 	MaxIncomingUniStreams int64         `mapstructure:"max_incoming_uni_streams"`

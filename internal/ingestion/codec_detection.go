@@ -3,13 +3,19 @@ package ingestion
 import (
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/pion/rtp"
 	"github.com/zsiec/mirror/internal/ingestion/types"
 )
 
-// CodecDetector detects codec from various sources
+// CodecDetector detects codec from various sources including audio and video.
+// It supports both static RTP payload types (RFC 3551) and dynamic types via SDP.
+//
+// For video-only codec detection with richer metadata (profile, level, resolution),
+// prefer using codec.Detector from the internal/ingestion/codec package instead.
 type CodecDetector struct {
+	mu sync.RWMutex
 	// RTP payload type to codec mapping
 	payloadTypeMap map[uint8]types.CodecType
 }
@@ -21,13 +27,14 @@ func NewCodecDetector() *CodecDetector {
 	}
 }
 
-// DetectFromRTPPacket attempts to detect codec from RTP packet
+// DetectFromRTPPacket attempts to detect codec from RTP packet.
+// It is safe for concurrent use.
 func (d *CodecDetector) DetectFromRTPPacket(packet *rtp.Packet) types.CodecType {
 	if packet == nil {
 		return types.CodecUnknown
 	}
 
-	// Check static payload types first
+	// Check static payload types first (includes custom mappings)
 	codec := d.detectFromPayloadType(packet.PayloadType)
 	if codec != types.CodecUnknown {
 		return codec
@@ -43,7 +50,8 @@ func (d *CodecDetector) DetectFromRTPPacket(packet *rtp.Packet) types.CodecType 
 	return types.CodecUnknown
 }
 
-// DetectFromSDP parses SDP and extracts codec information
+// DetectFromSDP parses SDP and extracts codec information.
+// It is safe for concurrent use.
 func (d *CodecDetector) DetectFromSDP(sdp string) (types.CodecType, map[string]string) {
 	lines := strings.Split(sdp, "\n")
 	codecType := types.CodecUnknown
@@ -103,7 +111,9 @@ func (d *CodecDetector) DetectFromSDP(sdp string) (types.CodecType, map[string]s
 						detectedCodec := detectCodecFromEncodingName(encodingName)
 						if detectedCodec != types.CodecUnknown {
 							codecType = detectedCodec
+							d.mu.Lock()
 							d.payloadTypeMap[currentPayloadType] = detectedCodec
+							d.mu.Unlock()
 						}
 
 						// Store clock rate if available
@@ -139,7 +149,10 @@ func (d *CodecDetector) DetectFromSDP(sdp string) (types.CodecType, map[string]s
 // detectFromPayloadType returns codec based on static RTP payload types
 func (d *CodecDetector) detectFromPayloadType(pt uint8) types.CodecType {
 	// Check custom mapping first
-	if codec, ok := d.payloadTypeMap[pt]; ok {
+	d.mu.RLock()
+	codec, ok := d.payloadTypeMap[pt]
+	d.mu.RUnlock()
+	if ok {
 		return codec
 	}
 
@@ -222,9 +235,12 @@ func (d *CodecDetector) detectFromPayload(payload []byte, payloadType uint8) typ
 	return types.CodecUnknown
 }
 
-// AddPayloadTypeMapping adds a custom payload type to codec mapping
+// AddPayloadTypeMapping adds a custom payload type to codec mapping.
+// It is safe for concurrent use.
 func (d *CodecDetector) AddPayloadTypeMapping(payloadType uint8, codec types.CodecType) {
+	d.mu.Lock()
 	d.payloadTypeMap[payloadType] = codec
+	d.mu.Unlock()
 }
 
 // detectCodecFromEncodingName maps SDP encoding names to codec types

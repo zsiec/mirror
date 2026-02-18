@@ -123,15 +123,24 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown() error {
-	s.logger.Info("Shutting down HTTP/3 server")
+	s.logger.Info("Shutting down servers")
+
+	// Shut down HTTP/1.1 and HTTP/2 server if running
+	if s.httpServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
+			s.logger.WithError(err).Warn("Failed to shutdown HTTP server gracefully")
+		}
+	}
 
 	// Note: http3.Server.Close() doesn't support context-based shutdown
 	// The timeout is handled at the application level
 	if err := s.http3Server.Close(); err != nil {
-		return fmt.Errorf("failed to shutdown server: %w", err)
+		return fmt.Errorf("failed to shutdown HTTP/3 server: %w", err)
 	}
 
-	s.logger.Info("HTTP/3 server shutdown complete")
+	s.logger.Info("Server shutdown complete")
 	return nil
 }
 
@@ -144,6 +153,7 @@ func (s *Server) setupRoutes() {
 	s.router.Use(s.errorHandler.Middleware)
 	s.router.Use(s.metricsMiddleware)
 	s.router.Use(s.corsMiddleware)
+	s.router.Use(s.apiKeyMiddleware)
 
 	// Health endpoints
 	healthHandler := health.NewHandler(s.healthMgr)
@@ -171,11 +181,6 @@ func (s *Server) setupRoutes() {
 	// Debug endpoints (only if enabled)
 	if s.config.DebugEndpoints {
 		s.setupDebugEndpoints()
-	}
-
-	// Register any additional routes
-	for _, registerFunc := range s.additionalRoutes {
-		registerFunc(s.router)
 	}
 
 	// 404 handler

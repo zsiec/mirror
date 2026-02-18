@@ -59,6 +59,7 @@ type CorruptionDetector struct {
 	mu       sync.RWMutex
 	streamID string
 	logger   logger.Logger
+	stopCh   chan struct{}
 
 	// Detection state
 	patterns        map[CorruptionType]*CorruptionPattern
@@ -96,6 +97,7 @@ func NewCorruptionDetector(streamID string, logger logger.Logger) *CorruptionDet
 	cd := &CorruptionDetector{
 		streamID:             streamID,
 		logger:               logger,
+		stopCh:               make(chan struct{}),
 		patterns:             make(map[CorruptionType]*CorruptionPattern),
 		recentEvents:         make([]CorruptionEvent, 0, 100),
 		eventBufferSize:      100,
@@ -216,7 +218,7 @@ func (cd *CorruptionDetector) CheckGOP(gop *types.GOP) error {
 
 // CheckSyncDrift checks for A/V sync drift
 func (cd *CorruptionDetector) CheckSyncDrift(audioPTS, videoPTS int64) {
-	drift := time.Duration(audioPTS-videoPTS) * time.Millisecond
+	drift := time.Duration(float64(audioPTS-videoPTS) / 90.0 * float64(time.Millisecond))
 	if drift < 0 {
 		drift = -drift
 	}
@@ -466,12 +468,27 @@ func (cd *CorruptionDetector) recordEvent(event CorruptionEvent) {
 	}).Warn("Corruption detected")
 }
 
+// Stop stops the corruption detector's background goroutine
+func (cd *CorruptionDetector) Stop() {
+	select {
+	case <-cd.stopCh:
+		// Already stopped
+	default:
+		close(cd.stopCh)
+	}
+}
+
 func (cd *CorruptionDetector) patternDetectionLoop() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		cd.analyzePatterns()
+	for {
+		select {
+		case <-ticker.C:
+			cd.analyzePatterns()
+		case <-cd.stopCh:
+			return
+		}
 	}
 }
 

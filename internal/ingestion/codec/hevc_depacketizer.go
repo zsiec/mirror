@@ -57,9 +57,8 @@ func (d *HEVCDepacketizer) Depacketize(packet *rtp.Packet) ([][]byte, error) {
 
 	switch {
 	case nalType < nalTypeAP:
-		// Single NAL unit packet
-		nalUnit := make([]byte, len(payload))
-		copy(nalUnit, payload)
+		// Single NAL unit packet - prepend Annex B start code
+		nalUnit := d.prependStartCode(payload)
 		nalUnits = append(nalUnits, nalUnit)
 
 	case nalType == nalTypeAP:
@@ -142,9 +141,13 @@ func (d *HEVCDepacketizer) handleAggregationPacket(payload []byte) ([][]byte, er
 			}
 		}
 
-		// Extract NAL unit
-		nalUnit := make([]byte, nalSize)
-		copy(nalUnit, payload[offset:offset+nalSize])
+		// Extract NAL unit with Annex B start code
+		nalUnit := make([]byte, 4+nalSize)
+		nalUnit[0] = 0x00
+		nalUnit[1] = 0x00
+		nalUnit[2] = 0x00
+		nalUnit[3] = 0x01
+		copy(nalUnit[4:], payload[offset:offset+nalSize])
 		nalUnits = append(nalUnits, nalUnit)
 
 		offset += nalSize
@@ -179,12 +182,16 @@ func (d *HEVCDepacketizer) handleFragmentationUnit(payload []byte, sequenceNumbe
 		d.fragments = [][]byte{}
 		d.fuInProgress = true
 
-		// Reconstruct NAL unit header
-		nalHeader := make([]byte, 2)
-		nalHeader[0] = (payload[0] & 0x81) | (fuType << 1)
-		nalHeader[1] = payload[1]
+		// Prepend Annex B start code + reconstructed NAL unit header
+		startCodeAndHeader := make([]byte, 6)
+		startCodeAndHeader[0] = 0x00
+		startCodeAndHeader[1] = 0x00
+		startCodeAndHeader[2] = 0x00
+		startCodeAndHeader[3] = 0x01
+		startCodeAndHeader[4] = (payload[0] & 0x81) | (fuType << 1)
+		startCodeAndHeader[5] = payload[1]
 
-		d.fragments = append(d.fragments, nalHeader)
+		d.fragments = append(d.fragments, startCodeAndHeader)
 	}
 
 	// Check for packet loss using wraparound-safe arithmetic
@@ -247,6 +254,15 @@ func (d *HEVCDepacketizer) handleFragmentationUnit(payload []byte, sequenceNumbe
 	return nil, false
 }
 
+// prependStartCode adds the Annex B start code (0x00 0x00 0x00 0x01) to a NAL unit
+func (d *HEVCDepacketizer) prependStartCode(nalUnit []byte) []byte {
+	startCode := []byte{0x00, 0x00, 0x00, 0x01}
+	result := make([]byte, len(startCode)+len(nalUnit))
+	copy(result, startCode)
+	copy(result[len(startCode):], nalUnit)
+	return result
+}
+
 // Reset clears the depacketizer state
 func (d *HEVCDepacketizer) Reset() {
 	d.mu.Lock()
@@ -297,6 +313,13 @@ func (d *HEVCDepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, 
 	// Process packet
 	nalUnits, err := d.HEVCDepacketizer.Depacketize(packet)
 
+	// Release memory on error
+	if err != nil {
+		d.memController.ReleaseMemory(d.streamID, estimatedSize)
+		d.currentUsage -= estimatedSize
+		return nil, err
+	}
+
 	// If we got complete NAL units, release fragment memory
 	if len(nalUnits) > 0 {
 		// Calculate actual memory used
@@ -316,7 +339,7 @@ func (d *HEVCDepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, 
 		d.currentUsage = 0
 	}
 
-	return nalUnits, err
+	return nalUnits, nil
 }
 
 // Reset clears the depacketizer state and releases memory

@@ -366,7 +366,11 @@ func (r *BFrameReorderer) isValidOutput(frame *types.VideoFrame) bool {
 
 // updateOutputState updates the last output timestamps
 func (r *BFrameReorderer) updateOutputState(frame *types.VideoFrame) {
-	r.lastOutputPTS = frame.PTS
+	// Only track non-B-frame PTS for order validation
+	// B-frames have lower PTS than surrounding I/P frames by design
+	if frame.Type != types.FrameTypeB {
+		r.lastOutputPTS = frame.PTS
+	}
 	r.lastOutputDTS = frame.DTS
 }
 
@@ -407,6 +411,7 @@ func (h *frameHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
 	frame := old[n-1]
+	old[n-1] = nil // Allow GC of the popped frame
 	*h = old[0 : n-1]
 	return frame
 }

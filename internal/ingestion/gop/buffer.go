@@ -410,6 +410,7 @@ func (b *Buffer) dropBFrames(gopCount int) []*types.VideoFrame {
 			gop.BFrameCount--
 			// FrameCount is now len(gop.Frames) - automatically updated
 			gop.TotalSize -= int64(frame.TotalSize)
+			b.currentBytes -= int64(frame.TotalSize)
 
 			// Update frame indices for remaining frames after removal
 			b.updateFrameIndicesAfterRemoval(gop, frameIdx)
@@ -448,6 +449,7 @@ func (b *Buffer) dropPFrames(gopCount int) []*types.VideoFrame {
 				gop.PFrameCount--
 				// FrameCount is now len(gop.Frames) - automatically updated
 				gop.TotalSize -= int64(frame.TotalSize)
+				b.currentBytes -= int64(frame.TotalSize)
 
 				// Update frame indices for remaining frames after removal
 				b.updateFrameIndicesAfterRemoval(gop, i)
@@ -576,6 +578,7 @@ func (b *Buffer) dropAllNonKeyframes() []*types.VideoFrame {
 			} else {
 				dropped = append(dropped, frame)
 				delete(b.frameIndex, frame.ID)
+				b.currentBytes -= int64(frame.TotalSize)
 			}
 		}
 

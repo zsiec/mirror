@@ -189,6 +189,7 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 	if len(fuPayload) > security.MaxFragmentSize {
 		// Fragment too large, reset and skip
 		d.fragments = nil
+		d.fuInProgress = false
 		d.fragmentStartTime = time.Time{}
 		return nil, false
 	}
@@ -197,6 +198,7 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 	if d.fragmentTimeout > 0 && !d.fragmentStartTime.IsZero() && time.Since(d.fragmentStartTime) > d.fragmentTimeout {
 		// Fragment assembly timed out, reset
 		d.fragments = [][]byte{}
+		d.fuInProgress = false
 		d.fragmentStartTime = time.Time{}
 	}
 
@@ -236,6 +238,7 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 			// Tolerating gaps would produce corrupt NAL units with holes.
 			// Reset fragment assembly and discard.
 			d.fragments = [][]byte{}
+			d.fuInProgress = false
 			d.fragmentStartTime = time.Time{}
 			return nil, false
 		}
@@ -253,6 +256,7 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 		if currentSize+len(fuPayload) > security.MaxNALUnitSize {
 			// Fragment accumulation too large, reset
 			d.fragments = [][]byte{}
+			d.fuInProgress = false
 			d.fragmentStartTime = time.Time{}
 			return nil, false
 		}
@@ -265,6 +269,7 @@ func (d *H264Depacketizer) handleFUA(payload []byte, sequenceNumber uint16) ([]b
 		if len(d.fragments) > 1000 {
 			// Too many fragments, reset
 			d.fragments = [][]byte{}
+			d.fuInProgress = false
 			d.fragmentStartTime = time.Time{}
 			return nil, false
 		}
@@ -384,6 +389,13 @@ func (d *H264DepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, 
 	// Process packet
 	nalUnits, err := d.H264Depacketizer.Depacketize(packet)
 
+	// Release memory on error
+	if err != nil {
+		d.memController.ReleaseMemory(d.streamID, estimatedSize)
+		d.currentUsage -= estimatedSize
+		return nil, err
+	}
+
 	// If we got complete NAL units, release fragment memory
 	if len(nalUnits) > 0 {
 		// Calculate actual memory used
@@ -403,7 +415,7 @@ func (d *H264DepacketizerWithMemory) Depacketize(packet *rtp.Packet) ([][]byte, 
 		d.currentUsage = 0
 	}
 
-	return nalUnits, err
+	return nalUnits, nil
 }
 
 // Reset clears the depacketizer state and releases memory

@@ -22,6 +22,8 @@ const (
 	StreamRecoveryStrategyAdaptive
 )
 
+const maxTotalRecoveryAttempts = 50
+
 // StreamRecoveryState represents the current recovery state
 type StreamRecoveryState int
 
@@ -66,12 +68,13 @@ type StreamRecovery struct {
 	config   RecoveryConfig
 
 	// State
-	state          atomic.Int32
-	failures       atomic.Int32
-	recoveries     atomic.Int32
-	lastError      error
-	lastRecovery   time.Time
-	circuitBreaker *CircuitBreaker
+	state                 atomic.Int32
+	failures              atomic.Int32
+	recoveries            atomic.Int32
+	totalRecoveryAttempts atomic.Int32
+	lastError             error
+	lastRecovery          time.Time
+	circuitBreaker        *CircuitBreaker
 
 	// Stream state preservation
 	preservedState *PreservedState
@@ -345,13 +348,23 @@ func (sr *StreamRecovery) checkHealth() {
 
 	switch state {
 	case StreamRecoveryStateFailed:
+		// Check if we've exceeded total recovery attempts
+		totalAttempts := sr.totalRecoveryAttempts.Load()
+		if totalAttempts >= maxTotalRecoveryAttempts {
+			sr.logger.WithField("total_attempts", totalAttempts).
+				Warn("Maximum total recovery attempts reached, giving up")
+			return
+		}
+
 		// Check if we should retry
 		sr.mu.RLock()
 		timeSinceFailure := time.Since(sr.lastRecovery)
 		sr.mu.RUnlock()
 
 		if timeSinceFailure > sr.config.HealthCheckInterval {
-			sr.logger.Info("Retrying after health check interval")
+			sr.totalRecoveryAttempts.Add(1)
+			sr.logger.WithField("attempt", sr.totalRecoveryAttempts.Load()).
+				Info("Retrying after health check interval")
 			sr.circuitBreaker.Reset()
 			go sr.recover()
 		}

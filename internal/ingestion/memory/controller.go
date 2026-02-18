@@ -146,15 +146,26 @@ func (c *Controller) ReleaseMemory(streamID string, size int64) {
 	// Only release memory if the stream exists in our tracking
 	if streamUsage, ok := c.streamUsage.Load(streamID); ok {
 		usage := streamUsage.(*atomic.Int64)
-		// Ensure we don't go negative on stream usage
-		oldUsage := usage.Load()
-		if oldUsage >= size {
-			usage.Add(-size)
-			c.usage.Add(-size)
-		} else {
-			// Release only what was actually allocated for this stream
-			usage.Store(0)
-			c.usage.Add(-oldUsage)
+		// Use CAS loop to avoid TOCTOU race between Load and Add/Store
+		for {
+			oldUsage := usage.Load()
+			if oldUsage <= 0 {
+				// Nothing to release
+				break
+			}
+			if oldUsage >= size {
+				if usage.CompareAndSwap(oldUsage, oldUsage-size) {
+					c.usage.Add(-size)
+					break
+				}
+			} else {
+				// Release only what was actually allocated for this stream
+				if usage.CompareAndSwap(oldUsage, 0) {
+					c.usage.Add(-oldUsage)
+					break
+				}
+			}
+			// CAS failed, retry
 		}
 	} else {
 		// Stream not found - this is a programming error but handle gracefully
@@ -241,11 +252,17 @@ func (c *Controller) evictMemory(targetSize int64) int64 {
 	var totalEvicted int64
 	for _, streamID := range selected {
 		if c.evictionCallback != nil {
-			// Get the stream's memory usage
+			// Get the stream's memory usage before the callback
 			if streamUsage, ok := c.streamUsage.Load(streamID); ok {
-				usage := streamUsage.(*atomic.Int64).Load()
-				c.evictionCallback(streamID, usage)
-				totalEvicted += usage
+				usageBefore := streamUsage.(*atomic.Int64).Load()
+				c.evictionCallback(streamID, usageBefore)
+				// Release any remaining memory the callback didn't release
+				remaining := streamUsage.(*atomic.Int64).Swap(0)
+				if remaining > 0 {
+					c.usage.Add(-remaining)
+				}
+				// Total evicted is what was used before (callback may have released some/all)
+				totalEvicted += usageBefore
 				c.evictionCount.Add(1)
 			}
 		}

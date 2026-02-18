@@ -106,11 +106,12 @@ func TestMemoryControllerEvictionRetryPath(t *testing.T) {
 	controller := NewController(1000, 800)
 	controller.pressureThreshold = 0.5 // Lower threshold to trigger eviction
 
-	// Set up eviction callback that does nothing (simulates failed eviction)
+	// Set up eviction callback - the controller will forcibly release memory
+	// tracking regardless of what the callback does (this was Fix 2: eviction
+	// must not be a no-op). The callback is a notification for external cleanup.
 	evictionCalled := false
 	controller.SetEvictionCallback(func(streamID string, bytes int64) {
 		evictionCalled = true
-		// Don't actually release memory to simulate eviction failure
 	})
 
 	// Fill up memory to trigger eviction path
@@ -119,10 +120,11 @@ func TestMemoryControllerEvictionRetryPath(t *testing.T) {
 		t.Fatalf("Initial allocation failed: %v", err)
 	}
 
-	// This should trigger eviction path but still fail
+	// This triggers eviction of stream1, freeing 600 bytes, then succeeds
+	// because the controller forcibly releases evicted stream memory tracking
 	err = controller.RequestMemory("stream2", 500)
-	if err != ErrGlobalMemoryLimit {
-		t.Fatalf("Expected global memory limit error after eviction retry, got: %v", err)
+	if err != nil {
+		t.Fatalf("Expected allocation to succeed after eviction, got: %v", err)
 	}
 
 	// Verify eviction was attempted
@@ -130,12 +132,16 @@ func TestMemoryControllerEvictionRetryPath(t *testing.T) {
 		t.Error("Expected eviction callback to be called")
 	}
 
-	// Verify accounting is correct after failed eviction
-	if controller.usage.Load() != 600 {
-		t.Errorf("Expected global usage 600 after eviction retry failure, got %d", controller.usage.Load())
+	// Verify accounting: stream1 evicted (0), stream2 allocated (500)
+	if controller.usage.Load() != 500 {
+		t.Errorf("Expected global usage 500 after eviction, got %d", controller.usage.Load())
 	}
 
-	if controller.GetStreamUsage("stream2") != 0 {
-		t.Errorf("Expected stream2 usage 0 after eviction retry failure, got %d", controller.GetStreamUsage("stream2"))
+	if controller.GetStreamUsage("stream1") != 0 {
+		t.Errorf("Expected stream1 usage 0 after eviction, got %d", controller.GetStreamUsage("stream1"))
+	}
+
+	if controller.GetStreamUsage("stream2") != 500 {
+		t.Errorf("Expected stream2 usage 500 after allocation, got %d", controller.GetStreamUsage("stream2"))
 	}
 }
