@@ -154,7 +154,8 @@ func TestParameterSetMigration(t *testing.T) {
 		migration, err := ctx.StartMigration(v1.Version, v2.Version, MigrationStrategyImmediate)
 		require.NoError(t, err)
 		assert.NotNil(t, migration)
-		assert.Equal(t, MigrationStatePending, migration.State)
+		// Note: Don't assert migration.State here — the background goroutine
+		// may have already changed it since Immediate strategy completes fast.
 
 		// Wait for migration to complete
 		time.Sleep(200 * time.Millisecond)

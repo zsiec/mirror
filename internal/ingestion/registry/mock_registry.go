@@ -34,12 +34,12 @@ func (m *MockRegistry) Register(ctx context.Context, stream *Stream) error {
 		return fmt.Errorf("stream %s already exists", stream.ID)
 	}
 
-	// Clone the stream to avoid external modifications
-	streamCopy := *stream
+	// Store a copy (excluding mutex) to avoid external modifications
+	streamCopy := copyStream(stream)
 	streamCopy.CreatedAt = time.Now()
 	streamCopy.LastHeartbeat = time.Now()
 
-	m.streams[stream.ID] = &streamCopy
+	m.streams[stream.ID] = streamCopy
 	return nil
 }
 
@@ -75,8 +75,7 @@ func (m *MockRegistry) Get(ctx context.Context, streamID string) (*Stream, error
 	}
 
 	// Return a copy to avoid external modifications
-	streamCopy := *stream
-	return &streamCopy, nil
+	return copyStream(stream), nil
 }
 
 // List returns all active streams
@@ -91,8 +90,7 @@ func (m *MockRegistry) List(ctx context.Context) ([]*Stream, error) {
 	streams := make([]*Stream, 0, len(m.streams))
 	for _, stream := range m.streams {
 		// Return copies to avoid external modifications
-		streamCopy := *stream
-		streams = append(streams, &streamCopy)
+		streams = append(streams, copyStream(stream))
 	}
 
 	return streams, nil
@@ -176,8 +174,7 @@ func (m *MockRegistry) Update(ctx context.Context, stream *Stream) error {
 	}
 
 	// Update the stream data
-	streamCopy := *stream
-	m.streams[stream.ID] = &streamCopy
+	m.streams[stream.ID] = copyStream(stream)
 	return nil
 }
 
@@ -193,6 +190,25 @@ func (m *MockRegistry) Close() error {
 	m.closed = true
 	m.streams = nil
 	return nil
+}
+
+// copyStream creates a copy of a Stream without copying the mutex.
+func copyStream(s *Stream) *Stream {
+	return &Stream{
+		ID:              s.ID,
+		Type:            s.Type,
+		SourceAddr:      s.SourceAddr,
+		Status:          s.Status,
+		CreatedAt:       s.CreatedAt,
+		LastHeartbeat:   s.LastHeartbeat,
+		VideoCodec:      s.VideoCodec,
+		Resolution:      s.Resolution,
+		Bitrate:         s.Bitrate,
+		FrameRate:       s.FrameRate,
+		BytesReceived:   s.BytesReceived,
+		PacketsReceived: s.PacketsReceived,
+		PacketsLost:     s.PacketsLost,
+	}
 }
 
 // Ensure MockRegistry implements Registry interface

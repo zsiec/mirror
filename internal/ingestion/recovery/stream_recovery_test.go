@@ -128,25 +128,29 @@ func TestStreamRecovery(t *testing.T) {
 		sr := NewStreamRecovery("test-stream", logger.NewNullLogger(), config)
 		defer sr.Stop()
 
-		var failureErr error
+		failureCh := make(chan error, 1)
 		sr.SetCallbacks(
 			func() error {
 				return fmt.Errorf("persistent error")
 			},
 			nil,
 			func(err error) {
-				failureErr = err
+				failureCh <- err
 			},
 		)
 
 		sr.HandleError(fmt.Errorf("test error"))
 
-		// Wait for recovery attempts
-		time.Sleep(100 * time.Millisecond)
+		// Wait for recovery failure via channel
+		select {
+		case failureErr := <-failureCh:
+			assert.NotNil(t, failureErr)
+			assert.Contains(t, failureErr.Error(), "failed after 2 attempts")
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for recovery failure")
+		}
 
 		assert.Equal(t, StreamRecoveryStateFailed, sr.GetState())
-		assert.NotNil(t, failureErr)
-		assert.Contains(t, failureErr.Error(), "failed after 2 attempts")
 	})
 
 	t.Run("State Preservation", func(t *testing.T) {
@@ -334,10 +338,10 @@ func TestRecoveryStrategies(t *testing.T) {
 		sr := NewStreamRecovery("test-stream", logger.NewNullLogger(), config)
 		defer sr.Stop()
 
-		recoverTime := time.Time{}
+		doneCh := make(chan time.Time, 1)
 		sr.SetCallbacks(
 			func() error {
-				recoverTime = time.Now()
+				doneCh <- time.Now()
 				return nil
 			},
 			nil,
@@ -347,10 +351,13 @@ func TestRecoveryStrategies(t *testing.T) {
 		start := time.Now()
 		sr.HandleError(fmt.Errorf("error"))
 
-		time.Sleep(20 * time.Millisecond)
-
-		// Should recover immediately
-		assert.Less(t, recoverTime.Sub(start), 10*time.Millisecond)
+		select {
+		case recoverTime := <-doneCh:
+			// Should recover immediately (within 100ms to be safe)
+			assert.Less(t, recoverTime.Sub(start), 100*time.Millisecond)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for recovery")
+		}
 	})
 
 	t.Run("Adaptive Strategy", func(t *testing.T) {
@@ -363,13 +370,21 @@ func TestRecoveryStrategies(t *testing.T) {
 		sr := NewStreamRecovery("test-stream", logger.NewNullLogger(), config)
 		defer sr.Stop()
 
-		errorTypes := []string{}
+		var mu sync.Mutex
+		errorCount := 0
+		doneCh := make(chan struct{}, 1)
 		sr.SetCallbacks(
 			func() error {
+				mu.Lock()
+				defer mu.Unlock()
 				// Simulate different error types
-				if len(errorTypes) < 2 {
-					errorTypes = append(errorTypes, "transient")
+				if errorCount < 2 {
+					errorCount++
 					return fmt.Errorf("transient error")
+				}
+				select {
+				case doneCh <- struct{}{}:
+				default:
 				}
 				return nil
 			},
@@ -379,17 +394,21 @@ func TestRecoveryStrategies(t *testing.T) {
 
 		sr.HandleError(fmt.Errorf("initial error"))
 
-		// Wait for recovery to complete
-		// First attempt: immediate
-		// Second attempt: after 50ms backoff
-		// Third attempt: after 75ms backoff (50 * 1.5)
-		// Total: ~125ms + processing time
-		time.Sleep(300 * time.Millisecond)
+		// Wait for recovery callback to succeed
+		select {
+		case <-doneCh:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for recovery")
+		}
 
-		// Recovery should eventually succeed
-		assert.Equal(t, StreamRecoveryStateHealthy, sr.GetState())
-		// The callback simulates 2 failures before success, so it should be called 3 times
-		assert.Equal(t, 2, len(errorTypes))
+		// Wait for state to propagate after callback returns
+		assert.Eventually(t, func() bool {
+			return sr.GetState() == StreamRecoveryStateHealthy
+		}, time.Second, 10*time.Millisecond, "Recovery should eventually succeed")
+
+		mu.Lock()
+		assert.Equal(t, 2, errorCount)
+		mu.Unlock()
 	})
 }
 

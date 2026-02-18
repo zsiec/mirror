@@ -140,14 +140,20 @@ const (
 	AlertSeverityCritical
 )
 
-// NewHealthMonitor creates a new health monitor
-func NewHealthMonitor(streamID string, logger logger.Logger) *HealthMonitor {
+// NewHealthMonitor creates a new health monitor.
+// An optional updateInterval can be passed to override the default 5s interval.
+func NewHealthMonitor(streamID string, logger logger.Logger, updateInterval ...time.Duration) *HealthMonitor {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	interval := 5 * time.Second
+	if len(updateInterval) > 0 && updateInterval[0] > 0 {
+		interval = updateInterval[0]
+	}
 
 	hm := &HealthMonitor{
 		streamID:          streamID,
 		logger:            logger,
-		updateInterval:    5 * time.Second,
+		updateInterval:    interval,
 		degradedThreshold: 0.7,
 		criticalThreshold: 0.5,
 		healthHistory:     make([]StreamHealth, 0, 100),

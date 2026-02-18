@@ -231,6 +231,13 @@ func (sr *StreamRecovery) recover() {
 	start := time.Now()
 	sr.setState(StreamRecoveryStateRecovering)
 
+	// Snapshot callbacks under lock to avoid races with SetCallbacks
+	sr.mu.RLock()
+	onRecover := sr.onRecover
+	onStateRestore := sr.onStateRestore
+	onRecoveryFailed := sr.onRecoveryFailed
+	sr.mu.RUnlock()
+
 	backoff := sr.config.InitialBackoff
 
 	for attempt := 1; attempt <= sr.config.MaxRetries; attempt++ {
@@ -238,8 +245,8 @@ func (sr *StreamRecovery) recover() {
 
 		// Try to restore state first
 		if sr.config.EnableStatePreservation && sr.preservedState != nil {
-			if sr.onStateRestore != nil {
-				if err := sr.onStateRestore(sr.preservedState); err != nil {
+			if onStateRestore != nil {
+				if err := onStateRestore(sr.preservedState); err != nil {
 					sr.logger.WithError(err).Warn("Failed to restore state")
 				} else {
 					sr.logger.Info("State restored successfully")
@@ -248,8 +255,8 @@ func (sr *StreamRecovery) recover() {
 		}
 
 		// Execute recovery callback
-		if sr.onRecover != nil {
-			if err := sr.onRecover(); err != nil {
+		if onRecover != nil {
+			if err := onRecover(); err != nil {
 				sr.logger.WithError(err).Warn("Recovery attempt failed")
 				sr.circuitBreaker.RecordFailure()
 
@@ -287,8 +294,8 @@ func (sr *StreamRecovery) recover() {
 
 	// All attempts failed
 	sr.setState(StreamRecoveryStateFailed)
-	if sr.onRecoveryFailed != nil {
-		sr.onRecoveryFailed(fmt.Errorf("recovery failed after %d attempts", sr.config.MaxRetries))
+	if onRecoveryFailed != nil {
+		onRecoveryFailed(fmt.Errorf("recovery failed after %d attempts", sr.config.MaxRetries))
 	}
 }
 

@@ -900,7 +900,6 @@ func (b *Buffer) ExtractParameterSetFromNAL(paramContext *types.ParameterSetCont
 		}
 
 		if err := paramContext.AddSPS(spsData); err != nil {
-			// **CRITICAL DEBUG: Log SPS addition failures with detailed context**
 			maxBytes := len(spsData)
 			if maxBytes > 20 {
 				maxBytes = 20
@@ -917,8 +916,8 @@ func (b *Buffer) ExtractParameterSetFromNAL(paramContext *types.ParameterSetCont
 			return false
 		}
 
-		// **ENHANCED DEBUGGING: Extract and log the SPS ID**
-		spsID := uint8(255) // Default invalid ID
+		spsID := uint8(255)
+		// Extract SPS ID for logging
 		if len(spsData) >= 2 {
 			// Parse SPS ID from the data to aid debugging
 			spsPayload := spsData[1:] // Skip NAL header

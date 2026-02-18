@@ -2,9 +2,6 @@ package types
 
 import (
 	"fmt"
-
-	"github.com/sirupsen/logrus"
-	"github.com/zsiec/mirror/internal/logger"
 )
 
 // H.264 bitstream parser for parameter sets and slice headers
@@ -257,52 +254,18 @@ func (ctx *ParameterSetContext) parseSPS(data []byte) (*ParameterSet, error) {
 		return nil, fmt.Errorf("SPS too short: %d bytes", len(data))
 	}
 
-	// DEBUG: Log raw SPS data
-	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
-	logger.WithFields(map[string]interface{}{
-		"stream_id":      ctx.streamID,
-		"raw_size":       len(data),
-		"first_16_bytes": fmt.Sprintf("%02x", data[:min(16, len(data))]),
-		"nal_header":     fmt.Sprintf("0x%02x", data[0]),
-		"nal_type":       data[0] & 0x1F,
-	}).Debug("SPS PARSING DEBUG: Raw SPS data before RBSP extraction")
-
 	// Detect if NAL header is present and extract RBSP accordingly
 	var rbspData []byte
 	var err error
-	// Check if this looks like a NAL header with SPS type (7 or 15)
 	nalType := data[0] & 0x1F
-	if len(data) > 0 && (nalType == 7 || nalType == 15) { // SPS NAL unit types (7=SPS, 15=subset SPS)
-		// NAL header present, skip it
+	if nalType == 7 || nalType == 15 { // SPS NAL unit types (7=SPS, 15=subset SPS)
 		rbspData, err = ExtractRBSPFromNALUnit(data)
-		logger.WithFields(map[string]interface{}{
-			"stream_id":  ctx.streamID,
-			"method":     "ExtractRBSPFromNALUnit",
-			"input_size": len(data),
-			"rbsp_size":  len(rbspData),
-			"error":      err,
-		}).Debug("SPS PARSING DEBUG: Extracted RBSP with NAL header")
 	} else {
-		// NAL header already stripped, process payload directly
 		rbspData, err = ExtractRBSPFromPayload(data)
-		logger.WithFields(map[string]interface{}{
-			"stream_id":  ctx.streamID,
-			"method":     "ExtractRBSPFromPayload",
-			"input_size": len(data),
-			"rbsp_size":  len(rbspData),
-			"error":      err,
-		}).Debug("SPS PARSING DEBUG: Extracted RBSP without NAL header")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract RBSP from SPS: %w", err)
 	}
-
-	// DEBUG: Log RBSP data after extraction
-	logger.WithFields(map[string]interface{}{
-		"stream_id":           ctx.streamID,
-		"rbsp_size":           len(rbspData),
-		"rbsp_first_16_bytes": fmt.Sprintf("%02x", rbspData[:min(16, len(rbspData))]),
-	}).Debug("SPS PARSING DEBUG: RBSP data after extraction")
 
 	br := NewBitReader(rbspData)
 
@@ -311,15 +274,6 @@ func (ctx *ParameterSetContext) parseSPS(data []byte) (*ParameterSet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read profile_idc: %w", err)
 	}
-
-	// DEBUG: Log profile_idc
-	logger.WithFields(map[string]interface{}{
-		"stream_id":       ctx.streamID,
-		"profile_idc":     profileIDC,
-		"profile_idc_hex": fmt.Sprintf("0x%02x", profileIDC),
-		"bit_pos":         br.bitPos,
-		"byte_pos":        br.bytePos,
-	}).Debug("SPS PARSING DEBUG: Read profile_idc")
 
 	// Validate profile_idc - common values are 66, 77, 88, 100, 110, 122, 244
 	// NOTE: The user says "the stream is correct", so we should be more permissive
@@ -340,16 +294,8 @@ func (ctx *ParameterSetContext) parseSPS(data []byte) (*ParameterSet, error) {
 		138: true, // Multiview Depth High
 	}
 
-	if !validProfiles[profileIDC] {
-		// Log warning but don't reject - the stream might use a profile we don't know about
-		logger.WithFields(map[string]interface{}{
-			"stream_id":       ctx.streamID,
-			"profile_idc":     profileIDC,
-			"profile_idc_hex": fmt.Sprintf("0x%02x", profileIDC),
-		}).Warn("SPS PARSING DEBUG: Unknown profile_idc value - proceeding anyway")
-		// Comment out rejection for now to see if this helps
-		// return nil, fmt.Errorf("invalid profile_idc: %d", profileIDC)
-	}
+	// Unknown profiles are allowed - the stream might use a profile we don't recognize
+	_ = validProfiles[profileIDC]
 
 	// Skip constraint flags (8 bits)
 	_, err = br.ReadBits(8)
@@ -362,15 +308,6 @@ func (ctx *ParameterSetContext) parseSPS(data []byte) (*ParameterSet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read level_idc: %w", err)
 	}
-
-	// DEBUG: Log level_idc
-	logger.WithFields(map[string]interface{}{
-		"stream_id":     ctx.streamID,
-		"level_idc":     levelIDC,
-		"level_idc_hex": fmt.Sprintf("0x%02x", levelIDC),
-		"bit_pos":       br.bitPos,
-		"byte_pos":      br.bytePos,
-	}).Debug("SPS PARSING DEBUG: Read level_idc")
 
 	// Validate level_idc - common values are 10, 11, 12, 13, 20, 21, 22, 30, 31, 32, 40, 41, 42, 50, 51, 52
 	// NOTE: The user says "the stream is correct", so we should be more permissive
@@ -397,16 +334,8 @@ func (ctx *ParameterSetContext) parseSPS(data []byte) (*ParameterSet, error) {
 		62: true, // Level 6.2
 	}
 
-	if !validLevels[levelIDC] {
-		// Log warning but don't reject - the stream might use a level we don't know about
-		logger.WithFields(map[string]interface{}{
-			"stream_id":     ctx.streamID,
-			"level_idc":     levelIDC,
-			"level_idc_hex": fmt.Sprintf("0x%02x", levelIDC),
-		}).Warn("SPS PARSING DEBUG: Unknown level_idc value - proceeding anyway")
-		// Comment out rejection for now to see if this helps
-		// return nil, fmt.Errorf("invalid level_idc: %d", levelIDC)
-	}
+	// Unknown levels are allowed - the stream might use a level we don't recognize
+	_ = validLevels[levelIDC]
 
 	// Parse seq_parameter_set_id
 	spsID, err := br.ReadUE()
@@ -417,14 +346,6 @@ func (ctx *ParameterSetContext) parseSPS(data []byte) (*ParameterSet, error) {
 	if spsID > 31 {
 		return nil, fmt.Errorf("sps_id %d out of range (0-31)", spsID)
 	}
-
-	// DEBUG: Log SPS ID
-	logger.WithFields(map[string]interface{}{
-		"stream_id":   ctx.streamID,
-		"sps_id":      spsID,
-		"profile_idc": profileIDC,
-		"level_idc":   levelIDC,
-	}).Debug("SPS PARSING DEBUG: Parsed SPS ID")
 
 	sps := &ParameterSet{
 		ID:       uint8(spsID),
@@ -445,19 +366,6 @@ func (ctx *ParameterSetContext) parseSPS(data []byte) (*ParameterSet, error) {
 	if width > 0 && height > 0 {
 		sps.Width = &width
 		sps.Height = &height
-		logger.WithFields(map[string]interface{}{
-			"stream_id": ctx.streamID,
-			"sps_id":    spsID,
-			"width":     width,
-			"height":    height,
-		}).Debug("SPS PARSING DEBUG: Parsed resolution from SPS")
-	} else {
-		logger.WithFields(map[string]interface{}{
-			"stream_id": ctx.streamID,
-			"sps_id":    spsID,
-			"width":     width,
-			"height":    height,
-		}).Warn("SPS PARSING DEBUG: Failed to parse resolution from SPS")
 	}
 
 	return sps, nil
@@ -485,7 +393,6 @@ func (ctx *ParameterSetContext) parsePPS(data []byte) (*PPSContext, error) {
 		return nil, fmt.Errorf("failed to extract RBSP from PPS: %w", err)
 	}
 
-	// **DEBUG: Additional validation**
 	if len(rbspData) < 1 {
 		return nil, fmt.Errorf("PPS RBSP payload too short: %d bytes", len(rbspData))
 	}
@@ -544,22 +451,6 @@ func (ctx *ParameterSetContext) parseSliceHeader(data []byte, isIDR bool) (*Fram
 		return nil, fmt.Errorf("slice header too short: %d bytes", len(data))
 	}
 
-	// **DEBUG: Enhanced slice header parsing with detailed logging**
-	logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
-	logger.WithFields(map[string]interface{}{
-		"stream_id":  ctx.streamID,
-		"data_size":  len(data),
-		"nal_header": fmt.Sprintf("0x%02x", data[0]),
-		"first_16_bytes": func() string {
-			maxBytes := 16
-			if len(data) < maxBytes {
-				maxBytes = len(data)
-			}
-			return fmt.Sprintf("%02x", data[:maxBytes])
-		}(),
-		"is_idr": isIDR,
-	}).Info("SLICE HEADER DEBUG: Starting slice header parsing")
-
 	// Detect if NAL header is present and extract RBSP accordingly
 	var rbspData []byte
 	var err error
@@ -583,94 +474,30 @@ func (ctx *ParameterSetContext) parseSliceHeader(data []byte, isIDR bool) (*Fram
 		return nil, fmt.Errorf("failed to extract RBSP from slice header: %w", err)
 	}
 
-	logger.WithFields(map[string]interface{}{
-		"stream_id":      ctx.streamID,
-		"rbsp_data_size": len(rbspData),
-		"rbsp_first_8_bytes": func() string {
-			maxBytes := 8
-			if len(rbspData) < maxBytes {
-				maxBytes = len(rbspData)
-			}
-			return fmt.Sprintf("%02x", rbspData[:maxBytes])
-		}(),
-	}).Info("SLICE HEADER DEBUG: RBSP data extracted")
-
 	br := NewBitReader(rbspData)
 
 	// Parse first_mb_in_slice
-	logger.Info("SLICE HEADER DEBUG: About to parse first_mb_in_slice")
-	firstMBInSlice, err := br.ReadUE()
+	_, err = br.ReadUE()
 	if err != nil {
-		logger.WithError(err).Error("SLICE HEADER DEBUG: Failed to parse first_mb_in_slice")
 		return nil, fmt.Errorf("failed to read first_mb_in_slice: %w", err)
 	}
-	logger.WithFields(map[string]interface{}{
-		"stream_id":         ctx.streamID,
-		"first_mb_in_slice": firstMBInSlice,
-		"bit_pos":           br.bitPos,
-		"byte_pos":          br.bytePos,
-	}).Info("SLICE HEADER DEBUG: Parsed first_mb_in_slice")
 
 	// Parse slice_type (H.264 Table 7-6: values 0-9)
-	logger.Info("SLICE HEADER DEBUG: About to parse slice_type")
 	sliceType, err := br.ReadUE()
 	if err != nil {
-		logger.WithError(err).Error("SLICE HEADER DEBUG: Failed to parse slice_type")
 		return nil, fmt.Errorf("failed to read slice_type: %w", err)
 	}
 	if sliceType > 9 {
-		logger.WithField("slice_type", sliceType).Error("SLICE HEADER DEBUG: Invalid slice_type")
 		return nil, fmt.Errorf("invalid slice_type %d (must be 0-9)", sliceType)
 	}
-	logger.WithFields(map[string]interface{}{
-		"stream_id":  ctx.streamID,
-		"slice_type": sliceType,
-		"bit_pos":    br.bitPos,
-		"byte_pos":   br.bytePos,
-	}).Info("SLICE HEADER DEBUG: Parsed slice_type")
 
 	// Parse pic_parameter_set_id
-	logger.WithFields(map[string]interface{}{
-		"stream_id": ctx.streamID,
-		"bit_pos":   br.bitPos,
-		"byte_pos":  br.bytePos,
-		"remaining_bytes": func() string {
-			if br.bytePos < len(rbspData) {
-				maxBytes := 8
-				endPos := br.bytePos + maxBytes
-				if endPos > len(rbspData) {
-					endPos = len(rbspData)
-				}
-				return fmt.Sprintf("%02x", rbspData[br.bytePos:endPos])
-			}
-			return "none"
-		}(),
-	}).Info("SLICE HEADER DEBUG: About to parse pic_parameter_set_id")
-
 	ppsID, err := br.ReadUE()
 	if err != nil {
-		logger.WithError(err).WithFields(map[string]interface{}{
-			"stream_id": ctx.streamID,
-			"bit_pos":   br.bitPos,
-			"byte_pos":  br.bytePos,
-		}).Error("SLICE HEADER DEBUG: Failed to parse pps_id")
 		return nil, fmt.Errorf("failed to read pps_id: %w", err)
 	}
 
-	logger.WithFields(map[string]interface{}{
-		"stream_id": ctx.streamID,
-		"pps_id":    ppsID,
-		"bit_pos":   br.bitPos,
-		"byte_pos":  br.bytePos,
-		"is_valid":  ppsID <= 255,
-	}).Info("SLICE HEADER DEBUG: Parsed pic_parameter_set_id")
-
 	if ppsID > 255 {
-		logger.WithFields(map[string]interface{}{
-			"stream_id":      ctx.streamID,
-			"invalid_pps_id": ppsID,
-			"max_valid":      255,
-		}).Error("SLICE HEADER DEBUG: PPS ID out of valid range")
 		return nil, fmt.Errorf("slice references invalid pps_id %d", ppsID)
 	}
 
@@ -853,14 +680,8 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 		return 0, 0
 	}
 
-	// Sanity check max_num_ref_frames (typically <= 16)
-	if maxNumRefFrames > 16 {
-		logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
-		logger.WithFields(map[string]interface{}{
-			"stream_id":          ctx.streamID,
-			"max_num_ref_frames": maxNumRefFrames,
-		}).Warn("SPS PARSING DEBUG: Unusually high max_num_ref_frames")
-	}
+	// max_num_ref_frames typically <= 16; allow higher values but they may indicate corruption
+	_ = maxNumRefFrames
 
 	// Parse gaps_in_frame_num_value_allowed_flag
 	_, err = br.ReadBit()
@@ -876,12 +697,6 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 
 	// Validate width is reasonable (max 512 MBs = 8192 pixels)
 	if widthInMBs > 511 {
-		logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
-		logger.WithFields(map[string]interface{}{
-			"stream_id":   ctx.streamID,
-			"widthInMBs":  widthInMBs,
-			"max_allowed": 511,
-		}).Warn("SPS PARSING DEBUG: Unreasonable width value detected")
 		return 0, 0
 	}
 
@@ -893,12 +708,6 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 
 	// Validate height is reasonable (max 512 map units = 8192 pixels)
 	if heightInMapUnits > 511 {
-		logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
-		logger.WithFields(map[string]interface{}{
-			"stream_id":        ctx.streamID,
-			"heightInMapUnits": heightInMapUnits,
-			"max_allowed":      511,
-		}).Warn("SPS PARSING DEBUG: Unreasonable height value detected")
 		return 0, 0
 	}
 
@@ -908,12 +717,6 @@ func (ctx *ParameterSetContext) parseResolutionFromSPS(br *BitReader, profileIDC
 
 	// Final sanity check
 	if width < 16 || height < 16 || width > 8192 || height > 8192 {
-		logger := logger.NewLogrusAdapter(logrus.NewEntry(logrus.New()))
-		logger.WithFields(map[string]interface{}{
-			"stream_id": ctx.streamID,
-			"width":     width,
-			"height":    height,
-		}).Warn("SPS PARSING DEBUG: Invalid resolution calculated from SPS")
 		return 0, 0
 	}
 

@@ -146,11 +146,8 @@ func TestHealthMonitor(t *testing.T) {
 	})
 
 	t.Run("Alert Resolution", func(t *testing.T) {
-		hm := NewHealthMonitor("test-stream", logger.NewNullLogger())
+		hm := NewHealthMonitor("test-stream", logger.NewNullLogger(), 50*time.Millisecond)
 		defer hm.Stop()
-
-		// Set shorter update interval for test
-		hm.updateInterval = 50 * time.Millisecond
 
 		// Trigger alert
 		badMetrics := HealthMetrics{

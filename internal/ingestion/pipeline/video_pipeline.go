@@ -221,14 +221,6 @@ func (p *VideoPipeline) processPackets() {
 				return
 			}
 
-			p.logger.WithFields(map[string]interface{}{
-				"stream_id":   p.streamID,
-				"packet_type": pkt.Type.String(),
-				"data_len":    len(pkt.Data),
-				"pts":         pkt.PTS,
-				"dts":         pkt.DTS,
-			}).Info("DEBUG: Video pipeline received packet")
-
 			// Validate packet data before processing
 			if len(pkt.Data) == 0 {
 				p.errors.Add(1)
@@ -248,12 +240,6 @@ func (p *VideoPipeline) processPackets() {
 					"dts":      pkt.DTS,
 					"data_len": len(pkt.Data),
 				})
-				p.logger.WithFields(map[string]interface{}{
-					"stream_id": p.streamID,
-					"error":     err.Error(),
-					"data_len":  len(pkt.Data),
-				}).Info("DEBUG: Frame assembler rejected packet")
-
 				// Check if error indicates critical failure requiring pipeline restart
 				if p.isCriticalError(err) {
 					p.logger.WithError(err).Error("Critical error in frame assembler, stopping pipeline")
@@ -264,10 +250,6 @@ func (p *VideoPipeline) processPackets() {
 				p.sampledLogger.DebugWithCategory(logger.CategoryPacketProcessing, "Packet processed successfully", map[string]interface{}{
 					"pts": pkt.PTS,
 				})
-				p.logger.WithFields(map[string]interface{}{
-					"stream_id": p.streamID,
-					"data_len":  len(pkt.Data),
-				}).Info("DEBUG: Frame assembler processed packet successfully")
 			}
 
 			p.packetsProcessed.Add(1)
@@ -328,16 +310,6 @@ func (p *VideoPipeline) processFrames() {
 				p.logger.WithField("frame_id", frame.ID).Error("Received frame with no NAL units")
 				continue
 			}
-
-			p.logger.WithFields(map[string]interface{}{
-				"stream_id":  p.streamID,
-				"frame_id":   frame.ID,
-				"frame_type": frame.Type.String(),
-				"frame_size": frame.TotalSize,
-				"pts":        frame.PTS,
-				"dts":        frame.DTS,
-				"nal_units":  len(frame.NALUnits),
-			}).Info("DEBUG: Video pipeline assembled frame")
 
 			// Check if this is a metadata frame (SPS, PPS, SEI) that should bypass reordering
 			if frame.Type == types.FrameTypeSPS || frame.Type == types.FrameTypePPS || frame.Type == types.FrameTypeSEI {
