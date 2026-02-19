@@ -132,7 +132,7 @@ func TestRBSPExtractionInParser(t *testing.T) {
 
 func TestParameterSetWithComplexRBSP(t *testing.T) {
 	// Test parameter set parsing with complex RBSP patterns
-	ctx := NewParameterSetContextForTest(CodecH264, "complex-test")
+	ctx := NewParameterSetContextForTest(CodecH264, "test-complex")
 
 	// Test that our RBSP extraction works with parameter sets
 	// This is a minimal test to verify RBSP is integrated

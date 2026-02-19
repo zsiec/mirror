@@ -175,7 +175,9 @@ func (q *HybridQueue) Dequeue() ([]byte, error) {
 	}
 }
 
-// DequeueTimeout removes and returns data from the queue with timeout
+// DequeueTimeout removes and returns data from the queue with timeout.
+// Data from disk is delivered via the background pump goroutine; the dequeue
+// path only reads from the in-memory channel to keep depth accounting simple.
 func (q *HybridQueue) DequeueTimeout(timeout time.Duration) ([]byte, error) {
 	if q.closed.Load() && q.depth.Load() == 0 {
 		return nil, ErrQueueClosed
@@ -189,22 +191,13 @@ func (q *HybridQueue) DequeueTimeout(timeout time.Duration) ([]byte, error) {
 		timeoutCh = timer.C
 	}
 
-	// Try memory queue with timeout
+	// All data flows through memQueue (directly enqueued or pumped from disk)
 	select {
 	case data := <-q.memQueue:
 		q.depth.Add(-1)
 		q.memCount.Add(-1)
 		return data, nil
 	case <-timeoutCh:
-		// Before timing out, check if there's disk data we can read directly
-		if q.HasDiskData() && q.memCount.Load() == 0 {
-			// Try to read directly from disk
-			data, err := q.readFromDisk()
-			if err == nil {
-				q.depth.Add(-1) // Adjust depth since readFromDisk doesn't
-				return data, nil
-			}
-		}
 		return nil, errors.New("dequeue timeout")
 	case <-q.closeCh:
 		// Check one more time after close signal
@@ -256,8 +249,8 @@ func (q *HybridQueue) diskToMemoryPump() {
 
 		// Check if we should pump data
 		if q.memCount.Load() >= int64(q.memSize) || !q.HasDiskData() {
-			// Memory full or no disk data, wait
-			timer := time.NewTimer(10 * time.Millisecond)
+			// Memory full or no disk data, wait briefly
+			timer := time.NewTimer(5 * time.Millisecond)
 			select {
 			case <-q.closeCh:
 				timer.Stop()
@@ -272,7 +265,7 @@ func (q *HybridQueue) diskToMemoryPump() {
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				// End of current disk data, wait for more
-				timer := time.NewTimer(50 * time.Millisecond)
+				timer := time.NewTimer(10 * time.Millisecond)
 				select {
 				case <-q.closeCh:
 					timer.Stop()
@@ -282,18 +275,18 @@ func (q *HybridQueue) diskToMemoryPump() {
 				}
 			}
 			// Other error, wait and retry
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(5 * time.Millisecond)
 			continue
 		}
 
-		// Try to put in memory queue (blocking)
+		// Put in memory queue (blocking until space available or close)
 		select {
 		case q.memQueue <- data:
 			q.memCount.Add(1)
-			// Successfully delivered to memory
 		case <-q.closeCh:
-			// Queue closing, data was read but not delivered
-			// Don't need to adjust counters since depth wasn't decremented in readFromDisk
+			// Queue closing, data was read but not delivered.
+			// Depth was NOT decremented in readFromDisk, so the counter
+			// is still correct (this item will remain "lost" on close).
 			return
 		}
 	}

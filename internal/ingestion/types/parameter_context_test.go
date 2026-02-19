@@ -301,8 +301,8 @@ func TestParameterSetContext_EncoderSessionIntegration(t *testing.T) {
 	})
 
 	t.Run("session_manager_isolation_between_contexts", func(t *testing.T) {
-		ctx1 := NewParameterSetContextForTest(CodecH264, "stream-1")
-		ctx2 := NewParameterSetContextForTest(CodecH264, "stream-2")
+		ctx1 := NewParameterSetContextForTest(CodecH264, "test-stream-1")
+		ctx2 := NewParameterSetContextForTest(CodecH264, "test-stream-2")
 
 		session1 := ctx1.GetSessionManager()
 		session2 := ctx2.GetSessionManager()

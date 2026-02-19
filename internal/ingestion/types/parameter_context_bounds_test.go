@@ -11,11 +11,11 @@ func TestParameterSetContextBoundsChecking(t *testing.T) {
 	ctx := NewParameterSetContextForTest(CodecH264, "test-stream")
 
 	// Test case 1: Normal copying should work
-	sourceCtx := NewParameterSetContextForTest(CodecH264, "source-stream")
+	sourceCtx := NewParameterSetContextForTest(CodecH264, "test-source-stream")
 
-	// Add some parameter sets to source
-	spsData := []byte{0x67, 0x42, 0x00, 0x1e, 0x96, 0x54, 0x00, 0x00} // Fake SPS
-	ppsData := []byte{0x68, 0xce, 0x3c, 0x80}                         // Fake PPS
+	// Add valid parameter sets to source
+	spsData := testValidSPSBytes(0x1e)
+	ppsData := testValidPPSBytes()
 
 	err := sourceCtx.AddSPS(spsData)
 	if err != nil {
@@ -131,7 +131,7 @@ func TestParameterSetContextMemoryLimits(t *testing.T) {
 	}
 
 	// Now create a source with additional parameter sets
-	sourceCtx := NewParameterSetContextForTest(CodecHEVC, "source-stream")
+	sourceCtx := NewParameterSetContextForTest(CodecHEVC, "test-source-stream")
 
 	// Add parameter sets that would exceed the limit
 	sourceCtx.mu.Lock()
@@ -231,10 +231,16 @@ func TestParameterSetContextEmergencyCleanup(t *testing.T) {
 	t.Logf("Filled context with %d old parameter sets (limit is %d)", ctx.totalSets, MaxParameterSetsPerSession)
 	ctx.mu.Unlock()
 
-	// Create source with more parameter sets
-	sourceCtx := NewParameterSetContextForTest(CodecH264, "source-stream")
-	sourceCtx.AddSPS([]byte{0x67, 0x42, 0x00, 0x1e, 0x99})
-	sourceCtx.AddPPS([]byte{0x68, 0xce, 0x3c, 0x99})
+	// Create source with valid parameter sets
+	sourceCtx := NewParameterSetContextForTest(CodecH264, "test-source-stream")
+	err := sourceCtx.AddSPS(testValidSPSBytes(0x1e))
+	if err != nil {
+		t.Fatalf("Failed to add SPS to source: %v", err)
+	}
+	err = sourceCtx.AddPPS(testValidPPSBytes())
+	if err != nil {
+		t.Fatalf("Failed to add PPS to source: %v", err)
+	}
 
 	// This should trigger emergency cleanup
 	copiedCount := ctx.CopyParameterSetsFrom(sourceCtx)
@@ -338,8 +344,8 @@ func TestParameterSetContextCriticalFailure(t *testing.T) {
 	ctx.mu.Unlock()
 
 	// Create source
-	sourceCtx := NewParameterSetContextForTest(CodecH264, "source-stream")
-	sourceCtx.AddSPS([]byte{0x67, 0x42, 0x00, 0x1e, 0x99})
+	sourceCtx := NewParameterSetContextForTest(CodecH264, "test-source-stream")
+	sourceCtx.AddSPS(testValidSPSBytes(0x1e))
 
 	// This should trigger emergency cleanup that reduces the count enough to allow copying
 	copiedCount := ctx.CopyParameterSetsFrom(sourceCtx)

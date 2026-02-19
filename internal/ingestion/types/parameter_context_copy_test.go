@@ -6,7 +6,7 @@ import (
 
 func TestParameterSetCopying(t *testing.T) {
 	// Create source context with parameter sets
-	sourceCtx := NewParameterSetContextForTest(CodecH264, "source-stream")
+	sourceCtx := NewParameterSetContextForTest(CodecH264, "test-source-stream")
 
 	// Add test SPS
 	spsData := []byte{0x67, 0x42, 0x00, 0x1E, 0x8D, 0x84, 0x04, 0x05}
@@ -23,7 +23,7 @@ func TestParameterSetCopying(t *testing.T) {
 	}
 
 	// Create destination context
-	destCtx := NewParameterSetContextForTest(CodecH264, "dest-stream")
+	destCtx := NewParameterSetContextForTest(CodecH264, "test-dest-stream")
 
 	// Verify destination is empty
 	destStats := destCtx.GetStatistics()
@@ -77,7 +77,7 @@ func TestParameterSetCopying(t *testing.T) {
 }
 
 func TestParameterSetCopyingWithNilSource(t *testing.T) {
-	destCtx := NewParameterSetContextForTest(CodecH264, "dest-stream")
+	destCtx := NewParameterSetContextForTest(CodecH264, "test-dest-stream")
 
 	// Try to copy from nil source
 	copiedCount := destCtx.CopyParameterSetsFrom(nil)
@@ -88,8 +88,8 @@ func TestParameterSetCopyingWithNilSource(t *testing.T) {
 }
 
 func TestParameterSetCopyingEmptySource(t *testing.T) {
-	sourceCtx := NewParameterSetContextForTest(CodecH264, "source-stream")
-	destCtx := NewParameterSetContextForTest(CodecH264, "dest-stream")
+	sourceCtx := NewParameterSetContextForTest(CodecH264, "test-source-stream")
+	destCtx := NewParameterSetContextForTest(CodecH264, "test-dest-stream")
 
 	// Copy from empty source
 	copiedCount := destCtx.CopyParameterSetsFrom(sourceCtx)
@@ -140,7 +140,7 @@ func TestParameterSetDataRetrieval(t *testing.T) {
 }
 
 func TestParameterSetCopyingWithInvalidData(t *testing.T) {
-	sourceCtx := NewParameterSetContextForTest(CodecH264, "source-stream")
+	sourceCtx := NewParameterSetContextForTest(CodecH264, "test-source-stream")
 
 	// Try to add invalid SPS (too short - only NAL header)
 	invalidSPS := []byte{0x67}
@@ -164,7 +164,7 @@ func TestParameterSetCopyingWithInvalidData(t *testing.T) {
 		}
 	}
 
-	destCtx := NewParameterSetContextForTest(CodecH264, "dest-stream")
+	destCtx := NewParameterSetContextForTest(CodecH264, "test-dest-stream")
 
 	// Copy should only copy valid parameter sets
 	copiedCount := destCtx.CopyParameterSetsFrom(sourceCtx)
@@ -174,7 +174,7 @@ func TestParameterSetCopyingWithInvalidData(t *testing.T) {
 }
 
 func TestParameterSetCopyingConcurrency(t *testing.T) {
-	sourceCtx := NewParameterSetContextForTest(CodecH264, "source-stream")
+	sourceCtx := NewParameterSetContextForTest(CodecH264, "test-source-stream")
 
 	// Add test parameter sets
 	spsData := []byte{0x67, 0x42, 0x00, 0x1E, 0x8D, 0x84, 0x04, 0x05}
@@ -190,7 +190,7 @@ func TestParameterSetCopyingConcurrency(t *testing.T) {
 		t.Fatalf("Failed to add PPS: %v", err)
 	}
 
-	destCtx := NewParameterSetContextForTest(CodecH264, "dest-stream")
+	destCtx := NewParameterSetContextForTest(CodecH264, "test-dest-stream")
 
 	// Test concurrent copying (this should be thread-safe)
 	done := make(chan bool, 2)

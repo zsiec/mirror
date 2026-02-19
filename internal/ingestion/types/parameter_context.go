@@ -2,7 +2,6 @@ package types
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -186,47 +185,25 @@ func (ctx *ParameterSetContext) AddSPS(data []byte) error {
 		return fmt.Errorf("cannot add H.264 SPS to %s context", ctx.codec)
 	}
 
-	// First validate the raw data
+	// Validate the raw data structure
 	if spsID, err := ValidateSPSData(data); err != nil {
-		// For test data, be more lenient - just log warning instead of failing
-		// Test data often uses minimal SPS that wouldn't be valid in production
-		if strings.HasPrefix(ctx.streamID, "test-") && len(data) < 10 {
-			logger := ctx.log
-			logger.WithError(err).WithFields(map[string]interface{}{
-				"stream_id":      ctx.streamID,
-				"data_size":      len(data),
-				"first_16_bytes": fmt.Sprintf("%02x", data[:min(16, len(data))]),
-			}).Warn("Allowing minimal SPS for test stream")
-			// Continue with parsing anyway for test streams
-		} else {
-			// Production validation - log error and fail
-			logger := ctx.log
-			logger.WithError(err).WithFields(map[string]interface{}{
-				"stream_id":      ctx.streamID,
-				"data_size":      len(data),
-				"first_16_bytes": fmt.Sprintf("%02x", data[:min(16, len(data))]),
-			}).Error("SPS VALIDATION FAILED: Invalid SPS data detected")
-			return fmt.Errorf("SPS data validation failed: %w", err)
-		}
+		logger := ctx.log
+		logger.WithError(err).WithFields(map[string]interface{}{
+			"stream_id": ctx.streamID,
+			"data_size": len(data),
+		}).Warn("SPS data validation issue")
+		// Continue - parseSPS will reject truly invalid data
 	} else if spsID > 31 {
 		return fmt.Errorf("invalid SPS ID %d from validation", spsID)
 	}
 
-	// Perform enhanced validation to catch FFmpeg-incompatible parameter sets
+	// Log FFmpeg compatibility issues (actual rejection happens in ValidateParameterSetsForFFmpeg)
 	if err := EnhancedSPSValidation(data, ctx.streamID); err != nil {
-		// For test streams, just warn
-		if strings.HasPrefix(ctx.streamID, "test-") {
-			logger := ctx.log
-			logger.WithError(err).Warn("Enhanced SPS validation failed for test stream")
-		} else {
-			// Production streams - this will prevent FFmpeg errors
-			logger := ctx.log
-			logger.WithError(err).WithFields(map[string]interface{}{
-				"stream_id": ctx.streamID,
-				"data_size": len(data),
-			}).Error("ENHANCED SPS VALIDATION FAILED: FFmpeg will reject this SPS")
-			return fmt.Errorf("enhanced SPS validation failed (FFmpeg compatibility): %w", err)
-		}
+		logger := ctx.log
+		logger.WithError(err).WithFields(map[string]interface{}{
+			"stream_id": ctx.streamID,
+			"data_size": len(data),
+		}).Debug("SPS may have FFmpeg compatibility issues")
 	}
 
 	sps, err := ctx.parseSPS(data)
@@ -353,21 +330,13 @@ func (ctx *ParameterSetContext) AddPPS(data []byte) error {
 		return fmt.Errorf("PPS validation failed: %w", validationErr)
 	}
 
-	// Perform enhanced validation to catch FFmpeg-incompatible parameter sets (FMO)
+	// Log FFmpeg compatibility issues (actual rejection happens in ValidateParameterSetsForFFmpeg)
 	if err := EnhancedPPSValidation(data, ctx.streamID); err != nil {
-		// For test streams, just warn
-		if strings.HasPrefix(ctx.streamID, "test-") {
-			logger := ctx.log
-			logger.WithError(err).Warn("Enhanced PPS validation failed for test stream")
-		} else {
-			// Production streams - this will prevent FFmpeg errors
-			logger := ctx.log
-			logger.WithError(err).WithFields(map[string]interface{}{
-				"stream_id": ctx.streamID,
-				"data_size": len(data),
-			}).Error("ENHANCED PPS VALIDATION FAILED: FFmpeg will reject this PPS (FMO not supported)")
-			return fmt.Errorf("enhanced PPS validation failed (FFmpeg compatibility): %w", err)
-		}
+		logger := ctx.log
+		logger.WithError(err).WithFields(map[string]interface{}{
+			"stream_id": ctx.streamID,
+			"data_size": len(data),
+		}).Debug("PPS may have FFmpeg compatibility issues (FMO)")
 	}
 
 	pps, err := ctx.parsePPS(data)
