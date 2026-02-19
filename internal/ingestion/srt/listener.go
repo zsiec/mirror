@@ -99,7 +99,7 @@ func (l *Listener) Start() error {
 		"payload_size":      adapterConfig.PayloadSize,
 		"flow_control":      adapterConfig.FlowControlWindow,
 		"input_bandwidth":   adapterConfig.InputBandwidth,
-	}).Info("SRT listener configured with Haivision official bindings")
+	}).Info("SRT listener configured with pure Go SRT")
 
 	// Create listener using adapter
 	listener, err := l.adapter.NewListener(adapterConfig.Address, adapterConfig.Port, adapterConfig)

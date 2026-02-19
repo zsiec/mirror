@@ -1,42 +1,16 @@
 # Build stage
-FROM golang:1.23 AS builder
+FROM golang:1.24 AS builder
 
-# Install build dependencies including SRT and FFmpeg
+# Install build dependencies (FFmpeg only — SRT is pure Go, no CGo needed)
 RUN apt-get update && apt-get install -y \
     git \
     make \
     ca-certificates \
-    gcc \
-    g++ \
-    pkg-config \
-    cmake \
-    libssl-dev \
-    build-essential \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install SRT library from source since Alpine doesn't have it in packages
-WORKDIR /tmp
-RUN git clone https://github.com/Haivision/srt.git && \
-    cd srt && \
-    git checkout v1.5.4 && \
-    mkdir build && \
-    cd build && \
-    cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DENABLE_SHARED=ON \
-          -DENABLE_STATIC=ON \
-          -DENABLE_APPS=OFF \
-          -DENABLE_LOGGING=OFF \
-          .. && \
-    make -j$(nproc) && \
-    make install
-
-# Verify SRT and FFmpeg installation in build stage
-RUN ls -la /usr/include/srt/ && \
-    ls -la /usr/lib/*/libsrt* && \
-    pkg-config --cflags --libs srt && \
-    echo "FFmpeg version:" && \
+# Verify FFmpeg installation in build stage
+RUN echo "FFmpeg version:" && \
     ffmpeg -version | head -3
 
 # Set working directory for Go build
@@ -45,20 +19,18 @@ WORKDIR /build
 # Copy go mod files
 COPY go.mod go.sum ./
 
-# Enable CGO and download dependencies
-ENV CGO_ENABLED=1
+# Download dependencies
 RUN go mod download
 
 # Copy source code
 COPY . .
 
-# Build the application with CGO enabled
+# Build the application
 RUN make build
 
 # Verify the binary was built successfully
 RUN ls -la bin/ && \
-    ls -la bin/mirror && \
-    ldd bin/mirror
+    ls -la bin/mirror
 
 # Runtime stage
 FROM nvidia/cuda:12.3.1-runtime-ubuntu22.04
@@ -67,22 +39,7 @@ FROM nvidia/cuda:12.3.1-runtime-ubuntu22.04
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     ffmpeg \
-    libssl3 \
     && rm -rf /var/lib/apt/lists/*
-
-# Copy SRT library and headers from build stage
-COPY --from=builder /usr/lib/aarch64-linux-gnu/libsrt.so* /usr/lib/aarch64-linux-gnu/
-COPY --from=builder /usr/include/srt /usr/include/srt
-
-# Update library cache
-RUN ldconfig
-
-# Verify SRT and FFmpeg installation in runtime
-RUN ldconfig -p | grep srt && \
-    ls -la /usr/include/srt/ && \
-    ls -la /usr/lib/*/libsrt* && \
-    echo "FFmpeg runtime verification:" && \
-    ffmpeg -version | head -3
 
 # Create non-root user
 RUN useradd -m -u 1000 mirror

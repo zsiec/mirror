@@ -1,6 +1,6 @@
 # SRT Package
 
-The `srt` package implements SRT (Secure Reliable Transport) stream ingestion for the Mirror platform. It uses an adapter pattern to abstract the underlying SRT library (currently Haivision srtgo), providing connection management, stream ID validation, and statistics collection.
+The `srt` package implements SRT (Secure Reliable Transport) stream ingestion for the Mirror platform. It uses an adapter pattern to abstract the underlying SRT library (pure Go `github.com/zsiec/srtgo`), providing connection management, stream ID validation, and statistics collection.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ The `srt` package implements SRT (Secure Reliable Transport) stream ingestion fo
 │              SRTAdapter (interface)          │
 │  NewListener / NewConnection / Connect      │
 ├─────────────────────────────────────────────┤
-│         HaivisionAdapter (srtgo)            │
+│         PureGoAdapter (zsiec/srtgo)         │
 └──────────────┬──────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────┐
@@ -67,11 +67,11 @@ type SRTConnection interface {
 }
 ```
 
-The `HaivisionAdapter` implements these using the `haivision/srtgo` library with the following socket configuration:
+The `PureGoAdapter` implements these using the pure Go `zsiec/srtgo` library with the following socket configuration:
 
-- Mandatory live mode settings (`transtype=live`, `tsbpdmode=1`, `tlpktdrop=1`)
+- Live mode with TSBPD enabled
 - Buffer sizes derived from `inputBandwidth * latency * 2` (8MB minimum)
-- 25% overhead bandwidth, packet reorder tolerance of 128 (`lossmaxttl`)
+- 25% overhead bandwidth, packet reorder tolerance of 128 (`LossMaxTTL`)
 - 5-second connection timeout
 
 ### Rejection Reasons
@@ -95,7 +95,7 @@ const (
 Accepts incoming SRT connections with stream ID validation and connection limiting.
 
 ```go
-adapter := srt.NewHaivisionAdapter()
+adapter := srt.NewPureGoAdapter()
 listener := srt.NewListenerWithAdapter(cfg, codecsCfg, reg, adapter, logger)
 listener.SetHandler(func(conn *srt.Connection) error {
     return manager.HandleSRTConnection(conn)
@@ -124,7 +124,7 @@ Creates a connection limiter (default 100 max), bandwidth manager (1 Gbps), and 
 
 #### Stream ID Validation
 
-Stream IDs are validated against `^[\x20-\x7E]{1,512}$` (printable ASCII, up to 512 bytes), supporting Haivision SRT access control syntax (`#!::key=value,key2=value2`).
+Stream IDs are validated against `^[\x20-\x7E]{1,512}$` (printable ASCII, up to 512 bytes), supporting SRT access control syntax (`#!::key=value,key2=value2`).
 
 The accept loop uses exponential backoff (100ms initial, 5s max) on accept errors.
 
@@ -155,7 +155,7 @@ Implements `io.Reader` and `io.Writer`. Uses `sync.Once` for close safety and `a
 | `ReadLoop(ctx context.Context) error` | Main read loop with stats ticker, heartbeat (10s), and context cancellation |
 | `Pause()` / `Resume()` | Atomic pause/resume |
 | `GetStats() ConnectionStats` | Returns stats from underlying SRT connection |
-| `SetMaxBandwidth(bw int64) error` | Sets `SRTO_MAXBW` for backpressure |
+| `SetMaxBandwidth(bw int64) error` | Sets max bandwidth for backpressure |
 | `GetStreamID() string` | Returns stream ID |
 | `GetRemoteAddr() string` | Returns remote address |
 
@@ -212,12 +212,12 @@ type EncryptionConfig struct {
 ## SRT Library Lifecycle
 
 ```go
-srt.InitSRTLibrary()  // Called automatically via init(), safe to call multiple times
-srt.CleanupSRT()      // Must be called during application shutdown
+srt.InitSRTLibrary()  // No-op (pure Go, no C library to init)
+srt.CleanupSRT()      // No-op (pure Go, no C library to clean up)
 ```
 
 ## Testing
 
 ```bash
-source scripts/srt-env.sh && go test ./internal/ingestion/srt/...
+go test ./internal/ingestion/srt/...
 ```

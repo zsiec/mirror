@@ -8,14 +8,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewHaivisionAdapter(t *testing.T) {
-	adapter := NewHaivisionAdapter()
+func TestNewPureGoAdapter(t *testing.T) {
+	adapter := NewPureGoAdapter()
 	assert.NotNil(t, adapter, "adapter should not be nil")
-	assert.IsType(t, &HaivisionAdapter{}, adapter, "should return HaivisionAdapter type")
+	assert.IsType(t, &PureGoAdapter{}, adapter, "should return PureGoAdapter type")
 }
 
-func TestHaivisionAdapter_NewListener(t *testing.T) {
-	adapter := NewHaivisionAdapter()
+func TestPureGoAdapter_NewListener(t *testing.T) {
+	adapter := NewPureGoAdapter()
 
 	tests := []struct {
 		name        string
@@ -56,7 +56,7 @@ func TestHaivisionAdapter_NewListener(t *testing.T) {
 			config: Config{
 				Encryption: EncryptionConfig{
 					Enabled:    true,
-					Passphrase: "test123",
+					Passphrase: "test123456", // min 10 bytes for SRT
 					KeyLength:  16,
 				},
 			},
@@ -75,20 +75,20 @@ func TestHaivisionAdapter_NewListener(t *testing.T) {
 			} else {
 				assert.NoError(t, err, tt.description)
 				assert.NotNil(t, listener, "listener should not be nil")
-				assert.IsType(t, &HaivisionListener{}, listener, "should return HaivisionListener type")
+				assert.IsType(t, &PureGoListener{}, listener, "should return PureGoListener type")
 
 				// Verify listener has correct properties
-				hvListener := listener.(*HaivisionListener)
-				assert.Equal(t, tt.address, hvListener.address, "address should match")
-				assert.Equal(t, uint16(tt.port), hvListener.port, "port should match")
-				assert.Equal(t, tt.config, hvListener.config, "config should match")
+				pgListener := listener.(*PureGoListener)
+				assert.Equal(t, tt.address, pgListener.address, "address should match")
+				assert.Equal(t, tt.port, pgListener.port, "port should match")
+				assert.Equal(t, tt.config, pgListener.config, "config should match")
 			}
 		})
 	}
 }
 
-func TestHaivisionAdapter_NewConnection(t *testing.T) {
-	adapter := NewHaivisionAdapter()
+func TestPureGoAdapter_NewConnection(t *testing.T) {
+	adapter := NewPureGoAdapter()
 
 	tests := []struct {
 		name        string
@@ -106,7 +106,7 @@ func TestHaivisionAdapter_NewConnection(t *testing.T) {
 		},
 		{
 			name:        "wrong socket type",
-			socket:      &testMockSRTSocket{}, // Not a HaivisionSocket
+			socket:      &testMockSRTSocket{}, // Not a PureGoSocket
 			wantErr:     true,
 			errContains: "invalid socket type",
 			description: "should fail with wrong socket type",
@@ -131,18 +131,16 @@ func TestHaivisionAdapter_NewConnection(t *testing.T) {
 	}
 }
 
-// Mock socket for testing (not a HaivisionSocket)
+// Mock socket for testing (not a PureGoSocket)
 type testMockSRTSocket struct{}
 
 func (m *testMockSRTSocket) Close() error                                 { return nil }
 func (m *testMockSRTSocket) GetStreamID() string                          { return "" }
 func (m *testMockSRTSocket) SetRejectReason(reason RejectionReason) error { return nil }
 
-func TestHaivisionAdapter_Integration(t *testing.T) {
-	// Test that the adapter can be created and used together
-	adapter := NewHaivisionAdapter()
+func TestPureGoAdapter_Integration(t *testing.T) {
+	adapter := NewPureGoAdapter()
 
-	// Create a listener
 	config := Config{
 		Latency:      100 * time.Millisecond,
 		MaxBandwidth: 1000000,
@@ -153,18 +151,16 @@ func TestHaivisionAdapter_Integration(t *testing.T) {
 	assert.NoError(t, err, "should create listener successfully")
 	assert.NotNil(t, listener, "listener should not be nil")
 
-	// Verify listener type and properties
-	hvListener, ok := listener.(*HaivisionListener)
-	assert.True(t, ok, "listener should be HaivisionListener type")
-	assert.Equal(t, "localhost", hvListener.address, "listener address should match")
-	assert.Equal(t, uint16(30001), hvListener.port, "listener port should match")
-	assert.Equal(t, config, hvListener.config, "listener config should match")
+	pgListener, ok := listener.(*PureGoListener)
+	assert.True(t, ok, "listener should be PureGoListener type")
+	assert.Equal(t, "localhost", pgListener.address, "listener address should match")
+	assert.Equal(t, 30001, pgListener.port, "listener port should match")
+	assert.Equal(t, config, pgListener.config, "listener config should match")
 }
 
-func TestHaivisionAdapter_ConfigVariations(t *testing.T) {
-	adapter := NewHaivisionAdapter()
+func TestPureGoAdapter_ConfigVariations(t *testing.T) {
+	adapter := NewPureGoAdapter()
 
-	// Test various config combinations
 	configs := []Config{
 		{}, // Empty config
 		{
@@ -178,7 +174,7 @@ func TestHaivisionAdapter_ConfigVariations(t *testing.T) {
 			PayloadSize:  1316,
 			Encryption: EncryptionConfig{
 				Enabled:    true,
-				Passphrase: "secret123",
+				Passphrase: "secret1234567890",
 				KeyLength:  24,
 			},
 		},
@@ -196,17 +192,16 @@ func TestHaivisionAdapter_ConfigVariations(t *testing.T) {
 			assert.NoError(t, err, "should create listener with config %d", i)
 			assert.NotNil(t, listener, "listener should not be nil for config %d", i)
 
-			hvListener := listener.(*HaivisionListener)
-			assert.Equal(t, config, hvListener.config, "config should be preserved for config %d", i)
+			pgListener := listener.(*PureGoListener)
+			assert.Equal(t, config, pgListener.config, "config should be preserved for config %d", i)
 		})
 	}
 }
 
-func TestHaivisionAdapter_PortRange(t *testing.T) {
-	adapter := NewHaivisionAdapter()
+func TestPureGoAdapter_PortRange(t *testing.T) {
+	adapter := NewPureGoAdapter()
 	config := Config{}
 
-	// Test various port values
 	ports := []int{0, 1, 1024, 30000, 65535}
 
 	for _, port := range ports {
@@ -215,17 +210,16 @@ func TestHaivisionAdapter_PortRange(t *testing.T) {
 			assert.NoError(t, err, "should create listener with port %d", port)
 			assert.NotNil(t, listener, "listener should not be nil for port %d", port)
 
-			hvListener := listener.(*HaivisionListener)
-			assert.Equal(t, uint16(port), hvListener.port, "port should be preserved as uint16")
+			pgListener := listener.(*PureGoListener)
+			assert.Equal(t, port, pgListener.port, "port should be preserved")
 		})
 	}
 }
 
-func TestHaivisionAdapter_AddressVariations(t *testing.T) {
-	adapter := NewHaivisionAdapter()
+func TestPureGoAdapter_AddressVariations(t *testing.T) {
+	adapter := NewPureGoAdapter()
 	config := Config{}
 
-	// Test various address formats
 	addresses := []string{
 		"localhost",
 		"127.0.0.1",
@@ -242,8 +236,100 @@ func TestHaivisionAdapter_AddressVariations(t *testing.T) {
 			assert.NoError(t, err, "should create listener with address '%s'", address)
 			assert.NotNil(t, listener, "listener should not be nil for address '%s'", address)
 
-			hvListener := listener.(*HaivisionListener)
-			assert.Equal(t, address, hvListener.address, "address should be preserved")
+			pgListener := listener.(*PureGoListener)
+			assert.Equal(t, address, pgListener.address, "address should be preserved")
 		})
 	}
+}
+
+func TestBuildPureGoConfig(t *testing.T) {
+	t.Run("default config", func(t *testing.T) {
+		cfg := buildPureGoConfig(Config{})
+		assert.Equal(t, 25, cfg.OverheadBW)
+		assert.Equal(t, 128, cfg.LossMaxTTL)
+		assert.Equal(t, 5*time.Second, cfg.ConnTimeout)
+	})
+
+	t.Run("latency mapping", func(t *testing.T) {
+		cfg := buildPureGoConfig(Config{Latency: 200 * time.Millisecond})
+		assert.Equal(t, 200*time.Millisecond, cfg.RecvLatency)
+		assert.Equal(t, 200*time.Millisecond, cfg.PeerLatency)
+	})
+
+	t.Run("bandwidth mapping bits to bytes", func(t *testing.T) {
+		cfg := buildPureGoConfig(Config{MaxBandwidth: 50_000_000}) // 50 Mbps
+		assert.Equal(t, int64(50_000_000/8), cfg.MaxBW)
+	})
+
+	t.Run("input bandwidth relative mode", func(t *testing.T) {
+		cfg := buildPureGoConfig(Config{InputBandwidth: 50_000_000})
+		assert.Equal(t, int64(50_000_000/8), cfg.InputBW)
+		assert.Equal(t, int64(0), cfg.MaxBW) // relative mode
+	})
+
+	t.Run("encryption", func(t *testing.T) {
+		cfg := buildPureGoConfig(Config{
+			Encryption: EncryptionConfig{
+				Enabled:    true,
+				Passphrase: "mypassphrase",
+				KeyLength:  32,
+			},
+		})
+		assert.Equal(t, "mypassphrase", cfg.Passphrase)
+		assert.Equal(t, 32, cfg.KeyLength)
+		assert.NotNil(t, cfg.EnforcedEncryption)
+		assert.True(t, *cfg.EnforcedEncryption)
+	})
+
+	t.Run("buffer sizes", func(t *testing.T) {
+		cfg := buildPureGoConfig(Config{
+			InputBandwidth: 50_000_000,  // 50 Mbps
+			Latency:        120 * time.Millisecond,
+		})
+		// Buffer should be at least 8MB / MSS packets
+		assert.Greater(t, cfg.RecvBufSize, 0)
+		assert.Greater(t, cfg.SendBufSize, 0)
+	})
+}
+
+func TestPureGoCallbackSocket_RejectReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason RejectionReason
+	}{
+		{"unauthorized", RejectionReasonUnauthorized},
+		{"resource unavailable", RejectionReasonResourceUnavailable},
+		{"bad request", RejectionReasonBadRequest},
+		{"forbidden", RejectionReasonForbidden},
+		{"not found", RejectionReasonNotFound},
+		{"bad mode", RejectionReasonBadMode},
+		{"unacceptable", RejectionReasonUnacceptable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sock := &PureGoCallbackSocket{streamID: "test"}
+			err := sock.SetRejectReason(tt.reason)
+			assert.NoError(t, err)
+			assert.NotZero(t, sock.rejectReason)
+		})
+	}
+}
+
+func TestPureGoConnection_NilConn(t *testing.T) {
+	conn := &PureGoConnection{}
+
+	_, err := conn.Read(make([]byte, 100))
+	assert.Error(t, err)
+
+	_, err = conn.Write(make([]byte, 100))
+	assert.Error(t, err)
+
+	assert.Equal(t, "", conn.GetStreamID())
+	assert.Equal(t, ConnectionStats{}, conn.GetStats())
+
+	err = conn.SetMaxBW(1000)
+	assert.Error(t, err)
+
+	assert.Equal(t, int64(0), conn.GetMaxBW())
 }

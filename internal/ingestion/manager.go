@@ -98,10 +98,9 @@ func NewManager(cfg *config.IngestionConfig, logger logger.Logger) (*Manager, er
 		cancel:           cancel,
 	}
 
-	// Create SRT listener if enabled using Haivision adapter
+	// Create SRT listener if enabled using pure Go SRT adapter
 	if cfg.SRT.Enabled {
-		// Use new Haivision adapter for better FFmpeg compatibility
-		adapter := srt.NewHaivisionAdapter()
+		adapter := srt.NewPureGoAdapter()
 		srtListener := srt.NewListenerWithAdapter(&cfg.SRT, &cfg.Codecs, reg, adapter, logger)
 
 		// Set the connection handler to use proper buffering
