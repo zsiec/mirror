@@ -173,7 +173,7 @@ func (mm *ParameterSetMigrationManager) CancelMigration(reason string) error {
 	mm.addToHistory(mm.activeMigration)
 
 	if mm.onMigrationFailed != nil {
-		mm.onMigrationFailed(mm.activeMigration, fmt.Errorf(reason))
+		mm.onMigrationFailed(mm.activeMigration, fmt.Errorf("%s", reason))
 	}
 
 	mm.activeMigration = nil
