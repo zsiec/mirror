@@ -116,7 +116,7 @@ type SRTConfig struct {
 }
 
 // Usage — the manager creates the listener internally via the adapter pattern
-adapter := srt.NewHaivisionAdapter()
+adapter := srt.NewPureGoAdapter()
 srtListener := srt.NewListenerWithAdapter(&cfg.SRT, &cfg.Codecs, reg, adapter, logger)
 srtListener.SetHandler(connectionHandler)
 if err := srtListener.Start(); err != nil {

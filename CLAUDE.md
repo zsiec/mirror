@@ -23,7 +23,7 @@ Mirror is a high-performance video streaming platform built in Go, designed to h
 - GitHub Actions CI/CD
 
 ### Phase 2 - COMPLETED
-- Stream ingestion with SRT and RTP protocols (Haivision adapter pattern)
+- Stream ingestion with SRT and RTP protocols (pure Go SRT via adapter pattern)
 - Video-aware buffering and GOP management
 - Automatic codec detection (H.264, HEVC, AV1, JPEGXS)
 - Frame assembly and validation with optimized B-frame reordering
@@ -52,16 +52,16 @@ Mirror is a high-performance video streaming platform built in Go, designed to h
 
 ## Build & Test Commands
 
-All builds require the SRT library. Use `scripts/srt-env.sh` to set up the environment, or use `make` which handles SRT env automatically.
+SRT is implemented in pure Go — no C library or CGo flags needed. Only FFmpeg is required as an external dependency.
 
 ```bash
-# Initial setup (installs SRT, FFmpeg, generates certs)
+# Initial setup (installs FFmpeg, generates certs)
 make setup
 
 # Build
 make build
 
-# Run tests (requires SRT library)
+# Run tests
 make test
 
 # Run tests with race detector
@@ -96,16 +96,9 @@ make r   # docker-compose up
 make l   # docker-compose logs
 ```
 
-### SRT Environment
+### SRT
 
-Tests require the SRT library (`libsrt`). The Makefile auto-detects it via `pkg-config`, but you can also source the helper script:
-
-```bash
-source scripts/srt-env.sh
-go test ./...
-```
-
-Install SRT: `make srt-setup` (or `brew install srt` on macOS).
+SRT support uses a pure Go implementation (`github.com/zsiec/srtgo`) — no `libsrt` C library or CGo flags are needed. Just `go test ./...` works directly.
 
 ## URLs and Access
 
@@ -153,7 +146,7 @@ mirror/
 
 ## Key Architecture Patterns
 
-- **Adapter pattern**: SRT and RTP connections implement a common `ConnectionAdapter` interface
+- **Adapter pattern**: SRT (pure Go) and RTP connections implement a common `ConnectionAdapter` interface
 - **Pipeline pattern**: Packets flow through: Protocol → Buffer → Frame Assembly → GOP → Output Queue
 - **Backpressure**: Watermark-based (25/50/75/90%) with GOP-aware frame dropping
 - **Memory management**: Global 8GB limit, 400MB per-stream limit, with eviction
@@ -164,5 +157,5 @@ mirror/
 
 - Target 80%+ test coverage per package
 - Use table-driven tests
-- Tests require SRT library (use `make test` or `source scripts/srt-env.sh`)
+- No external SRT library needed (pure Go implementation)
 - Integration tests in `tests/` directory, run with `make test-full-integration`
